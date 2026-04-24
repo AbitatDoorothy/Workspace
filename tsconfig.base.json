@@ -8,9 +8,6 @@
     "isolatedModules": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "paths": {
-      "@abitat/shared": ["packages/shared/src/index.ts"]
-    },
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "strict": true,

@@ -8,8 +8,8 @@
     "dev": "pnpm --filter web dev",
     "format": "prettier --check .",
     "lint": "pnpm -r lint",
-    "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "test": "pnpm --filter @abitat/shared build && pnpm -r test",
+    "typecheck": "pnpm --filter @abitat/shared build && pnpm -r typecheck"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -15,5 +15,7 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "devDependencies": {}
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
 }

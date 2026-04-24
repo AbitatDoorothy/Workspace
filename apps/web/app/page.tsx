@@ -1,6 +1,10 @@
+import { runtimeSchema } from "@abitat/shared";
+
 import { appInfo } from "../lib/app-info";
 
 export default function Home() {
+  const mockRuntime = runtimeSchema.parse("mock");
+
   return (
     <main>
       <section className="workspace-shell">
@@ -30,7 +34,7 @@ export default function Home() {
 
           <article className="panel">
             <h2>Shared Package</h2>
-            <p>@abitat/shared is ready for shared types and schemas in the next phase.</p>
+            <p>@abitat/shared validates the {mockRuntime} runtime for the app and daemon.</p>
             <div className="command">pnpm --filter @abitat/shared build</div>
           </article>
         </div>
