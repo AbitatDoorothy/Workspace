@@ -11,6 +11,9 @@ export default async function ProjectsPage() {
             <p className="eyebrow">Projects</p>
             <h1>Workspace Repos</h1>
           </div>
+          <a className="button-link" href="/agents">
+            Agents
+          </a>
         </div>
 
         <form className="panel project-form" action="/api/projects" method="post">

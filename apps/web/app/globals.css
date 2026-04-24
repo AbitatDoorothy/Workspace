@@ -156,13 +156,24 @@ h1 {
   gap: 6px;
 }
 
-.project-form input {
+.project-form input,
+.project-form select,
+.project-form textarea {
   border: 1px solid #abc2d6;
   border-radius: 6px;
   color: #172026;
   font: inherit;
   min-height: 38px;
   padding: 0 10px;
+}
+
+.project-form textarea {
+  min-height: 80px;
+  padding: 10px;
+}
+
+.wide-field {
+  grid-column: span 2;
 }
 
 .project-form button,
@@ -198,5 +209,9 @@ h1 {
 
   .project-form {
     grid-template-columns: 1fr;
+  }
+
+  .wide-field {
+    grid-column: auto;
   }
 }

@@ -12,6 +12,7 @@
     "predev": "pnpm --filter @abitat/shared build",
     "dev": "next dev",
     "lint": "eslint .",
+    "pretest": "pnpm --filter @abitat/shared build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
