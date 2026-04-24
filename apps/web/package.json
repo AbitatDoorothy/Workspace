@@ -4,6 +4,11 @@
   "version": "0.1.0",
   "scripts": {
     "build": "next build",
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:migrate": "prisma migrate deploy --schema prisma/schema.prisma",
+    "db:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:seed": "prisma db seed --schema prisma/schema.prisma",
+    "db:validate": "prisma validate --schema prisma/schema.prisma",
     "predev": "pnpm --filter @abitat/shared build",
     "dev": "next dev",
     "lint": "eslint .",
@@ -12,12 +17,17 @@
   },
   "dependencies": {
     "@abitat/shared": "workspace:*",
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
     "next": "16.2.4",
     "react": "19.2.5",
     "react-dom": "19.2.5"
   },
   "devDependencies": {
     "@types/react": "19.2.14",
-    "@types/react-dom": "19.2.3"
+    "@types/react-dom": "19.2.3",
+    "dotenv": "^17.4.2",
+    "prisma": "^7.8.0",
+    "tsx": "4.21.0"
   }
 }

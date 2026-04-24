@@ -5,11 +5,16 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "build": "pnpm -r build",
+    "db:generate": "pnpm --filter web db:generate",
+    "db:migrate": "pnpm --filter web db:migrate",
+    "db:migrate:dev": "pnpm --filter web db:migrate:dev",
+    "db:seed": "pnpm --filter web db:seed",
+    "db:validate": "pnpm --filter web db:validate",
     "dev": "pnpm --filter web dev",
     "format": "prettier --check .",
     "lint": "pnpm -r lint",
     "test": "pnpm --filter @abitat/shared build && pnpm -r test",
-    "typecheck": "pnpm --filter @abitat/shared build && pnpm -r typecheck"
+    "typecheck": "pnpm --filter @abitat/shared build && pnpm db:generate && pnpm -r typecheck"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

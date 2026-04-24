@@ -1,0 +1,221 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum WorkspaceRole {
+  owner
+  admin
+  member
+  viewer
+}
+
+enum MachineType {
+  host
+  client
+}
+
+enum MachineStatus {
+  pending
+  online
+  offline
+  error
+}
+
+enum AgentRuntime {
+  codex
+  claude
+  mock
+}
+
+enum ConversationType {
+  feature
+  bugfix
+  investigation
+  refactor
+}
+
+enum ConversationStatus {
+  draft
+  queued
+  preparing
+  running
+  awaiting_approval
+  approved
+  committing
+  pushed
+  failed
+  cancelled
+}
+
+enum RunEventType {
+  status
+  stdout
+  stderr
+  tool_scan
+  git
+  diff
+  test
+  summary
+  approval
+  error
+}
+
+model User {
+  id                    String         @id @default(cuid())
+  email                 String         @unique
+  displayName           String
+  ownedWorkspaces       Workspace[]    @relation("WorkspaceOwner")
+  memberships           WorkspaceMember[]
+  projectsCreated       Project[]
+  agentsCreated         Agent[]
+  conversationsCreated  Conversation[] @relation("ConversationCreator")
+  conversationsApproved Conversation[] @relation("ConversationApprover")
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+}
+
+model Workspace {
+  id          String            @id @default(cuid())
+  name        String
+  ownerUserId String
+  owner       User              @relation("WorkspaceOwner", fields: [ownerUserId], references: [id])
+  members     WorkspaceMember[]
+  machines    Machine[]
+  projects    Project[]
+  conversations Conversation[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([ownerUserId])
+}
+
+model WorkspaceMember {
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(member)
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+
+  @@id([workspaceId, userId])
+  @@index([userId])
+}
+
+model Machine {
+  id                 String        @id @default(cuid())
+  workspaceId        String
+  name               String
+  type               MachineType
+  status             MachineStatus @default(pending)
+  pairingTokenHash   String?
+  lastSeenAt         DateTime?
+  installedToolsJson Json?
+  workspace          Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([workspaceId])
+}
+
+model Project {
+  id              String         @id @default(cuid())
+  workspaceId     String
+  name            String
+  repoUrl         String
+  defaultBranch   String         @default("main")
+  hostLocalPath   String?
+  githubOwner     String?
+  githubRepo      String?
+  createdByUserId String
+  workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy       User           @relation(fields: [createdByUserId], references: [id])
+  agents          Agent[]
+  conversations   Conversation[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([workspaceId])
+  @@index([createdByUserId])
+}
+
+model Agent {
+  id              String         @id @default(cuid())
+  projectId       String
+  name            String
+  role            String
+  instructions    String
+  model           String
+  runtime         AgentRuntime
+  allowedToolsJson Json          @default("[]")
+  createdByUserId String
+  project         Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy       User           @relation(fields: [createdByUserId], references: [id])
+  conversations   Conversation[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([projectId])
+  @@index([createdByUserId])
+}
+
+model Conversation {
+  id               String             @id @default(cuid())
+  agentId          String
+  projectId        String
+  workspaceId      String
+  createdByUserId  String
+  approvedByUserId String?
+  type             ConversationType
+  status           ConversationStatus @default(draft)
+  prompt           String
+  branchName       String?
+  worktreePath     String?
+  summary          String?
+  testsJson        Json?
+  commitSha        String?
+  prUrl            String?
+  errorMessage     String?
+  agent            Agent              @relation(fields: [agentId], references: [id])
+  project          Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace        Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy        User               @relation("ConversationCreator", fields: [createdByUserId], references: [id])
+  approvedBy       User?              @relation("ConversationApprover", fields: [approvedByUserId], references: [id])
+  events           RunEvent[]
+  changeSet        ChangeSet?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([agentId])
+  @@index([projectId])
+  @@index([workspaceId])
+  @@index([createdByUserId])
+  @@index([approvedByUserId])
+}
+
+model RunEvent {
+  id             String       @id @default(cuid())
+  conversationId String
+  sequence       Int
+  type           RunEventType
+  content        String
+  metadataJson   Json?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([conversationId, sequence])
+  @@index([conversationId])
+}
+
+model ChangeSet {
+  id               String       @id @default(cuid())
+  conversationId   String       @unique
+  filesChangedJson Json
+  diffText         String
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
