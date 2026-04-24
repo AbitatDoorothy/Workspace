@@ -1,6 +1,7 @@
 import { agentService } from "../../server/agents";
 import { conversationQueueService } from "../../server/conversations";
 import { projectService } from "../../server/projects";
+import { reviewService } from "../../server/reviews";
 import { runEventService } from "../../server/run-events";
 import { ConversationEvents } from "./conversation-events";
 
@@ -13,6 +14,7 @@ export default async function ConversationsPage() {
     getProjects()
   ]);
   const eventGroups = await getEventGroups(conversations.map((conversation) => conversation.id));
+  const changeSets = await getChangeSets(conversations.map((conversation) => conversation.id));
   const firstProjectId = projects[0]?.id ?? "project_demo";
   const firstAgentId = agents[0]?.id ?? "agent_demo";
 
@@ -92,6 +94,27 @@ export default async function ConversationsPage() {
                     conversationId={conversation.id}
                     initialEvents={eventGroups.get(conversation.id) ?? []}
                   />
+                  {changeSets.get(conversation.id) ? (
+                    <div className="diff-review">
+                      <h3>Changed Files</h3>
+                      <ul>
+                        {changeSets.get(conversation.id)?.filesChangedJson.map((file) => (
+                          <li key={file}>{file}</li>
+                        ))}
+                      </ul>
+                      <pre>{changeSets.get(conversation.id)?.diffText}</pre>
+                      <form action={`/api/conversations/${conversation.id}/approve`} method="post">
+                        <input type="hidden" name="approvalType" value="commit_and_push" />
+                        <input type="hidden" name="approvedByUserId" value="user_demo" />
+                        <input
+                          name="commitMessage"
+                          defaultValue={`feat: complete ${conversation.type} task`}
+                          required
+                        />
+                        <button type="submit">Approve</button>
+                      </form>
+                    </div>
+                  ) : null}
                 </div>
                 <strong className={`status-label status-label-${conversation.status}`}>
                   {conversation.status}
@@ -146,6 +169,22 @@ async function getEventGroups(conversationIds: string[]) {
         groups.set(conversationId, await runEventService.listEvents(conversationId));
       } catch {
         groups.set(conversationId, []);
+      }
+    })
+  );
+
+  return groups;
+}
+
+async function getChangeSets(conversationIds: string[]) {
+  const groups = new Map<string, Awaited<ReturnType<typeof reviewService.getChangeSet>>>();
+
+  await Promise.all(
+    conversationIds.map(async (conversationId) => {
+      try {
+        groups.set(conversationId, await reviewService.getChangeSet(conversationId));
+      } catch {
+        groups.set(conversationId, null);
       }
     })
   );

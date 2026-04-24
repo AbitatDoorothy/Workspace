@@ -186,6 +186,60 @@ h1 {
   text-transform: uppercase;
 }
 
+.diff-review {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.diff-review h3 {
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.diff-review ul {
+  color: #596875;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.diff-review pre {
+  background: #13202b;
+  border-radius: 6px;
+  color: #f7fbff;
+  font-size: 0.78rem;
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.diff-review form {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.diff-review input {
+  border: 1px solid #abc2d6;
+  border-radius: 6px;
+  color: #172026;
+  font: inherit;
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.diff-review button {
+  background: #214760;
+  border: 0;
+  border-radius: 6px;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  min-height: 38px;
+  padding: 0 14px;
+}
+
 .status-label {
   border: 1px solid #abc2d6;
   border-radius: 999px;

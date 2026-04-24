@@ -40,6 +40,13 @@ export class HostApiClient {
     return this.post<{ ok: true }>(`/api/conversations/${conversationId}/events`, input);
   }
 
+  uploadChangeSet(
+    conversationId: string,
+    input: { filesChanged: string[]; diffText: string; summary: string }
+  ) {
+    return this.post<{ ok: true }>(`/api/conversations/${conversationId}/changeset`, input);
+  }
+
   private async post<TResponse>(path: string, body: unknown) {
     const response = await fetch(new URL(path, this.apiUrl), {
       method: "POST",

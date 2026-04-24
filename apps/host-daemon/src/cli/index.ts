@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { runtimeSchema } from "@abitat/shared";
 
 import { defaultConfigPath, loadHostConfig, saveHostConfig } from "../config/host-config.js";
+import { collectChangeset } from "../git/changeset.js";
 import { resolveRepoPath } from "../git/paths.js";
 import { cleanupConversationWorktree, setupConversationWorktree } from "../git/worktree.js";
 import { createMockRuntimeAdapter } from "../runtime/mock.js";
@@ -153,6 +154,8 @@ async function pollDaemonJob(client: HostApiClient, machineId: string, workspace
         model: job.payload.model,
         instructions: job.payload.instructions
       });
+      const changeSet = await collectChangeset(setup.worktreePath);
+      await client.uploadChangeSet(job.conversationId, changeSet);
       await client.ackJob(job.id, {
         status: "completed",
         branchName: setup.branchName,
