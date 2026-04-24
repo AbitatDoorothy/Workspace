@@ -65,6 +65,14 @@ export default async function Home() {
               Open projects
             </a>
           </article>
+
+          <article className="panel">
+            <h2>Conversations</h2>
+            <p>Queued agent work</p>
+            <a className="button-link" href="/conversations">
+              Open conversations
+            </a>
+          </article>
         </div>
       </section>
     </main>

@@ -13,6 +13,9 @@ export default async function AgentsPage() {
             <p className="eyebrow">Agents</p>
             <h1>Project Agents</h1>
           </div>
+          <a className="button-link" href="/conversations">
+            Conversations
+          </a>
         </div>
 
         <form className="panel project-form" action="/api/agents" method="post">

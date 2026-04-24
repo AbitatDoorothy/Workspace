@@ -73,6 +73,7 @@ async function startDaemon(args: string[]) {
         machineId: config.machineId,
         status: "online"
       });
+      await pollDaemonJob(client, config.machineId);
     }
   };
 
@@ -96,6 +97,17 @@ async function uploadToolScan(client: HostApiClient, machineId: string) {
   const tools = await createToolScanner().scan();
   await client.uploadTools(machineId, tools);
   console.log(`tools=${tools.filter((tool) => tool.installed).length}/${tools.length}`);
+}
+
+async function pollDaemonJob(client: HostApiClient, machineId: string) {
+  const { job } = await client.pollJob(machineId);
+
+  if (!job) {
+    return;
+  }
+
+  console.log(`job=${job.id} type=${job.type}`);
+  await client.ackJob(job.id, { status: "running" });
 }
 
 async function readConfigIfAvailable(path: string) {

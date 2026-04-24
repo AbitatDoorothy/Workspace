@@ -121,6 +121,11 @@ export const daemonJobPollRequestSchema = z.object({
   machineId: idSchema
 });
 
+export const daemonJobAckRequestSchema = z.object({
+  status: z.enum(["running", "completed", "failed"]),
+  errorMessage: z.string().min(1).optional()
+});
+
 const daemonJobBaseSchema = z.object({
   id: idSchema
 });
@@ -216,5 +221,6 @@ export type RunEventIngestRequest = z.infer<typeof runEventIngestRequestSchema>;
 export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
 export type ApprovalResponse = z.infer<typeof approvalResponseSchema>;
 export type DaemonJobPollRequest = z.infer<typeof daemonJobPollRequestSchema>;
+export type DaemonJobAckRequest = z.infer<typeof daemonJobAckRequestSchema>;
 export type DaemonJob = z.infer<typeof daemonJobSchema>;
 export type DaemonJobPollResponse = z.infer<typeof daemonJobPollResponseSchema>;

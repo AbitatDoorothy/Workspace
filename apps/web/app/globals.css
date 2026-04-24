@@ -90,6 +90,12 @@ h1 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.nav-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .panel {
   background: #ffffff;
   border: 1px solid #d9e2ec;
@@ -139,6 +145,46 @@ h1 {
 .tool-list strong {
   color: #214760;
   font-size: 0.85rem;
+}
+
+.conversation-list {
+  display: grid;
+  gap: 12px;
+}
+
+.conversation-row {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 104px;
+}
+
+.conversation-row p {
+  overflow-wrap: anywhere;
+}
+
+.status-label {
+  border: 1px solid #abc2d6;
+  border-radius: 999px;
+  color: #214760;
+  font-size: 0.82rem;
+  min-width: 112px;
+  padding: 8px 12px;
+  text-align: center;
+}
+
+.status-label-preparing {
+  border-color: #c79a35;
+  color: #6a4b00;
+}
+
+.status-label-running {
+  border-color: #2bb673;
+  color: #11603a;
+}
+
+.status-label-failed {
+  border-color: #d96a6a;
+  color: #8a2525;
 }
 
 .project-form {
@@ -208,6 +254,11 @@ h1 {
   }
 
   .project-form {
+    grid-template-columns: 1fr;
+  }
+
+  .conversation-row {
+    align-items: flex-start;
     grid-template-columns: 1fr;
   }
 

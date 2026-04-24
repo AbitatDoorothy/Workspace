@@ -11,9 +11,14 @@ export default async function ProjectsPage() {
             <p className="eyebrow">Projects</p>
             <h1>Workspace Repos</h1>
           </div>
-          <a className="button-link" href="/agents">
-            Agents
-          </a>
+          <div className="nav-actions">
+            <a className="button-link" href="/agents">
+              Agents
+            </a>
+            <a className="button-link" href="/conversations">
+              Conversations
+            </a>
+          </div>
         </div>
 
         <form className="panel project-form" action="/api/projects" method="post">

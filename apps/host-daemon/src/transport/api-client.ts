@@ -1,4 +1,6 @@
 import type {
+  DaemonJobAckRequest,
+  DaemonJobPollResponse,
   HostHeartbeatRequest,
   HostPairingRequest,
   HostPairingResponse,
@@ -23,6 +25,14 @@ export class HostApiClient {
   uploadTools(machineId: string, tools: HostTool[]) {
     const input: ToolScanUploadRequest = { machineId, tools };
     return this.post<{ ok: true }>("/api/hosts/tools", input);
+  }
+
+  pollJob(machineId: string) {
+    return this.post<DaemonJobPollResponse>("/api/daemon/jobs/poll", { machineId });
+  }
+
+  ackJob(jobId: string, input: DaemonJobAckRequest) {
+    return this.post<{ ok: true }>(`/api/daemon/jobs/${jobId}/ack`, input);
   }
 
   private async post<TResponse>(path: string, body: unknown) {
