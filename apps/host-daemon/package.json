@@ -1,0 +1,23 @@
+{
+  "name": "host-daemon",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "abitat-host": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "predev": "pnpm --filter @abitat/shared build",
+    "dev": "tsx src/cli/index.ts start --mock",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@abitat/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "4.21.0"
+  }
+}

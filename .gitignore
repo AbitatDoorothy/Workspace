@@ -1,0 +1,8 @@
+.DS_Store
+.env
+.env.local
+.next
+dist
+*.tsbuildinfo
+node_modules
+pnpm-debug.log*

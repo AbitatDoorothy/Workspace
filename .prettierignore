@@ -1,0 +1,6 @@
+.next
+AGENTS.md
+dist
+docs
+node_modules
+pnpm-lock.yaml
