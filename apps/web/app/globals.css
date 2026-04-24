@@ -120,6 +120,27 @@ h1 {
   white-space: nowrap;
 }
 
+.tool-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tool-list li {
+  align-items: center;
+  border-bottom: 1px solid #e6edf4;
+  display: flex;
+  justify-content: space-between;
+  min-height: 30px;
+}
+
+.tool-list strong {
+  color: #214760;
+  font-size: 0.85rem;
+}
+
 @media (max-width: 760px) {
   main {
     padding: 20px;

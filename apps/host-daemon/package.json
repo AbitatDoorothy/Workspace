@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "predev": "pnpm --filter @abitat/shared build",
-    "dev": "tsx src/cli/index.ts start --mock",
+    "dev": "tsx src/cli/index.ts",
     "lint": "eslint .",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"

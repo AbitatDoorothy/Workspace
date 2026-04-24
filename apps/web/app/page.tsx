@@ -1,9 +1,14 @@
-import { runtimeSchema } from "@abitat/shared";
+import type { HostTool } from "@abitat/shared";
 
 import { appInfo } from "../lib/app-info";
+import { DEMO_PAIRING_CODE } from "../server/hosts/host-service";
+import { hostService } from "../server/hosts";
 
-export default function Home() {
-  const mockRuntime = runtimeSchema.parse("mock");
+export default async function Home() {
+  const host = await getHost();
+  const tools = Array.isArray(host?.installedToolsJson)
+    ? (host.installedToolsJson as HostTool[])
+    : [];
 
   return (
     <main>
@@ -15,30 +20,53 @@ export default function Home() {
           </div>
           <div className="status-pill">
             <span className="status-dot" aria-hidden="true" />
-            Scaffold online
+            Host {host?.status ?? "pending"}
           </div>
         </div>
 
         <div className="overview-grid">
           <article className="panel">
-            <h2>Web Control Plane</h2>
-            <p>Next.js is ready for the workspace dashboard, host setup, projects, and runs.</p>
-            <div className="command">pnpm dev</div>
+            <h2>Host Pairing</h2>
+            <p>{DEMO_PAIRING_CODE}</p>
+            <div className="command">
+              pnpm --filter host-daemon dev pair --code {DEMO_PAIRING_CODE}
+            </div>
           </article>
 
           <article className="panel">
             <h2>Host Daemon</h2>
-            <p>The local daemon starts in mock mode for Phase 0 development checks.</p>
+            <p>{host?.name ?? "Demo Host"}</p>
             <div className="command">pnpm --filter host-daemon dev</div>
           </article>
 
           <article className="panel">
-            <h2>Shared Package</h2>
-            <p>@abitat/shared validates the {mockRuntime} runtime for the app and daemon.</p>
-            <div className="command">pnpm --filter @abitat/shared build</div>
+            <h2>Installed Tools</h2>
+            <ul className="tool-list">
+              {tools.length > 0 ? (
+                tools.map((tool) => (
+                  <li key={tool.name}>
+                    <span>{tool.name}</span>
+                    <strong>{tool.installed ? "installed" : "missing"}</strong>
+                  </li>
+                ))
+              ) : (
+                <li>
+                  <span>scan</span>
+                  <strong>pending</strong>
+                </li>
+              )}
+            </ul>
           </article>
         </div>
       </section>
     </main>
   );
+}
+
+async function getHost() {
+  try {
+    return await hostService.getDemoHost();
+  } catch {
+    return null;
+  }
 }
