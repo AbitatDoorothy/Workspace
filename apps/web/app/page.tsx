@@ -57,6 +57,14 @@ export default async function Home() {
               )}
             </ul>
           </article>
+
+          <article className="panel">
+            <h2>Projects</h2>
+            <p>Workspace repository sync</p>
+            <a className="button-link" href="/projects">
+              Open projects
+            </a>
+          </article>
         </div>
       </section>
     </main>

@@ -141,6 +141,46 @@ h1 {
   font-size: 0.85rem;
 }
 
+.project-form {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.project-form,
+.project-form label {
+  display: grid;
+}
+
+.project-form label {
+  color: #596875;
+  font-size: 0.85rem;
+  gap: 6px;
+}
+
+.project-form input {
+  border: 1px solid #abc2d6;
+  border-radius: 6px;
+  color: #172026;
+  font: inherit;
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.project-form button,
+.button-link {
+  align-items: center;
+  background: #214760;
+  border: 0;
+  border-radius: 6px;
+  color: #ffffff;
+  display: inline-flex;
+  font: inherit;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  text-decoration: none;
+}
+
 @media (max-width: 760px) {
   main {
     padding: 20px;
@@ -153,6 +193,10 @@ h1 {
   }
 
   .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .project-form {
     grid-template-columns: 1fr;
   }
 }

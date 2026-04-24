@@ -115,6 +115,7 @@ model Machine {
   lastSeenAt         DateTime?
   installedToolsJson Json?
   workspace          Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  daemonJobs         DaemonJob[]
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
@@ -128,6 +129,7 @@ model Project {
   repoUrl         String
   defaultBranch   String         @default("main")
   hostLocalPath   String?
+  repoSyncStatus  String         @default("pending")
   githubOwner     String?
   githubRepo      String?
   createdByUserId String
@@ -135,6 +137,7 @@ model Project {
   createdBy       User           @relation(fields: [createdByUserId], references: [id])
   agents          Agent[]
   conversations   Conversation[]
+  daemonJobs      DaemonJob[]
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
@@ -186,6 +189,7 @@ model Conversation {
   approvedBy       User?              @relation("ConversationApprover", fields: [approvedByUserId], references: [id])
   events           RunEvent[]
   changeSet        ChangeSet?
+  daemonJobs       DaemonJob[]
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
@@ -218,4 +222,27 @@ model ChangeSet {
   conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
+}
+
+model DaemonJob {
+  id             String        @id @default(cuid())
+  workspaceId    String
+  machineId      String?
+  projectId      String?
+  conversationId String?
+  type           String
+  status         String        @default("queued")
+  payloadJson    Json
+  errorMessage   String?
+  machine        Machine?      @relation(fields: [machineId], references: [id], onDelete: SetNull)
+  project        Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([workspaceId])
+  @@index([machineId])
+  @@index([projectId])
+  @@index([conversationId])
+  @@index([status])
 }
