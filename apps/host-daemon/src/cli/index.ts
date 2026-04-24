@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 
+import { homedir } from "node:os";
 import { runtimeSchema } from "@abitat/shared";
 
 import { defaultConfigPath, loadHostConfig, saveHostConfig } from "../config/host-config.js";
+import { resolveRepoPath } from "../git/paths.js";
+import { cleanupConversationWorktree, setupConversationWorktree } from "../git/worktree.js";
 import { HostApiClient } from "../transport/api-client.js";
 import { createToolScanner } from "../tools/scanner.js";
 import { resolveDaemonConnection } from "./daemon-connection.js";
@@ -21,6 +24,11 @@ async function main() {
 
   if (command === "start") {
     await startDaemon(args);
+    return;
+  }
+
+  if (command === "cleanup-worktree") {
+    await cleanupWorktree(args);
     return;
   }
 
@@ -49,7 +57,7 @@ async function pairDaemon(args: string[]) {
 async function startDaemon(args: string[]) {
   const options = parseStartOptions(args);
   const runtime = runtimeSchema.parse(options.mock || args.length === 0 ? "mock" : "codex");
-  const workspaceRoot = process.env.ABITAT_WORKSPACE_ROOT ?? "$HOME/AbitatWorkspace";
+  const workspaceRoot = process.env.ABITAT_WORKSPACE_ROOT ?? `${homedir()}/AbitatWorkspace`;
   const pollIntervalMs = Number(process.env.ABITAT_DAEMON_POLL_INTERVAL_MS ?? 2000);
   const configPath = process.env.ABITAT_CONFIG_PATH ?? defaultConfigPath();
   const config = await readConfigIfAvailable(configPath);
@@ -79,7 +87,7 @@ async function startDaemon(args: string[]) {
       });
     }
 
-    await pollDaemonJob(client, connection.machineId);
+    await pollDaemonJob(client, connection.machineId, workspaceRoot);
   };
 
   await beat();
@@ -104,7 +112,7 @@ async function uploadToolScan(client: HostApiClient, machineId: string) {
   console.log(`tools=${tools.filter((tool) => tool.installed).length}/${tools.length}`);
 }
 
-async function pollDaemonJob(client: HostApiClient, machineId: string) {
+async function pollDaemonJob(client: HostApiClient, machineId: string, workspaceRoot: string) {
   const { job } = await client.pollJob(machineId);
 
   if (!job) {
@@ -112,7 +120,52 @@ async function pollDaemonJob(client: HostApiClient, machineId: string) {
   }
 
   console.log(`job=${job.id} type=${job.type}`);
-  await client.ackJob(job.id, { status: "running" });
+
+  if (job.type !== "start_conversation") {
+    await client.ackJob(job.id, { status: "running" });
+    return;
+  }
+
+  try {
+    const setup = await setupConversationWorktree({
+      workspaceRoot,
+      conversationId: job.conversationId,
+      conversationType: job.payload.conversationType,
+      prompt: job.payload.prompt,
+      repoUrl: job.payload.repoUrl,
+      defaultBranch: job.payload.defaultBranch
+    });
+
+    console.log(`branch=${setup.branchName}`);
+    console.log(`worktree=${setup.worktreePath}`);
+    await client.ackJob(job.id, {
+      status: "running",
+      branchName: setup.branchName,
+      worktreePath: setup.worktreePath
+    });
+  } catch (error) {
+    await client.ackJob(job.id, {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "worktree setup failed"
+    });
+  }
+}
+
+async function cleanupWorktree(args: string[]) {
+  const workspaceRoot = process.env.ABITAT_WORKSPACE_ROOT ?? `${homedir()}/AbitatWorkspace`;
+  const repoUrl = readOption(args, "--repo-url") ?? "";
+  const worktreePath = readOption(args, "--path") ?? "";
+
+  if (!repoUrl || !worktreePath) {
+    throw new Error("Usage: abitat-host cleanup-worktree --repo-url <url> --path <worktree>");
+  }
+
+  await cleanupConversationWorktree({
+    workspaceRoot,
+    repoPath: resolveRepoPath(workspaceRoot, repoUrl),
+    worktreePath
+  });
+  console.log(`cleanup=${worktreePath}`);
 }
 
 async function readConfigIfAvailable(path: string) {

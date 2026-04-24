@@ -48,7 +48,9 @@ function createPrismaConversationDb(db: PrismaClient) {
       },
       async update(args: {
         where: { id: string };
-        data: Partial<Pick<ConversationRecord, "status" | "errorMessage">>;
+        data: Partial<
+          Pick<ConversationRecord, "branchName" | "errorMessage" | "status" | "worktreePath">
+        >;
       }) {
         return normalizeConversation(
           await db.conversation.update({
@@ -150,6 +152,8 @@ function normalizeConversation(conversation: {
   type: ConversationType;
   status: ConversationStatus;
   prompt: string;
+  branchName: string | null;
+  worktreePath: string | null;
   errorMessage: string | null;
   createdAt: Date;
 }): ConversationRecord {
@@ -162,6 +166,8 @@ function normalizeConversation(conversation: {
     type: conversation.type,
     status: conversation.status,
     prompt: conversation.prompt,
+    branchName: conversation.branchName,
+    worktreePath: conversation.worktreePath,
     errorMessage: conversation.errorMessage,
     createdAt: conversation.createdAt
   };
@@ -233,7 +239,9 @@ function createDemoConversationDb() {
         data
       }: {
         where: { id: string };
-        data: Partial<Pick<ConversationRecord, "status" | "errorMessage">>;
+        data: Partial<
+          Pick<ConversationRecord, "branchName" | "errorMessage" | "status" | "worktreePath">
+        >;
       }) => {
         const current = store.conversations.get(where.id);
 

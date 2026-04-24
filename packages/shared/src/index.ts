@@ -123,7 +123,9 @@ export const daemonJobPollRequestSchema = z.object({
 
 export const daemonJobAckRequestSchema = z.object({
   status: z.enum(["running", "completed", "failed"]),
-  errorMessage: z.string().min(1).optional()
+  errorMessage: z.string().min(1).optional(),
+  branchName: z.string().min(1).optional(),
+  worktreePath: z.string().min(1).optional()
 });
 
 const daemonJobBaseSchema = z.object({
@@ -150,6 +152,7 @@ export const startConversationJobSchema = daemonJobBaseSchema.extend({
   payload: z.object({
     repoUrl: z.string().url(),
     defaultBranch: z.string().min(1),
+    conversationType: conversationTypeSchema,
     agentRuntime: runtimeSchema,
     model: z.string().min(1),
     instructions: z.string().min(1),

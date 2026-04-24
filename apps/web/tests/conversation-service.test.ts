@@ -32,6 +32,8 @@ interface TestConversation {
   type: "feature" | "bugfix" | "investigation" | "refactor";
   status: ConversationStatus;
   prompt: string;
+  branchName?: string | null;
+  worktreePath?: string | null;
 }
 
 interface TestDaemonJob {
@@ -199,10 +201,15 @@ describe("conversation queue service", () => {
     expect(job?.type).toBe("start_conversation");
     expect((await db.conversation.findMany())[0].status).toBe("preparing");
 
-    await service.ackJob(job?.id ?? "", "running");
+    await service.ackJob(job?.id ?? "", "running", {
+      branchName: "abitat/bugfix/abc123-fix-a-useful-page",
+      worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo"
+    });
     expect((await db.conversation.findMany())[0]).toMatchObject({
       id: conversation.id,
-      status: "running"
+      status: "running",
+      branchName: "abitat/bugfix/abc123-fix-a-useful-page",
+      worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo"
     });
   });
 

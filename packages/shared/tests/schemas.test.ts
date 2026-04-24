@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  daemonJobAckRequestSchema,
   conversationCreateRequestSchema,
   conversationTypeSchema,
   daemonJobPollResponseSchema,
@@ -33,6 +34,7 @@ describe("shared schema validation", () => {
           payload: {
             repoUrl: "https://github.com/example/app.git",
             defaultBranch: "main",
+            conversationType: "feature",
             agentRuntime: "gpt-999",
             model: "mock-model",
             instructions: "You are careful.",
@@ -74,6 +76,22 @@ describe("shared schema validation", () => {
           installed: false
         }
       ]
+    });
+  });
+
+  it("accepts worktree metadata on daemon job acknowledgment", () => {
+    expect(
+      daemonJobAckRequestSchema.parse({
+        status: "running",
+        branchName: "abitat/feature/abcdef12-add-a-useful-page",
+        worktreePath:
+          "/tmp/AbitatWorkspace/worktrees/conversation_abcdef123456-abitat-feature-abcdef12-add-a-useful-page"
+      })
+    ).toEqual({
+      status: "running",
+      branchName: "abitat/feature/abcdef12-add-a-useful-page",
+      worktreePath:
+        "/tmp/AbitatWorkspace/worktrees/conversation_abcdef123456-abitat-feature-abcdef12-add-a-useful-page"
     });
   });
 });

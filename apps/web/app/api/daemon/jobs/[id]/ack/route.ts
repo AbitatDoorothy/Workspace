@@ -10,7 +10,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       daemonJobAckRequestSchema.parseAsync(await request.json())
     ]);
 
-    await conversationQueueService.ackJob(id, input.status, input.errorMessage);
+    await conversationQueueService.ackJob(id, input.status, {
+      branchName: input.branchName,
+      errorMessage: input.errorMessage,
+      worktreePath: input.worktreePath
+    });
 
     return NextResponse.json({ ok: true });
   } catch (error) {

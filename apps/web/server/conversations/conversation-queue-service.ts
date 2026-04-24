@@ -22,6 +22,8 @@ export interface ConversationCreateInput {
 export interface ConversationRecord extends ConversationCreateInput {
   id: string;
   status: ConversationStatus;
+  branchName?: string | null;
+  worktreePath?: string | null;
   errorMessage?: string | null;
   createdAt?: Date;
 }
@@ -68,7 +70,9 @@ interface ConversationDb {
     findMany(args?: { where?: { workspaceId?: string } }): Promise<ConversationRecord[]>;
     update(args: {
       where: { id: string };
-      data: Partial<Pick<ConversationRecord, "status" | "errorMessage">>;
+      data: Partial<
+        Pick<ConversationRecord, "branchName" | "errorMessage" | "status" | "worktreePath">
+      >;
     }): Promise<ConversationRecord>;
   };
   daemonJob: {
@@ -143,6 +147,7 @@ export function createConversationQueueService(db: ConversationDb) {
           payloadJson: {
             repoUrl: project.repoUrl,
             defaultBranch: project.defaultBranch,
+            conversationType: created.type,
             agentRuntime: agent.runtime,
             model: agent.model,
             instructions: agent.instructions,
@@ -186,12 +191,16 @@ export function createConversationQueueService(db: ConversationDb) {
       return toDaemonJob(updated);
     },
 
-    async ackJob(jobId: string, status: "running" | "completed" | "failed", errorMessage?: string) {
+    async ackJob(
+      jobId: string,
+      status: "running" | "completed" | "failed",
+      details: { branchName?: string; errorMessage?: string; worktreePath?: string } = {}
+    ) {
       const job = await db.daemonJob.update({
         where: { id: jobId },
         data: {
           status,
-          errorMessage: status === "failed" ? (errorMessage ?? "Daemon job failed") : null
+          errorMessage: status === "failed" ? (details.errorMessage ?? "Daemon job failed") : null
         }
       });
 
@@ -199,8 +208,10 @@ export function createConversationQueueService(db: ConversationDb) {
         await db.conversation.update({
           where: { id: job.conversationId },
           data: {
+            branchName: details.branchName,
             status: statusToConversationStatus(status),
-            errorMessage: status === "failed" ? (errorMessage ?? "Daemon job failed") : null
+            worktreePath: details.worktreePath,
+            errorMessage: status === "failed" ? (details.errorMessage ?? "Daemon job failed") : null
           }
         });
       }
@@ -238,10 +249,10 @@ export function createResilientConversationQueueService(
       );
     },
 
-    ackJob(jobId, status, errorMessage) {
+    ackJob(jobId, status, details) {
       return runWithFallback(
-        () => primary.ackJob(jobId, status, errorMessage),
-        () => fallback.ackJob(jobId, status, errorMessage)
+        () => primary.ackJob(jobId, status, details),
+        () => fallback.ackJob(jobId, status, details)
       );
     }
   };

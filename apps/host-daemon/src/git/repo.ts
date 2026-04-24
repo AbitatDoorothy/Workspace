@@ -5,9 +5,9 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-interface RepoRuntime {
+export interface RepoRuntime {
   exists(path: string): Promise<boolean>;
-  run(command: string, args: string[]): Promise<void>;
+  run(command: string, args: string[]): Promise<string | void>;
 }
 
 interface SyncRepoInput {
@@ -18,7 +18,7 @@ interface SyncRepoInput {
 }
 
 export async function syncRepo(input: SyncRepoInput) {
-  const runtime = input.runtime ?? defaultRuntime;
+  const runtime = input.runtime ?? defaultRepoRuntime;
 
   if (await runtime.exists(input.targetPath)) {
     await runtime.run("git", ["-C", input.targetPath, "fetch", "origin"]);
@@ -36,7 +36,58 @@ export async function syncRepo(input: SyncRepoInput) {
   return "cloned" as const;
 }
 
-const defaultRuntime: RepoRuntime = {
+export function fetchRepo(repoPath: string, defaultBranch: string, runtime = defaultRepoRuntime) {
+  return runtime.run("git", ["-C", repoPath, "fetch", "origin", defaultBranch]);
+}
+
+export function addWorktree(
+  repoPath: string,
+  worktreePath: string,
+  branchName: string,
+  defaultBranch: string,
+  runtime = defaultRepoRuntime
+) {
+  return runtime.run("git", [
+    "-C",
+    repoPath,
+    "worktree",
+    "add",
+    "-B",
+    branchName,
+    worktreePath,
+    `origin/${defaultBranch}`
+  ]);
+}
+
+export async function gitStatus(worktreePath: string, runtime = defaultRepoRuntime) {
+  return String((await runtime.run("git", ["-C", worktreePath, "status", "--short"])) ?? "");
+}
+
+export async function gitDiff(worktreePath: string, runtime = defaultRepoRuntime) {
+  return String((await runtime.run("git", ["-C", worktreePath, "diff"])) ?? "");
+}
+
+export function commitWorktree(
+  worktreePath: string,
+  commitMessage: string,
+  runtime = defaultRepoRuntime
+) {
+  return runtime.run("git", ["-C", worktreePath, "commit", "-am", commitMessage]);
+}
+
+export function pushBranch(repoPath: string, branchName: string, runtime = defaultRepoRuntime) {
+  return runtime.run("git", ["-C", repoPath, "push", "-u", "origin", branchName]);
+}
+
+export function removeWorktree(
+  repoPath: string,
+  worktreePath: string,
+  runtime = defaultRepoRuntime
+) {
+  return runtime.run("git", ["-C", repoPath, "worktree", "remove", worktreePath]);
+}
+
+export const defaultRepoRuntime: RepoRuntime = {
   async exists(path) {
     try {
       await access(path);
@@ -46,6 +97,7 @@ const defaultRuntime: RepoRuntime = {
     }
   },
   async run(command, args) {
-    await execFileAsync(command, args);
+    const { stdout } = await execFileAsync(command, args);
+    return stdout;
   }
 };
