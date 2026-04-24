@@ -5,6 +5,7 @@ import { runtimeSchema } from "@abitat/shared";
 import { defaultConfigPath, loadHostConfig, saveHostConfig } from "../config/host-config.js";
 import { HostApiClient } from "../transport/api-client.js";
 import { createToolScanner } from "../tools/scanner.js";
+import { resolveDaemonConnection } from "./daemon-connection.js";
 import { parseStartOptions } from "./start-options.js";
 
 const args = process.argv.slice(2);
@@ -52,29 +53,33 @@ async function startDaemon(args: string[]) {
   const pollIntervalMs = Number(process.env.ABITAT_DAEMON_POLL_INTERVAL_MS ?? 2000);
   const configPath = process.env.ABITAT_CONFIG_PATH ?? defaultConfigPath();
   const config = await readConfigIfAvailable(configPath);
-  const client = config ? new HostApiClient(config.apiUrl, config.hostToken) : null;
+  const connection = resolveDaemonConnection({ config, env: process.env });
+  const client = new HostApiClient(connection.apiUrl, connection.hostToken);
 
   console.log("Abitat Workspace host daemon");
   console.log(`mode=${runtime}`);
   console.log(`workspaceRoot=${workspaceRoot}`);
   console.log(`pollIntervalMs=${pollIntervalMs}`);
+  console.log(`machineId=${connection.machineId}`);
+  console.log(`paired=${connection.paired}`);
   console.log("status=online");
 
-  if (client && config) {
-    await uploadToolScan(client, config.machineId);
+  if (connection.paired) {
+    await uploadToolScan(client, connection.machineId);
   }
 
   const beat = async () => {
     const timestamp = new Date().toISOString();
     console.log(`heartbeat=${timestamp}`);
 
-    if (client && config) {
+    if (connection.paired) {
       await client.heartbeat({
-        machineId: config.machineId,
+        machineId: connection.machineId,
         status: "online"
       });
-      await pollDaemonJob(client, config.machineId);
     }
+
+    await pollDaemonJob(client, connection.machineId);
   };
 
   await beat();
@@ -89,7 +94,7 @@ async function startDaemon(args: string[]) {
 
   process.on("SIGINT", () => {
     clearInterval(heartbeat);
-    void stopDaemon(client, config?.machineId);
+    void stopDaemon(client, connection);
   });
 }
 
@@ -123,11 +128,14 @@ function readOption(args: string[], option: string) {
   return index >= 0 ? args[index + 1] : undefined;
 }
 
-async function stopDaemon(client: HostApiClient | null, machineId?: string) {
-  if (client && machineId) {
+async function stopDaemon(
+  client: HostApiClient,
+  connection: { machineId: string; paired: boolean }
+) {
+  if (connection.paired) {
     await client
       .heartbeat({
-        machineId,
+        machineId: connection.machineId,
         status: "offline"
       })
       .catch((error: unknown) => {

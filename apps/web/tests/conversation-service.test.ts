@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ConversationStatus } from "@abitat/shared";
 
-import { createConversationQueueService } from "../server/conversations/conversation-queue-service";
+import {
+  createConversationQueueService,
+  createResilientConversationQueueService,
+  type ConversationQueueService
+} from "../server/conversations/conversation-queue-service";
 
 interface TestProject {
   id: string;
@@ -199,6 +203,42 @@ describe("conversation queue service", () => {
     expect((await db.conversation.findMany())[0]).toMatchObject({
       id: conversation.id,
       status: "running"
+    });
+  });
+
+  it("falls back to demo queue storage when the primary database is unavailable", async () => {
+    const databaseError = new Error("connection refused");
+    Object.assign(databaseError, { code: "ECONNREFUSED" });
+    const primary: ConversationQueueService = {
+      createConversation: async () => {
+        throw databaseError;
+      },
+      listConversations: async () => {
+        throw databaseError;
+      },
+      pollNextJob: async () => {
+        throw databaseError;
+      },
+      ackJob: async () => {
+        throw databaseError;
+      }
+    };
+    const fallback = createConversationQueueService(createConversationDb());
+    const service = createResilientConversationQueueService(primary, fallback);
+
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Add a useful page."
+    });
+
+    expect(conversation.status).toBe("queued");
+    expect(await service.pollNextJob("machine_demo")).toMatchObject({
+      type: "start_conversation",
+      conversationId: conversation.id
     });
   });
 });

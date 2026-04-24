@@ -2,6 +2,8 @@ import { agentService } from "../../server/agents";
 import { conversationQueueService } from "../../server/conversations";
 import { projectService } from "../../server/projects";
 
+export const dynamic = "force-dynamic";
+
 export default async function ConversationsPage() {
   const [agents, conversations, projects] = await Promise.all([
     getAgents(),

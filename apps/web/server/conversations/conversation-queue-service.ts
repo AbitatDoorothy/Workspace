@@ -210,6 +210,66 @@ export function createConversationQueueService(db: ConversationDb) {
   };
 }
 
+export type ConversationQueueService = ReturnType<typeof createConversationQueueService>;
+
+export function createResilientConversationQueueService(
+  primary: ConversationQueueService,
+  fallback: ConversationQueueService
+): ConversationQueueService {
+  return {
+    createConversation(input) {
+      return runWithFallback(
+        () => primary.createConversation(input),
+        () => fallback.createConversation(input)
+      );
+    },
+
+    listConversations(workspaceId) {
+      return runWithFallback(
+        () => primary.listConversations(workspaceId),
+        () => fallback.listConversations(workspaceId)
+      );
+    },
+
+    pollNextJob(machineId) {
+      return runWithFallback(
+        () => primary.pollNextJob(machineId),
+        () => fallback.pollNextJob(machineId)
+      );
+    },
+
+    ackJob(jobId, status, errorMessage) {
+      return runWithFallback(
+        () => primary.ackJob(jobId, status, errorMessage),
+        () => fallback.ackJob(jobId, status, errorMessage)
+      );
+    }
+  };
+}
+
+async function runWithFallback<TResult>(
+  primary: () => Promise<TResult>,
+  fallback: () => Promise<TResult>
+) {
+  try {
+    return await primary();
+  } catch (error) {
+    if (!isDatabaseUnavailable(error)) {
+      throw error;
+    }
+
+    return fallback();
+  }
+}
+
+function isDatabaseUnavailable(error: unknown) {
+  const code =
+    typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+  const message = error instanceof Error ? error.message : "";
+
+  return code === "ECONNREFUSED" || message.includes("ECONNREFUSED");
+}
+
 function toDaemonJob(job: DaemonJobRecord) {
   return daemonJobSchema.parse({
     id: job.id,

@@ -4,14 +4,16 @@ import type { ConversationStatus, ConversationType, Runtime } from "@abitat/shar
 import { prisma } from "../db/client";
 import {
   createConversationQueueService,
+  createResilientConversationQueueService,
   type AgentRecord,
   type ConversationRecord,
   type DaemonJobRecord,
   type ProjectRecord
 } from "./conversation-queue-service";
 
-export const conversationQueueService = createConversationQueueService(
-  createPrismaConversationDb(prisma)
+export const conversationQueueService = createResilientConversationQueueService(
+  createConversationQueueService(createPrismaConversationDb(prisma)),
+  createConversationQueueService(createDemoConversationDb())
 );
 
 function createPrismaConversationDb(db: PrismaClient) {
@@ -187,4 +189,111 @@ function normalizeDaemonJob(job: {
     payloadJson: job.payloadJson,
     errorMessage: job.errorMessage
   };
+}
+
+function createDemoConversationDb() {
+  const store = getDemoConversationStore();
+  const project: ProjectRecord = {
+    id: "project_demo",
+    workspaceId: "workspace_demo",
+    name: "Workspace",
+    repoUrl: "https://github.com/AbitatDoorothy/Workspace.git",
+    defaultBranch: "main"
+  };
+  const agent: AgentRecord = {
+    id: "agent_demo",
+    projectId: "project_demo",
+    name: "Mock Agent",
+    runtime: "mock",
+    model: "mock-model",
+    instructions: "Use the mock runtime and keep changes small.",
+    allowedToolsJson: ["git", "node"]
+  };
+
+  return {
+    project: {
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        where.id === project.id ? project : null
+    },
+    agent: {
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        where.id === agent.id ? agent : null
+    },
+    conversation: {
+      create: async ({ data }: { data: ConversationRecord }) => {
+        store.conversations.set(data.id, data);
+        return data;
+      },
+      findMany: async ({ where }: { where?: { workspaceId?: string } } = {}) =>
+        Array.from(store.conversations.values()).filter(
+          (conversation) => !where?.workspaceId || conversation.workspaceId === where.workspaceId
+        ),
+      update: async ({
+        where,
+        data
+      }: {
+        where: { id: string };
+        data: Partial<Pick<ConversationRecord, "status" | "errorMessage">>;
+      }) => {
+        const current = store.conversations.get(where.id);
+
+        if (!current) {
+          throw new Error(`Missing conversation ${where.id}`);
+        }
+
+        const next = { ...current, ...data };
+        store.conversations.set(where.id, next);
+        return next;
+      }
+    },
+    daemonJob: {
+      create: async ({ data }: { data: DaemonJobRecord }) => {
+        store.jobs.set(data.id, data);
+        return data;
+      },
+      findFirst: async ({ where }: { where: { status: { in: string[] }; type?: string } }) =>
+        Array.from(store.jobs.values()).find(
+          (job) => where.status.in.includes(job.status) && (!where.type || job.type === where.type)
+        ) ?? null,
+      findMany: async ({ where }: { where?: { status?: { in: string[] }; type?: string } } = {}) =>
+        Array.from(store.jobs.values()).filter(
+          (job) =>
+            (!where?.status || where.status.in.includes(job.status)) &&
+            (!where?.type || job.type === where.type)
+        ),
+      update: async ({
+        where,
+        data
+      }: {
+        where: { id: string };
+        data: Partial<Pick<DaemonJobRecord, "machineId" | "status" | "errorMessage">>;
+      }) => {
+        const current = store.jobs.get(where.id);
+
+        if (!current) {
+          throw new Error(`Missing job ${where.id}`);
+        }
+
+        const next = { ...current, ...data };
+        store.jobs.set(where.id, next);
+        return next;
+      }
+    }
+  };
+}
+
+function getDemoConversationStore() {
+  const globalForConversations = globalThis as typeof globalThis & {
+    abitatDemoConversationStore?: {
+      conversations: Map<string, ConversationRecord>;
+      jobs: Map<string, DaemonJobRecord>;
+    };
+  };
+
+  globalForConversations.abitatDemoConversationStore ??= {
+    conversations: new Map<string, ConversationRecord>(),
+    jobs: new Map<string, DaemonJobRecord>()
+  };
+
+  return globalForConversations.abitatDemoConversationStore;
 }
