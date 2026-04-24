@@ -6,6 +6,8 @@ import { runtimeSchema } from "@abitat/shared";
 import { defaultConfigPath, loadHostConfig, saveHostConfig } from "../config/host-config.js";
 import { resolveRepoPath } from "../git/paths.js";
 import { cleanupConversationWorktree, setupConversationWorktree } from "../git/worktree.js";
+import { createMockRuntimeAdapter } from "../runtime/mock.js";
+import type { RuntimeEvent } from "../runtime/adapter.js";
 import { HostApiClient } from "../transport/api-client.js";
 import { createToolScanner } from "../tools/scanner.js";
 import { resolveDaemonConnection } from "./daemon-connection.js";
@@ -143,12 +145,49 @@ async function pollDaemonJob(client: HostApiClient, machineId: string, workspace
       branchName: setup.branchName,
       worktreePath: setup.worktreePath
     });
+
+    if (job.payload.agentRuntime === "mock") {
+      await runMockConversation(client, job.conversationId, {
+        worktreePath: setup.worktreePath,
+        prompt: job.payload.prompt,
+        model: job.payload.model,
+        instructions: job.payload.instructions
+      });
+      await client.ackJob(job.id, {
+        status: "completed",
+        branchName: setup.branchName,
+        worktreePath: setup.worktreePath
+      });
+    }
   } catch (error) {
     await client.ackJob(job.id, {
       status: "failed",
       errorMessage: error instanceof Error ? error.message : "worktree setup failed"
     });
   }
+}
+
+async function runMockConversation(
+  client: HostApiClient,
+  conversationId: string,
+  input: {
+    worktreePath: string;
+    prompt: string;
+    model: string;
+    instructions: string;
+  }
+) {
+  let sequence = 1;
+
+  await createMockRuntimeAdapter().run(input, async (event: RuntimeEvent) => {
+    await client.ingestRunEvent(conversationId, {
+      sequence,
+      type: event.type,
+      content: event.content,
+      metadata: {}
+    });
+    sequence += 1;
+  });
 }
 
 async function cleanupWorktree(args: string[]) {

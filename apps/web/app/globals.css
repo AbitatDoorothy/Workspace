@@ -162,6 +162,30 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.event-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.event-list li {
+  align-items: baseline;
+  border-top: 1px solid #e6edf4;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 72px minmax(0, 1fr);
+  padding-top: 8px;
+}
+
+.event-list span {
+  color: #214760;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .status-label {
   border: 1px solid #abc2d6;
   border-radius: 999px;

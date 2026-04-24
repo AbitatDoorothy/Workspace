@@ -5,6 +5,7 @@ import type {
   HostPairingRequest,
   HostPairingResponse,
   HostTool,
+  RunEventIngestRequest,
   ToolScanUploadRequest
 } from "@abitat/shared";
 
@@ -33,6 +34,10 @@ export class HostApiClient {
 
   ackJob(jobId: string, input: DaemonJobAckRequest) {
     return this.post<{ ok: true }>(`/api/daemon/jobs/${jobId}/ack`, input);
+  }
+
+  ingestRunEvent(conversationId: string, input: RunEventIngestRequest) {
+    return this.post<{ ok: true }>(`/api/conversations/${conversationId}/events`, input);
   }
 
   private async post<TResponse>(path: string, body: unknown) {

@@ -1,6 +1,8 @@
 import { agentService } from "../../server/agents";
 import { conversationQueueService } from "../../server/conversations";
 import { projectService } from "../../server/projects";
+import { runEventService } from "../../server/run-events";
+import { ConversationEvents } from "./conversation-events";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +12,7 @@ export default async function ConversationsPage() {
     getConversations(),
     getProjects()
   ]);
+  const eventGroups = await getEventGroups(conversations.map((conversation) => conversation.id));
   const firstProjectId = projects[0]?.id ?? "project_demo";
   const firstAgentId = agents[0]?.id ?? "agent_demo";
 
@@ -85,6 +88,10 @@ export default async function ConversationsPage() {
                 <div>
                   <h2>{conversation.type}</h2>
                   <p>{conversation.prompt}</p>
+                  <ConversationEvents
+                    conversationId={conversation.id}
+                    initialEvents={eventGroups.get(conversation.id) ?? []}
+                  />
                 </div>
                 <strong className={`status-label status-label-${conversation.status}`}>
                   {conversation.status}
@@ -128,4 +135,20 @@ async function getProjects() {
   } catch {
     return [];
   }
+}
+
+async function getEventGroups(conversationIds: string[]) {
+  const groups = new Map<string, Awaited<ReturnType<typeof runEventService.listEvents>>>();
+
+  await Promise.all(
+    conversationIds.map(async (conversationId) => {
+      try {
+        groups.set(conversationId, await runEventService.listEvents(conversationId));
+      } catch {
+        groups.set(conversationId, []);
+      }
+    })
+  );
+
+  return groups;
 }
