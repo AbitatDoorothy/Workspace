@@ -672,15 +672,15 @@ Outcome: a runnable monorepo with web, daemon, shared package, linting, formatti
 
 Tasks:
 
-- [ ] Create monorepo structure.
-- [ ] Add TypeScript configuration.
-- [ ] Add shared package.
-- [ ] Add web app.
-- [ ] Add host daemon package.
-- [ ] Add test runner.
-- [ ] Add lint/format commands.
-- [ ] Add `.env.example`.
-- [ ] Add README with local setup.
+- [x] Create monorepo structure.
+- [x] Add TypeScript configuration.
+- [x] Add shared package.
+- [x] Add web app.
+- [x] Add host daemon package.
+- [x] Add test runner.
+- [x] Add lint/format commands.
+- [x] Add `.env.example`.
+- [x] Add README with local setup.
 
 Acceptance:
 
@@ -696,10 +696,10 @@ Outcome: all domain entities and API payloads have shared types.
 
 Tasks:
 
-- [ ] Define enums for machine type/status, runtime, conversation type/status, run event type.
-- [ ] Define Zod schemas for host pairing, heartbeat, tool scan, conversation creation, run events, approval, and daemon jobs.
-- [ ] Export TypeScript types inferred from schemas.
-- [ ] Add unit tests for schema validation.
+- [x] Define enums for machine type/status, runtime, conversation type/status, run event type.
+- [x] Define Zod schemas for host pairing, heartbeat, tool scan, conversation creation, run events, approval, and daemon jobs.
+- [x] Export TypeScript types inferred from schemas.
+- [x] Add unit tests for schema validation.
 
 Acceptance:
 
@@ -714,11 +714,11 @@ Outcome: web backend can persist workspaces, machines, projects, agents, convers
 
 Tasks:
 
-- [ ] Add Prisma schema with the domain model above.
-- [ ] Add migrations.
-- [ ] Add database seed script for a local demo workspace and user.
-- [ ] Add repository/service modules for each core entity.
-- [ ] Add unit tests for create/read/update operations.
+- [x] Add Prisma schema with the domain model above.
+- [x] Add migrations.
+- [x] Add database seed script for a local demo workspace and user.
+- [x] Add repository/service modules for each core entity.
+- [x] Add unit tests for create/read/update operations.
 
 Acceptance:
 
@@ -732,14 +732,14 @@ Outcome: daemon can pair with backend, heartbeat, and upload installed tools.
 
 Tasks:
 
-- [ ] Add host setup UI that shows a pairing code.
-- [ ] Add backend endpoint for host pairing.
-- [ ] Add daemon config file support.
-- [ ] Add daemon `pair` command.
-- [ ] Add daemon `start` command with heartbeat loop.
-- [ ] Add tool scanner for `git`, `gh`, `node`, `python`, `codex`, and `claude`.
-- [ ] Store uploaded tools in `Machine.installedToolsJson`.
-- [ ] Show host status and installed tools in UI.
+- [x] Add host setup UI that shows a pairing code.
+- [x] Add backend endpoint for host pairing.
+- [x] Add daemon config file support.
+- [x] Add daemon `pair` command.
+- [x] Add daemon `start` command with heartbeat loop.
+- [x] Add tool scanner for `git`, `gh`, `node`, `python`, `codex`, and `claude`.
+- [x] Store uploaded tools in `Machine.installedToolsJson`.
+- [x] Show host status and installed tools in UI.
 
 Acceptance:
 
@@ -754,15 +754,15 @@ Outcome: user can create a project and the daemon can clone/sync the repo.
 
 Tasks:
 
-- [ ] Add project creation UI.
-- [ ] Parse GitHub repo URL into owner/repo.
-- [ ] Store project with repo URL and default branch.
-- [ ] Add daemon job type `clone_repo`.
-- [ ] Implement safe repo path resolution under daemon workspace root.
-- [ ] Implement clone if missing.
-- [ ] Implement fetch if already cloned.
-- [ ] Stream clone/fetch events to backend.
-- [ ] Show repo sync status in UI.
+- [x] Add project creation UI.
+- [x] Parse GitHub repo URL into owner/repo.
+- [x] Store project with repo URL and default branch.
+- [x] Add daemon job type `clone_repo`.
+- [x] Implement safe repo path resolution under daemon workspace root.
+- [x] Implement clone if missing.
+- [x] Implement fetch if already cloned.
+- [x] Stream clone/fetch events to backend.
+- [x] Show repo sync status in UI.
 
 Acceptance:
 
@@ -777,11 +777,11 @@ Outcome: user can create and edit a project-level agent.
 
 Tasks:
 
-- [ ] Add agent form with name, role, instructions, model, runtime, allowed tools.
-- [ ] Restrict runtime choices based on host tool scan, but always allow `mock`.
-- [ ] Store agent config.
-- [ ] Show project agent list.
-- [ ] Add validation for required instructions and runtime.
+- [x] Add agent form with name, role, instructions, model, runtime, allowed tools.
+- [x] Restrict runtime choices based on host tool scan, but always allow `mock`.
+- [x] Store agent config.
+- [x] Show project agent list.
+- [x] Add validation for required instructions and runtime.
 
 Acceptance:
 
@@ -795,13 +795,13 @@ Outcome: user can start a task and backend queues daemon work.
 
 Tasks:
 
-- [ ] Add conversation creation UI.
-- [ ] Let user choose task type and enter prompt.
-- [ ] Create conversation with status `queued`.
-- [ ] Create daemon job `start_conversation`.
-- [ ] Add daemon polling endpoint.
-- [ ] Add daemon job acknowledgment.
-- [ ] Prevent two active jobs from running at the same time on one host in MVP.
+- [x] Add conversation creation UI.
+- [x] Let user choose task type and enter prompt.
+- [x] Create conversation with status `queued`.
+- [x] Create daemon job `start_conversation`.
+- [x] Add daemon polling endpoint.
+- [x] Add daemon job acknowledgment.
+- [x] Prevent two active jobs from running at the same time on one host in MVP.
 
 Acceptance:
 
@@ -815,13 +815,13 @@ Outcome: every conversation runs in an isolated git worktree and branch.
 
 Tasks:
 
-- [ ] Implement branch name generator.
-- [ ] Implement worktree path generator.
-- [ ] Add daemon git helper for `fetch`, `worktree add`, `status`, `diff`, `commit`, and `push`.
-- [ ] On job start, create branch from default branch.
-- [ ] Store branch name and worktree path on conversation.
-- [ ] Reject running if worktree path is outside daemon workspace root.
-- [ ] Add cleanup command but do not auto-delete worktrees in MVP.
+- [x] Implement branch name generator.
+- [x] Implement worktree path generator.
+- [x] Add daemon git helper for `fetch`, `worktree add`, `status`, `diff`, `commit`, and `push`.
+- [x] On job start, create branch from default branch.
+- [x] Store branch name and worktree path on conversation.
+- [x] Reject running if worktree path is outside daemon workspace root.
+- [x] Add cleanup command but do not auto-delete worktrees in MVP.
 
 Acceptance:
 
@@ -836,14 +836,14 @@ Outcome: a full conversation run works with mock runtime and browser logs update
 
 Tasks:
 
-- [ ] Implement runtime adapter interface.
-- [ ] Implement mock runtime adapter.
-- [ ] Mock runtime writes `ABITAT_RUN_LOG.md` in the worktree.
-- [ ] Daemon streams status/stdout/stderr events to backend.
-- [ ] Backend persists `RunEvent` records in sequence.
-- [ ] Add SSE endpoint for conversation events.
-- [ ] Conversation page subscribes to events.
-- [ ] Show event timeline and current status.
+- [x] Implement runtime adapter interface.
+- [x] Implement mock runtime adapter.
+- [x] Mock runtime writes `ABITAT_RUN_LOG.md` in the worktree.
+- [x] Daemon streams status/stdout/stderr events to backend.
+- [x] Backend persists `RunEvent` records in sequence.
+- [x] Add SSE endpoint for conversation events.
+- [x] Conversation page subscribes to events.
+- [x] Show event timeline and current status.
 
 Acceptance:
 
