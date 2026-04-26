@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import { homedir } from "node:os";
-import { runtimeSchema } from "@abitat/shared";
+import { runtimeSchema, type DaemonJob } from "@abitat/shared";
 
 import { defaultConfigPath, loadHostConfig, saveHostConfig } from "../config/host-config.js";
 import { collectChangeset } from "../git/changeset.js";
 import { resolveRepoPath } from "../git/paths.js";
+import { commitAndPushWorktree, tryCreatePullRequest } from "../git/publish.js";
 import { cleanupConversationWorktree, setupConversationWorktree } from "../git/worktree.js";
 import { createMockRuntimeAdapter } from "../runtime/mock.js";
 import type { RuntimeEvent } from "../runtime/adapter.js";
@@ -124,6 +125,11 @@ async function pollDaemonJob(client: HostApiClient, machineId: string, workspace
 
   console.log(`job=${job.id} type=${job.type}`);
 
+  if (job.type === "commit_and_push") {
+    await commitAndPushConversation(client, job);
+    return;
+  }
+
   if (job.type !== "start_conversation") {
     await client.ackJob(job.id, { status: "running" });
     return;
@@ -166,6 +172,37 @@ async function pollDaemonJob(client: HostApiClient, machineId: string, workspace
     await client.ackJob(job.id, {
       status: "failed",
       errorMessage: error instanceof Error ? error.message : "worktree setup failed"
+    });
+  }
+}
+
+async function commitAndPushConversation(
+  client: HostApiClient,
+  job: Extract<DaemonJob, { type: "commit_and_push" }>
+) {
+  await client.ackJob(job.id, { status: "running" });
+
+  try {
+    const result = await commitAndPushWorktree({
+      worktreePath: job.payload.worktreePath,
+      branchName: job.payload.branchName,
+      commitMessage: job.payload.commitMessage
+    });
+    const prResult = await tryCreatePullRequest({
+      worktreePath: job.payload.worktreePath,
+      branchName: job.payload.branchName
+    });
+
+    await client.ackJob(job.id, {
+      status: "completed",
+      commitSha: result.commitSha,
+      prUrl: "prUrl" in prResult ? prResult.prUrl : undefined,
+      errorMessage: "errorMessage" in prResult ? prResult.errorMessage : undefined
+    });
+  } catch (error) {
+    await client.ackJob(job.id, {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "commit and push failed"
     });
   }
 }

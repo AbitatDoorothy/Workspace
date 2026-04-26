@@ -49,7 +49,10 @@ function createPrismaConversationDb(db: PrismaClient) {
       async update(args: {
         where: { id: string };
         data: Partial<
-          Pick<ConversationRecord, "branchName" | "errorMessage" | "status" | "worktreePath">
+          Pick<
+            ConversationRecord,
+            "branchName" | "commitSha" | "errorMessage" | "prUrl" | "status" | "worktreePath"
+          >
         >;
       }) {
         return normalizeConversation(
@@ -66,10 +69,17 @@ function createPrismaConversationDb(db: PrismaClient) {
           await db.daemonJob.create({ data: args.data as Prisma.DaemonJobUncheckedCreateInput })
         );
       },
-      async findFirst(args: { where: { status: { in: string[] }; type?: string } }) {
+      async findFirst(args: {
+        where: { status: { in: string[] }; type?: string | { in: string[] } };
+      }) {
         const job = await db.daemonJob.findFirst({
           where: {
-            type: args.where.type,
+            type:
+              typeof args.where.type === "string"
+                ? args.where.type
+                : args.where.type
+                  ? { in: args.where.type.in }
+                  : undefined,
             status: { in: args.where.status.in }
           },
           orderBy: { createdAt: "asc" }
@@ -77,11 +87,18 @@ function createPrismaConversationDb(db: PrismaClient) {
 
         return job ? normalizeDaemonJob(job) : null;
       },
-      async findMany(args?: { where?: { status?: { in: string[] }; type?: string } }) {
+      async findMany(args?: {
+        where?: { status?: { in: string[] }; type?: string | { in: string[] } };
+      }) {
         const jobs = await db.daemonJob.findMany({
           where: args?.where
             ? {
-                type: args.where.type,
+                type:
+                  typeof args.where.type === "string"
+                    ? args.where.type
+                    : args.where.type
+                      ? { in: args.where.type.in }
+                      : undefined,
                 status: args.where.status ? { in: args.where.status.in } : undefined
               }
             : undefined,
@@ -154,6 +171,8 @@ function normalizeConversation(conversation: {
   prompt: string;
   branchName: string | null;
   worktreePath: string | null;
+  commitSha: string | null;
+  prUrl: string | null;
   errorMessage: string | null;
   createdAt: Date;
 }): ConversationRecord {
@@ -168,6 +187,8 @@ function normalizeConversation(conversation: {
     prompt: conversation.prompt,
     branchName: conversation.branchName,
     worktreePath: conversation.worktreePath,
+    commitSha: conversation.commitSha,
+    prUrl: conversation.prUrl,
     errorMessage: conversation.errorMessage,
     createdAt: conversation.createdAt
   };
@@ -240,7 +261,10 @@ function createDemoConversationDb() {
       }: {
         where: { id: string };
         data: Partial<
-          Pick<ConversationRecord, "branchName" | "errorMessage" | "status" | "worktreePath">
+          Pick<
+            ConversationRecord,
+            "branchName" | "commitSha" | "errorMessage" | "prUrl" | "status" | "worktreePath"
+          >
         >;
       }) => {
         const current = store.conversations.get(where.id);
@@ -259,15 +283,29 @@ function createDemoConversationDb() {
         store.jobs.set(data.id, data);
         return data;
       },
-      findFirst: async ({ where }: { where: { status: { in: string[] }; type?: string } }) =>
+      findFirst: async ({
+        where
+      }: {
+        where: { status: { in: string[] }; type?: string | { in: string[] } };
+      }) =>
         Array.from(store.jobs.values()).find(
-          (job) => where.status.in.includes(job.status) && (!where.type || job.type === where.type)
+          (job) =>
+            where.status.in.includes(job.status) &&
+            (!where.type ||
+              (typeof where.type === "string"
+                ? job.type === where.type
+                : where.type.in.includes(job.type)))
         ) ?? null,
-      findMany: async ({ where }: { where?: { status?: { in: string[] }; type?: string } } = {}) =>
+      findMany: async ({
+        where
+      }: { where?: { status?: { in: string[] }; type?: string | { in: string[] } } } = {}) =>
         Array.from(store.jobs.values()).filter(
           (job) =>
             (!where?.status || where.status.in.includes(job.status)) &&
-            (!where?.type || job.type === where.type)
+            (!where?.type ||
+              (typeof where.type === "string"
+                ? job.type === where.type
+                : where.type.in.includes(job.type)))
         ),
       update: async ({
         where,

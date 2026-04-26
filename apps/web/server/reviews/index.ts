@@ -121,6 +121,8 @@ function normalizeConversation(conversation: {
   summary: string | null;
   approvedByUserId: string | null;
   approvedAt: Date | null;
+  branchName: string | null;
+  worktreePath: string | null;
 }): ConversationReviewRecord {
   return {
     id: conversation.id,
@@ -129,7 +131,9 @@ function normalizeConversation(conversation: {
     status: conversation.status,
     summary: conversation.summary,
     approvedByUserId: conversation.approvedByUserId,
-    approvedAt: conversation.approvedAt
+    approvedAt: conversation.approvedAt,
+    branchName: conversation.branchName,
+    worktreePath: conversation.worktreePath
   };
 }
 
@@ -182,7 +186,9 @@ function createDemoReviewDb() {
           status: "running",
           summary: null,
           approvedByUserId: null,
-          approvedAt: null
+          approvedAt: null,
+          branchName: null,
+          worktreePath: null
         },
       update: async ({
         where,
@@ -200,7 +206,9 @@ function createDemoReviewDb() {
           status: "running",
           summary: null,
           approvedByUserId: null,
-          approvedAt: null
+          approvedAt: null,
+          branchName: null,
+          worktreePath: null
         };
         const next = { ...current, ...data };
         store.conversations.set(where.id, next);

@@ -10,6 +10,8 @@ interface TestConversation {
   summary: string | null;
   approvedByUserId: string | null;
   approvedAt: Date | null;
+  branchName: string | null;
+  worktreePath: string | null;
 }
 
 interface TestChangeSet {
@@ -37,7 +39,9 @@ function createReviewDb() {
     status: "running",
     summary: null,
     approvedByUserId: null,
-    approvedAt: null
+    approvedAt: null,
+    branchName: "abitat/feature/abcdef12-add-a-useful-page",
+    worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo"
   };
   const changeSets = new Map<string, TestChangeSet>();
   const jobs = new Map<string, TestDaemonJob>();
@@ -112,7 +116,11 @@ describe("review service", () => {
         conversationId: "conversation_demo",
         type: "commit_and_push",
         status: "queued",
-        payloadJson: { commitMessage: "feat: add mock run log" }
+        payloadJson: {
+          commitMessage: "feat: add mock run log",
+          branchName: "abitat/feature/abcdef12-add-a-useful-page",
+          worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo"
+        }
       }
     ]);
     await expect(

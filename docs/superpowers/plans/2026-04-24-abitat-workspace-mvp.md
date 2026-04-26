@@ -880,14 +880,14 @@ Outcome: approved changes are committed and pushed to GitHub.
 
 Tasks:
 
-- [ ] Implement daemon commit operation.
-- [ ] Implement daemon push operation.
-- [ ] Store commit SHA.
-- [ ] Update conversation status to `pushed`.
-- [ ] If GitHub CLI or API credentials exist, create PR.
-- [ ] Store PR URL.
-- [ ] UI shows commit SHA and PR URL.
-- [ ] Add failure handling for push rejection or missing credentials.
+- [x] Implement daemon commit operation.
+- [x] Implement daemon push operation.
+- [x] Store commit SHA.
+- [x] Update conversation status to `pushed`.
+- [x] If GitHub CLI or API credentials exist, create PR.
+- [x] Store PR URL.
+- [x] UI shows commit SHA and PR URL.
+- [x] Add failure handling for push rejection or missing credentials.
 
 Acceptance:
 

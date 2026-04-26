@@ -125,7 +125,9 @@ export const daemonJobAckRequestSchema = z.object({
   status: z.enum(["running", "completed", "failed"]),
   errorMessage: z.string().min(1).optional(),
   branchName: z.string().min(1).optional(),
-  worktreePath: z.string().min(1).optional()
+  worktreePath: z.string().min(1).optional(),
+  commitSha: z.string().min(1).optional(),
+  prUrl: z.string().url().optional()
 });
 
 const daemonJobBaseSchema = z.object({
@@ -171,7 +173,9 @@ export const commitAndPushJobSchema = daemonJobBaseSchema.extend({
   type: z.literal("commit_and_push"),
   conversationId: idSchema,
   payload: z.object({
-    commitMessage: z.string().trim().min(1)
+    commitMessage: z.string().trim().min(1),
+    branchName: z.string().min(1),
+    worktreePath: z.string().min(1)
   })
 });
 

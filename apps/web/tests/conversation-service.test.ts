@@ -34,6 +34,9 @@ interface TestConversation {
   prompt: string;
   branchName?: string | null;
   worktreePath?: string | null;
+  commitSha?: string | null;
+  prUrl?: string | null;
+  errorMessage?: string | null;
 }
 
 interface TestDaemonJob {
@@ -50,7 +53,7 @@ interface TestDaemonJob {
 type JobFindFirstArgs = {
   where: {
     status: { in: string[] };
-    type?: string;
+    type?: string | { in: string[] };
   };
 };
 
@@ -117,7 +120,12 @@ function createConversationDb(existingJob?: TestDaemonJob) {
       },
       findFirst: async ({ where }: JobFindFirstArgs) =>
         Array.from(jobs.values()).find(
-          (job) => where.status.in.includes(job.status) && (!where.type || job.type === where.type)
+          (job) =>
+            where.status.in.includes(job.status) &&
+            (!where.type ||
+              (typeof where.type === "string"
+                ? job.type === where.type
+                : where.type.in.includes(job.type)))
         ) ?? null,
       findMany: async () => Array.from(jobs.values()),
       update: async ({ where, data }: { where: { id: string }; data: Partial<TestDaemonJob> }) => {
@@ -246,6 +254,56 @@ describe("conversation queue service", () => {
     expect(await service.pollNextJob("machine_demo")).toMatchObject({
       type: "start_conversation",
       conversationId: conversation.id
+    });
+  });
+
+  it("polls and acknowledges commit_and_push jobs with pushed metadata", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Add a useful page."
+    });
+    const jobs = await db.daemonJob.findMany();
+    await db.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        status: "approved",
+        branchName: "abitat/feature/abcdef12-add-a-useful-page",
+        worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo"
+      }
+    });
+    await db.daemonJob.update({
+      where: { id: jobs[0]?.id ?? "" },
+      data: {
+        type: "commit_and_push",
+        status: "queued",
+        payloadJson: {
+          commitMessage: "feat: add mock run log",
+          branchName: "abitat/feature/abcdef12-add-a-useful-page",
+          worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo"
+        }
+      }
+    });
+
+    const job = await service.pollNextJob("machine_demo");
+    expect(job?.type).toBe("commit_and_push");
+    expect((await db.conversation.findMany())[0].status).toBe("committing");
+
+    await service.ackJob(job?.id ?? "", "completed", {
+      commitSha: "abc123",
+      prUrl: "https://github.com/AbitatDoorothy/Workspace/pull/1",
+      errorMessage: "gh is not authenticated"
+    });
+    expect((await db.conversation.findMany())[0]).toMatchObject({
+      status: "pushed",
+      commitSha: "abc123",
+      prUrl: "https://github.com/AbitatDoorothy/Workspace/pull/1",
+      errorMessage: "gh is not authenticated"
     });
   });
 });

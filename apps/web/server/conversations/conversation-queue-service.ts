@@ -24,6 +24,8 @@ export interface ConversationRecord extends ConversationCreateInput {
   status: ConversationStatus;
   branchName?: string | null;
   worktreePath?: string | null;
+  commitSha?: string | null;
+  prUrl?: string | null;
   errorMessage?: string | null;
   createdAt?: Date;
 }
@@ -71,17 +73,20 @@ interface ConversationDb {
     update(args: {
       where: { id: string };
       data: Partial<
-        Pick<ConversationRecord, "branchName" | "errorMessage" | "status" | "worktreePath">
+        Pick<
+          ConversationRecord,
+          "branchName" | "commitSha" | "errorMessage" | "prUrl" | "status" | "worktreePath"
+        >
       >;
     }): Promise<ConversationRecord>;
   };
   daemonJob: {
     create(args: { data: DaemonJobRecord }): Promise<DaemonJobRecord>;
     findFirst(args: {
-      where: { status: { in: string[] }; type?: string };
+      where: { status: { in: string[] }; type?: string | { in: string[] } };
     }): Promise<DaemonJobRecord | null>;
     findMany(args?: {
-      where?: { status?: { in: string[] }; type?: string };
+      where?: { status?: { in: string[] }; type?: string | { in: string[] } };
     }): Promise<DaemonJobRecord[]>;
     update(args: {
       where: { id: string };
@@ -167,7 +172,7 @@ export function createConversationQueueService(db: ConversationDb) {
     async pollNextJob(machineId: string): Promise<DaemonJob | null> {
       const job = await db.daemonJob.findFirst({
         where: {
-          type: "start_conversation",
+          type: { in: ["start_conversation", "commit_and_push"] },
           status: { in: ["queued"] }
         }
       });
@@ -184,7 +189,7 @@ export function createConversationQueueService(db: ConversationDb) {
       if (updated.conversationId) {
         await db.conversation.update({
           where: { id: updated.conversationId },
-          data: { status: "preparing" }
+          data: { status: jobTypeToPreparingStatus(updated.type) }
         });
       }
 
@@ -194,7 +199,13 @@ export function createConversationQueueService(db: ConversationDb) {
     async ackJob(
       jobId: string,
       status: "running" | "completed" | "failed",
-      details: { branchName?: string; errorMessage?: string; worktreePath?: string } = {}
+      details: {
+        branchName?: string;
+        commitSha?: string;
+        errorMessage?: string;
+        prUrl?: string;
+        worktreePath?: string;
+      } = {}
     ) {
       const job = await db.daemonJob.update({
         where: { id: jobId },
@@ -205,14 +216,40 @@ export function createConversationQueueService(db: ConversationDb) {
       });
 
       if (job.conversationId) {
+        const conversationData: Partial<
+          Pick<
+            ConversationRecord,
+            "branchName" | "commitSha" | "errorMessage" | "prUrl" | "status" | "worktreePath"
+          >
+        > = {
+          status: statusToConversationStatus(status, job.type)
+        };
+
+        if (details.branchName !== undefined) {
+          conversationData.branchName = details.branchName;
+        }
+
+        if (details.worktreePath !== undefined) {
+          conversationData.worktreePath = details.worktreePath;
+        }
+
+        if (details.commitSha !== undefined) {
+          conversationData.commitSha = details.commitSha;
+        }
+
+        if (details.prUrl !== undefined) {
+          conversationData.prUrl = details.prUrl;
+        }
+
+        if (status === "failed") {
+          conversationData.errorMessage = details.errorMessage ?? "Daemon job failed";
+        } else if (details.errorMessage !== undefined) {
+          conversationData.errorMessage = details.errorMessage;
+        }
+
         await db.conversation.update({
           where: { id: job.conversationId },
-          data: {
-            branchName: details.branchName,
-            status: statusToConversationStatus(status),
-            worktreePath: details.worktreePath,
-            errorMessage: status === "failed" ? (details.errorMessage ?? "Daemon job failed") : null
-          }
+          data: conversationData
         });
       }
 
@@ -292,11 +329,26 @@ function toDaemonJob(job: DaemonJobRecord) {
 }
 
 function statusToConversationStatus(
-  status: "running" | "completed" | "failed"
+  status: "running" | "completed" | "failed",
+  jobType: string
 ): ConversationStatus {
+  if (jobType === "commit_and_push") {
+    if (status === "completed") {
+      return "pushed";
+    }
+
+    if (status === "running") {
+      return "committing";
+    }
+  }
+
   if (status === "completed") {
     return "awaiting_approval";
   }
 
   return status;
+}
+
+function jobTypeToPreparingStatus(jobType: string): ConversationStatus {
+  return jobType === "commit_and_push" ? "committing" : "preparing";
 }

@@ -11,6 +11,8 @@ export interface ConversationReviewRecord {
   summary: string | null;
   approvedByUserId: string | null;
   approvedAt: Date | null;
+  branchName: string | null;
+  worktreePath: string | null;
 }
 
 export interface ChangeSetRecord {
@@ -104,6 +106,10 @@ export function createReviewService(db: ReviewDb) {
       const parsed = approveConversationSchema.parse(input);
       const conversation = await requireConversation(db, conversationId);
 
+      if (!conversation.branchName || !conversation.worktreePath) {
+        throw new Error("Conversation is missing git worktree metadata");
+      }
+
       await db.conversation.update({
         where: { id: conversationId },
         data: {
@@ -121,7 +127,9 @@ export function createReviewService(db: ReviewDb) {
           type: "commit_and_push",
           status: "queued",
           payloadJson: {
-            commitMessage: parsed.commitMessage
+            commitMessage: parsed.commitMessage,
+            branchName: conversation.branchName,
+            worktreePath: conversation.worktreePath
           }
         }
       });

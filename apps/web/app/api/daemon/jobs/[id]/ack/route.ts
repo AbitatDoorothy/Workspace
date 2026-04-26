@@ -12,7 +12,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     await conversationQueueService.ackJob(id, input.status, {
       branchName: input.branchName,
+      commitSha: input.commitSha,
       errorMessage: input.errorMessage,
+      prUrl: input.prUrl,
       worktreePath: input.worktreePath
     });
 

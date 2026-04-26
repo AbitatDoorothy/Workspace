@@ -115,6 +115,21 @@ export default async function ConversationsPage() {
                       </form>
                     </div>
                   ) : null}
+                  {conversation.commitSha || conversation.prUrl || conversation.errorMessage ? (
+                    <div className="push-result">
+                      {conversation.commitSha ? (
+                        <p>
+                          Commit <code>{conversation.commitSha}</code>
+                        </p>
+                      ) : null}
+                      {conversation.prUrl ? (
+                        <a href={conversation.prUrl} rel="noreferrer" target="_blank">
+                          Open pull request
+                        </a>
+                      ) : null}
+                      {conversation.errorMessage ? <p>{conversation.errorMessage}</p> : null}
+                    </div>
+                  ) : null}
                 </div>
                 <strong className={`status-label status-label-${conversation.status}`}>
                   {conversation.status}

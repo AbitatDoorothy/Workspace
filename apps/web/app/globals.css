@@ -240,6 +240,30 @@ h1 {
   padding: 0 14px;
 }
 
+.push-result {
+  border-left: 3px solid #2bb673;
+  color: #596875;
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  padding-left: 10px;
+}
+
+.push-result p {
+  margin: 0;
+}
+
+.push-result code {
+  color: #172026;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.push-result a {
+  color: #214760;
+  font-weight: 700;
+}
+
 .status-label {
   border: 1px solid #abc2d6;
   border-radius: 999px;
