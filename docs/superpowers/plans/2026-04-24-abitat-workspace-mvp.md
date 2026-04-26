@@ -858,14 +858,14 @@ Outcome: user can review changed files and approve commit/push.
 
 Tasks:
 
-- [ ] After runtime exits, daemon collects `git status --short`.
-- [ ] Daemon collects `git diff`.
-- [ ] Backend stores `ChangeSet`.
-- [ ] Conversation status becomes `awaiting_approval`.
-- [ ] UI shows changed files and diff.
-- [ ] UI shows editable commit message.
-- [ ] Approval endpoint records approving user.
-- [ ] Approval creates daemon job `commit_and_push`.
+- [x] After runtime exits, daemon collects `git status --short`.
+- [x] Daemon collects `git diff`.
+- [x] Backend stores `ChangeSet`.
+- [x] Conversation status becomes `awaiting_approval`.
+- [x] UI shows changed files and diff.
+- [x] UI shows editable commit message.
+- [x] Approval endpoint records approving user.
+- [x] Approval creates daemon job `commit_and_push`.
 
 Acceptance:
 
@@ -1208,4 +1208,3 @@ Then:
 > Build Phase 6 through Phase 10. Implement conversation creation, daemon job polling, worktree isolation, mock runtime, realtime events, diff review, approval, commit, push, and optional PR creation.
 
 This sequencing keeps each handoff testable and prevents the project from turning into a large half-built platform before the core loop works.
-

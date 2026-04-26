@@ -172,6 +172,7 @@ model Conversation {
   workspaceId      String
   createdByUserId  String
   approvedByUserId String?
+  approvedAt       DateTime?
   type             ConversationType
   status           ConversationStatus @default(draft)
   prompt           String

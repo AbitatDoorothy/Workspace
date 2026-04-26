@@ -22,7 +22,9 @@ function createPrismaReviewDb(db: PrismaClient) {
       },
       async update(args: {
         where: { id: string };
-        data: Partial<Pick<ConversationReviewRecord, "approvedByUserId" | "status" | "summary">>;
+        data: Partial<
+          Pick<ConversationReviewRecord, "approvedAt" | "approvedByUserId" | "status" | "summary">
+        >;
       }) {
         return normalizeConversation(
           await db.conversation.update({
@@ -118,6 +120,7 @@ function normalizeConversation(conversation: {
   status: string;
   summary: string | null;
   approvedByUserId: string | null;
+  approvedAt: Date | null;
 }): ConversationReviewRecord {
   return {
     id: conversation.id,
@@ -125,7 +128,8 @@ function normalizeConversation(conversation: {
     projectId: conversation.projectId,
     status: conversation.status,
     summary: conversation.summary,
-    approvedByUserId: conversation.approvedByUserId
+    approvedByUserId: conversation.approvedByUserId,
+    approvedAt: conversation.approvedAt
   };
 }
 
@@ -177,14 +181,17 @@ function createDemoReviewDb() {
           projectId: "project_demo",
           status: "running",
           summary: null,
-          approvedByUserId: null
+          approvedByUserId: null,
+          approvedAt: null
         },
       update: async ({
         where,
         data
       }: {
         where: { id: string };
-        data: Partial<Pick<ConversationReviewRecord, "approvedByUserId" | "status" | "summary">>;
+        data: Partial<
+          Pick<ConversationReviewRecord, "approvedAt" | "approvedByUserId" | "status" | "summary">
+        >;
       }) => {
         const current = store.conversations.get(where.id) ?? {
           id: where.id,
@@ -192,7 +199,8 @@ function createDemoReviewDb() {
           projectId: "project_demo",
           status: "running",
           summary: null,
-          approvedByUserId: null
+          approvedByUserId: null,
+          approvedAt: null
         };
         const next = { ...current, ...data };
         store.conversations.set(where.id, next);

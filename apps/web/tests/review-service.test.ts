@@ -9,6 +9,7 @@ interface TestConversation {
   status: string;
   summary: string | null;
   approvedByUserId: string | null;
+  approvedAt: Date | null;
 }
 
 interface TestChangeSet {
@@ -35,7 +36,8 @@ function createReviewDb() {
     projectId: "project_demo",
     status: "running",
     summary: null,
-    approvedByUserId: null
+    approvedByUserId: null,
+    approvedAt: null
   };
   const changeSets = new Map<string, TestChangeSet>();
   const jobs = new Map<string, TestDaemonJob>();
@@ -113,5 +115,11 @@ describe("review service", () => {
         payloadJson: { commitMessage: "feat: add mock run log" }
       }
     ]);
+    await expect(
+      db.conversation.findUnique({ where: { id: "conversation_demo" } })
+    ).resolves.toMatchObject({
+      approvedByUserId: "user_demo",
+      approvedAt: expect.any(Date)
+    });
   });
 });

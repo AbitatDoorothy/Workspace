@@ -10,6 +10,7 @@ export interface ConversationReviewRecord {
   status: string;
   summary: string | null;
   approvedByUserId: string | null;
+  approvedAt: Date | null;
 }
 
 export interface ChangeSetRecord {
@@ -34,7 +35,9 @@ interface ReviewDb {
     findUnique(args: { where: { id: string } }): Promise<ConversationReviewRecord | null>;
     update(args: {
       where: { id: string };
-      data: Partial<Pick<ConversationReviewRecord, "approvedByUserId" | "status" | "summary">>;
+      data: Partial<
+        Pick<ConversationReviewRecord, "approvedAt" | "approvedByUserId" | "status" | "summary">
+      >;
     }): Promise<ConversationReviewRecord>;
   };
   changeSet: {
@@ -105,6 +108,7 @@ export function createReviewService(db: ReviewDb) {
         where: { id: conversationId },
         data: {
           approvedByUserId: parsed.approvedByUserId,
+          approvedAt: new Date(),
           status: "approved"
         }
       });
