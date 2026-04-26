@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { conversationQueueService } from "../../../server/conversations";
+import { runEventService } from "../../../server/run-events";
 
 const conversationRequestSchema = conversationCreateRequestSchema.extend({
   workspaceId: z.string().min(1).default("workspace_demo"),
@@ -16,6 +17,10 @@ export async function POST(request: Request) {
     const conversation = await conversationQueueService.createConversation(
       conversationRequestSchema.parse(body)
     );
+    await runEventService.appendAuditEvent(conversation.id, {
+      content: "Conversation started",
+      metadata: { action: "start", userId: conversation.createdByUserId }
+    });
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
       return NextResponse.redirect(new URL("/conversations", request.url), 303);

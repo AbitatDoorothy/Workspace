@@ -67,6 +67,7 @@ async function startDaemon(args: string[]) {
   const config = await readConfigIfAvailable(configPath);
   const connection = resolveDaemonConnection({ config, env: process.env });
   const client = new HostApiClient(connection.apiUrl, connection.hostToken);
+  const activeState: { conversationId?: string } = {};
 
   console.log("Abitat Workspace host daemon");
   console.log(`mode=${runtime}`);
@@ -87,11 +88,12 @@ async function startDaemon(args: string[]) {
     if (connection.paired) {
       await client.heartbeat({
         machineId: connection.machineId,
-        status: "online"
+        status: "online",
+        activeConversationId: activeState.conversationId
       });
     }
 
-    await pollDaemonJob(client, connection.machineId, workspaceRoot);
+    await pollDaemonJob(client, connection.machineId, workspaceRoot, activeState);
   };
 
   await beat();
@@ -116,7 +118,12 @@ async function uploadToolScan(client: HostApiClient, machineId: string) {
   console.log(`tools=${tools.filter((tool) => tool.installed).length}/${tools.length}`);
 }
 
-async function pollDaemonJob(client: HostApiClient, machineId: string, workspaceRoot: string) {
+async function pollDaemonJob(
+  client: HostApiClient,
+  machineId: string,
+  workspaceRoot: string,
+  activeState: { conversationId?: string }
+) {
   const { job } = await client.pollJob(machineId);
 
   if (!job) {
@@ -125,8 +132,16 @@ async function pollDaemonJob(client: HostApiClient, machineId: string, workspace
 
   console.log(`job=${job.id} type=${job.type}`);
 
+  if ("conversationId" in job) {
+    activeState.conversationId = job.conversationId;
+  }
+
   if (job.type === "commit_and_push") {
-    await commitAndPushConversation(client, job);
+    try {
+      await commitAndPushConversation(client, job);
+    } finally {
+      activeState.conversationId = undefined;
+    }
     return;
   }
 
@@ -173,6 +188,8 @@ async function pollDaemonJob(client: HostApiClient, machineId: string, workspace
       status: "failed",
       errorMessage: error instanceof Error ? error.message : "worktree setup failed"
     });
+  } finally {
+    activeState.conversationId = undefined;
   }
 }
 

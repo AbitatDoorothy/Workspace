@@ -923,14 +923,14 @@ Outcome: product is stable enough for a private demo.
 
 Tasks:
 
-- [ ] Add cancellation support.
-- [ ] Add daemon restart recovery.
-- [ ] Mark stale running conversations as failed or recoverable after daemon reconnect.
-- [ ] Add basic role checks.
-- [ ] Add audit events for start, approval, commit, push, and failure.
-- [ ] Add error boundaries in UI.
-- [ ] Add runbook for local setup.
-- [ ] Add runbook for common failures.
+- [x] Add cancellation support.
+- [x] Add daemon restart recovery.
+- [x] Mark stale running conversations as failed or recoverable after daemon reconnect.
+- [x] Add basic role checks.
+- [x] Add audit events for start, approval, commit, push, and failure.
+- [x] Add error boundaries in UI.
+- [x] Add runbook for local setup.
+- [x] Add runbook for common failures.
 
 Acceptance:
 

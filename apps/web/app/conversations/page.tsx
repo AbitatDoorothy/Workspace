@@ -130,6 +130,16 @@ export default async function ConversationsPage() {
                       {conversation.errorMessage ? <p>{conversation.errorMessage}</p> : null}
                     </div>
                   ) : null}
+                  {!isTerminalStatus(conversation.status) ? (
+                    <form
+                      action={`/api/conversations/${conversation.id}/cancel`}
+                      className="cancel-form"
+                      method="post"
+                    >
+                      <input type="hidden" name="userId" value="user_demo" />
+                      <button type="submit">Cancel</button>
+                    </form>
+                  ) : null}
                 </div>
                 <strong className={`status-label status-label-${conversation.status}`}>
                   {conversation.status}
@@ -149,6 +159,10 @@ export default async function ConversationsPage() {
       </section>
     </main>
   );
+}
+
+function isTerminalStatus(status: string) {
+  return ["awaiting_approval", "cancelled", "failed", "pushed"].includes(status);
 }
 
 async function getAgents() {

@@ -3,10 +3,13 @@ import { randomBytes } from "node:crypto";
 import { approvalRequestSchema } from "@abitat/shared";
 import { z } from "zod";
 
+import { assertWorkspaceMember } from "../auth/role-checks";
+
 export interface ConversationReviewRecord {
   id: string;
   workspaceId: string;
   projectId: string;
+  createdByUserId: string;
   status: string;
   summary: string | null;
   approvedByUserId: string | null;
@@ -105,6 +108,10 @@ export function createReviewService(db: ReviewDb) {
     ) {
       const parsed = approveConversationSchema.parse(input);
       const conversation = await requireConversation(db, conversationId);
+      assertWorkspaceMember({
+        workspaceId: conversation.workspaceId,
+        userId: parsed.approvedByUserId
+      });
 
       if (!conversation.branchName || !conversation.worktreePath) {
         throw new Error("Conversation is missing git worktree metadata");

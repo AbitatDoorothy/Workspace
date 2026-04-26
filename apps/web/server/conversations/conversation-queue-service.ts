@@ -10,6 +10,8 @@ import {
 } from "@abitat/shared";
 import { z } from "zod";
 
+import { assertWorkspaceMember } from "../auth/role-checks";
+
 export interface ConversationCreateInput {
   workspaceId: string;
   projectId: string;
@@ -58,6 +60,7 @@ export interface DaemonJobRecord {
   status: string;
   payloadJson: unknown;
   errorMessage?: string | null;
+  updatedAt?: Date;
 }
 
 interface ConversationDb {
@@ -69,6 +72,7 @@ interface ConversationDb {
   };
   conversation: {
     create(args: { data: ConversationRecord }): Promise<ConversationRecord>;
+    findUnique(args: { where: { id: string } }): Promise<ConversationRecord | null>;
     findMany(args?: { where?: { workspaceId?: string } }): Promise<ConversationRecord[]>;
     update(args: {
       where: { id: string };
@@ -83,14 +87,18 @@ interface ConversationDb {
   daemonJob: {
     create(args: { data: DaemonJobRecord }): Promise<DaemonJobRecord>;
     findFirst(args: {
-      where: { status: { in: string[] }; type?: string | { in: string[] } };
+      where: { machineId?: string; status: { in: string[] }; type?: string | { in: string[] } };
     }): Promise<DaemonJobRecord | null>;
     findMany(args?: {
-      where?: { status?: { in: string[] }; type?: string | { in: string[] } };
+      where?: {
+        machineId?: string;
+        status?: { in: string[] };
+        type?: string | { in: string[] };
+      };
     }): Promise<DaemonJobRecord[]>;
     update(args: {
       where: { id: string };
-      data: Partial<Pick<DaemonJobRecord, "machineId" | "status" | "errorMessage">>;
+      data: Partial<Pick<DaemonJobRecord, "errorMessage" | "machineId" | "status" | "updatedAt">>;
     }): Promise<DaemonJobRecord>;
   };
 }
@@ -127,6 +135,11 @@ export function createConversationQueueService(db: ConversationDb) {
       if (activeJob) {
         throw new Error("An active daemon job is already running");
       }
+
+      assertWorkspaceMember({
+        workspaceId: parsed.workspaceId,
+        userId: parsed.createdByUserId
+      });
 
       const conversation: ConversationRecord = {
         id: `conversation_${randomBytes(8).toString("hex")}`,
@@ -254,6 +267,93 @@ export function createConversationQueueService(db: ConversationDb) {
       }
 
       return job;
+    },
+
+    async cancelConversation(conversationId: string, input: { userId: string }) {
+      const conversation = await db.conversation.findUnique({ where: { id: conversationId } });
+
+      if (!conversation) {
+        throw new Error("Conversation not found");
+      }
+
+      const message = `Cancelled by ${input.userId}`;
+      await db.conversation.update({
+        where: { id: conversationId },
+        data: {
+          status: "cancelled",
+          errorMessage: message
+        }
+      });
+
+      const activeJobs = await db.daemonJob.findMany({
+        where: {
+          status: { in: ["queued", "preparing", "running"] }
+        }
+      });
+
+      await Promise.all(
+        activeJobs
+          .filter((job) => job.conversationId === conversationId)
+          .map((job) =>
+            db.daemonJob.update({
+              where: { id: job.id },
+              data: {
+                status: "cancelled",
+                errorMessage: message
+              }
+            })
+          )
+      );
+
+      return { ok: true as const, status: "cancelled" as const };
+    },
+
+    async recoverStaleJobs(
+      machineId: string,
+      options: { activeConversationId?: string; now?: Date; staleAfterMs?: number } = {}
+    ) {
+      const now = options.now ?? new Date();
+      const staleAfterMs = options.staleAfterMs ?? 5 * 60 * 1000;
+      const staleJobs = (
+        await db.daemonJob.findMany({
+          where: {
+            machineId,
+            status: { in: ["preparing", "running"] }
+          }
+        })
+      ).filter((job) => {
+        if (job.conversationId === options.activeConversationId) {
+          return false;
+        }
+
+        const updatedAt = job.updatedAt ?? now;
+        return now.getTime() - updatedAt.getTime() > staleAfterMs;
+      });
+      const message = "Daemon reconnected before this job completed";
+
+      await Promise.all(
+        staleJobs.map(async (job) => {
+          await db.daemonJob.update({
+            where: { id: job.id },
+            data: {
+              status: "failed",
+              errorMessage: message
+            }
+          });
+
+          if (job.conversationId) {
+            await db.conversation.update({
+              where: { id: job.conversationId },
+              data: {
+                status: "failed",
+                errorMessage: message
+              }
+            });
+          }
+        })
+      );
+
+      return staleJobs.length;
     }
   };
 }
@@ -290,6 +390,20 @@ export function createResilientConversationQueueService(
       return runWithFallback(
         () => primary.ackJob(jobId, status, details),
         () => fallback.ackJob(jobId, status, details)
+      );
+    },
+
+    cancelConversation(conversationId, input) {
+      return runWithFallback(
+        () => primary.cancelConversation(conversationId, input),
+        () => fallback.cancelConversation(conversationId, input)
+      );
+    },
+
+    recoverStaleJobs(machineId, options) {
+      return runWithFallback(
+        () => primary.recoverStaleJobs(machineId, options),
+        () => fallback.recoverStaleJobs(machineId, options)
       );
     }
   };

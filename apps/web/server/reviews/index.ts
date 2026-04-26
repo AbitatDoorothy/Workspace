@@ -117,6 +117,7 @@ function normalizeConversation(conversation: {
   id: string;
   workspaceId: string;
   projectId: string;
+  createdByUserId: string;
   status: string;
   summary: string | null;
   approvedByUserId: string | null;
@@ -128,6 +129,7 @@ function normalizeConversation(conversation: {
     id: conversation.id,
     workspaceId: conversation.workspaceId,
     projectId: conversation.projectId,
+    createdByUserId: conversation.createdByUserId,
     status: conversation.status,
     summary: conversation.summary,
     approvedByUserId: conversation.approvedByUserId,
@@ -183,6 +185,7 @@ function createDemoReviewDb() {
           id: where.id,
           workspaceId: "workspace_demo",
           projectId: "project_demo",
+          createdByUserId: "user_demo",
           status: "running",
           summary: null,
           approvedByUserId: null,
@@ -203,6 +206,7 @@ function createDemoReviewDb() {
           id: where.id,
           workspaceId: "workspace_demo",
           projectId: "project_demo",
+          createdByUserId: "user_demo",
           status: "running",
           summary: null,
           approvedByUserId: null,

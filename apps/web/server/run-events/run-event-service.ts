@@ -42,6 +42,21 @@ export function createRunEventService(db: RunEventDb) {
     async listEvents(conversationId: string) {
       const events = await db.runEvent.findMany({ where: { conversationId } });
       return events.sort((left, right) => left.sequence - right.sequence);
+    },
+
+    async appendAuditEvent(
+      conversationId: string,
+      input: { content: string; metadata?: Record<string, unknown> }
+    ) {
+      const events = await this.listEvents(conversationId);
+      const sequence = events.reduce((max, event) => Math.max(max, event.sequence), 0) + 1;
+
+      return this.ingestEvent(conversationId, {
+        sequence,
+        type: "approval",
+        content: input.content,
+        metadata: input.metadata ?? {}
+      });
     }
   };
 }
@@ -64,6 +79,13 @@ export function createResilientRunEventService(
       return runWithFallback(
         () => primary.listEvents(conversationId),
         () => fallback.listEvents(conversationId)
+      );
+    },
+
+    appendAuditEvent(conversationId, input) {
+      return runWithFallback(
+        () => primary.appendAuditEvent(conversationId, input),
+        () => fallback.appendAuditEvent(conversationId, input)
       );
     }
   };

@@ -38,6 +38,10 @@ function createPrismaConversationDb(db: PrismaClient) {
           })
         );
       },
+      async findUnique(args: { where: { id: string } }) {
+        const conversation = await db.conversation.findUnique({ where: args.where });
+        return conversation ? normalizeConversation(conversation) : null;
+      },
       async findMany(args?: { where?: { workspaceId?: string } }) {
         const conversations = await db.conversation.findMany({
           where: args?.where,
@@ -70,10 +74,11 @@ function createPrismaConversationDb(db: PrismaClient) {
         );
       },
       async findFirst(args: {
-        where: { status: { in: string[] }; type?: string | { in: string[] } };
+        where: { machineId?: string; status: { in: string[] }; type?: string | { in: string[] } };
       }) {
         const job = await db.daemonJob.findFirst({
           where: {
+            machineId: args.where.machineId,
             type:
               typeof args.where.type === "string"
                 ? args.where.type
@@ -88,11 +93,16 @@ function createPrismaConversationDb(db: PrismaClient) {
         return job ? normalizeDaemonJob(job) : null;
       },
       async findMany(args?: {
-        where?: { status?: { in: string[] }; type?: string | { in: string[] } };
+        where?: {
+          machineId?: string;
+          status?: { in: string[] };
+          type?: string | { in: string[] };
+        };
       }) {
         const jobs = await db.daemonJob.findMany({
           where: args?.where
             ? {
+                machineId: args.where.machineId,
                 type:
                   typeof args.where.type === "string"
                     ? args.where.type
@@ -109,7 +119,7 @@ function createPrismaConversationDb(db: PrismaClient) {
       },
       async update(args: {
         where: { id: string };
-        data: Partial<Pick<DaemonJobRecord, "machineId" | "status" | "errorMessage">>;
+        data: Partial<Pick<DaemonJobRecord, "errorMessage" | "machineId" | "status" | "updatedAt">>;
       }) {
         return normalizeDaemonJob(
           await db.daemonJob.update({
@@ -204,6 +214,7 @@ function normalizeDaemonJob(job: {
   status: string;
   payloadJson: Prisma.JsonValue;
   errorMessage: string | null;
+  updatedAt: Date;
 }): DaemonJobRecord {
   return {
     id: job.id,
@@ -214,7 +225,8 @@ function normalizeDaemonJob(job: {
     type: job.type,
     status: job.status,
     payloadJson: job.payloadJson,
-    errorMessage: job.errorMessage
+    errorMessage: job.errorMessage,
+    updatedAt: job.updatedAt
   };
 }
 
@@ -251,6 +263,8 @@ function createDemoConversationDb() {
         store.conversations.set(data.id, data);
         return data;
       },
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        store.conversations.get(where.id) ?? null,
       findMany: async ({ where }: { where?: { workspaceId?: string } } = {}) =>
         Array.from(store.conversations.values()).filter(
           (conversation) => !where?.workspaceId || conversation.workspaceId === where.workspaceId
@@ -286,11 +300,12 @@ function createDemoConversationDb() {
       findFirst: async ({
         where
       }: {
-        where: { status: { in: string[] }; type?: string | { in: string[] } };
+        where: { machineId?: string; status: { in: string[] }; type?: string | { in: string[] } };
       }) =>
         Array.from(store.jobs.values()).find(
           (job) =>
             where.status.in.includes(job.status) &&
+            (!where.machineId || job.machineId === where.machineId) &&
             (!where.type ||
               (typeof where.type === "string"
                 ? job.type === where.type
@@ -298,10 +313,17 @@ function createDemoConversationDb() {
         ) ?? null,
       findMany: async ({
         where
-      }: { where?: { status?: { in: string[] }; type?: string | { in: string[] } } } = {}) =>
+      }: {
+        where?: {
+          machineId?: string;
+          status?: { in: string[] };
+          type?: string | { in: string[] };
+        };
+      } = {}) =>
         Array.from(store.jobs.values()).filter(
           (job) =>
             (!where?.status || where.status.in.includes(job.status)) &&
+            (!where?.machineId || job.machineId === where.machineId) &&
             (!where?.type ||
               (typeof where.type === "string"
                 ? job.type === where.type
@@ -312,7 +334,7 @@ function createDemoConversationDb() {
         data
       }: {
         where: { id: string };
-        data: Partial<Pick<DaemonJobRecord, "machineId" | "status" | "errorMessage">>;
+        data: Partial<Pick<DaemonJobRecord, "errorMessage" | "machineId" | "status" | "updatedAt">>;
       }) => {
         const current = store.jobs.get(where.id);
 
@@ -320,7 +342,7 @@ function createDemoConversationDb() {
           throw new Error(`Missing job ${where.id}`);
         }
 
-        const next = { ...current, ...data };
+        const next = { ...current, ...data, updatedAt: data.updatedAt ?? new Date() };
         store.jobs.set(where.id, next);
         return next;
       }

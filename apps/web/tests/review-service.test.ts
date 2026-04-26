@@ -6,6 +6,7 @@ interface TestConversation {
   id: string;
   workspaceId: string;
   projectId: string;
+  createdByUserId: string;
   status: string;
   summary: string | null;
   approvedByUserId: string | null;
@@ -36,6 +37,7 @@ function createReviewDb() {
     id: "conversation_demo",
     workspaceId: "workspace_demo",
     projectId: "project_demo",
+    createdByUserId: "user_demo",
     status: "running",
     summary: null,
     approvedByUserId: null,

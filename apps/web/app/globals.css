@@ -270,6 +270,32 @@ h1 {
   font-weight: 700;
 }
 
+.cancel-form {
+  margin-top: 14px;
+}
+
+.cancel-form button {
+  background: #ffffff;
+  border: 1px solid #c95f5f;
+  border-radius: 6px;
+  color: #9b2727;
+  font: inherit;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.error-panel button {
+  background: #214760;
+  border: 0;
+  border-radius: 6px;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  min-height: 38px;
+  padding: 0 14px;
+}
+
 .status-label {
   border: 1px solid #abc2d6;
   border-radius: 999px;

@@ -6,7 +6,7 @@ interface TestRunEvent {
   id: string;
   conversationId: string;
   sequence: number;
-  type: "status" | "stdout" | "stderr";
+  type: "approval" | "status" | "stdout" | "stderr";
   content: string;
   metadataJson: Record<string, unknown>;
 }
@@ -48,6 +48,26 @@ describe("run event service", () => {
     expect(await service.listEvents("conversation_demo")).toMatchObject([
       { sequence: 1, type: "status", content: "Mock runtime starting" },
       { sequence: 2, type: "stdout", content: "Wrote file" }
+    ]);
+  });
+
+  it("appends audit events after the latest persisted sequence", async () => {
+    const service = createRunEventService(createRunEventDb());
+
+    await service.ingestEvent("conversation_demo", {
+      sequence: 4,
+      type: "stdout",
+      content: "existing",
+      metadata: {}
+    });
+    await service.appendAuditEvent("conversation_demo", {
+      content: "Conversation approved",
+      metadata: { action: "approval" }
+    });
+
+    expect(await service.listEvents("conversation_demo")).toMatchObject([
+      { sequence: 4, content: "existing" },
+      { sequence: 5, type: "approval", content: "Conversation approved" }
     ]);
   });
 });

@@ -1,24 +1,23 @@
-import { approvalRequestSchema } from "@abitat/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { reviewService } from "../../../../../server/reviews";
+import { conversationQueueService } from "../../../../../server/conversations";
 import { runEventService } from "../../../../../server/run-events";
 
-const approveRequestSchema = approvalRequestSchema.extend({
-  approvedByUserId: z.string().min(1).default("user_demo")
+const cancelRequestSchema = z.object({
+  userId: z.string().min(1).default("user_demo")
 });
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const [{ id }, input] = await Promise.all([
       context.params,
-      approveRequestSchema.parseAsync(await parseRequest(request))
+      cancelRequestSchema.parseAsync(await parseRequest(request))
     ]);
-    const response = await reviewService.approveConversation(id, input);
+    const response = await conversationQueueService.cancelConversation(id, input);
     await runEventService.appendAuditEvent(id, {
-      content: "Commit and push approved",
-      metadata: { action: "approval", userId: input.approvedByUserId }
+      content: "Conversation cancelled",
+      metadata: { action: "cancel", userId: input.userId }
     });
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
@@ -28,7 +27,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json(response);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unable to approve conversation" },
+      { error: error instanceof Error ? error.message : "Unable to cancel conversation" },
       { status: 400 }
     );
   }

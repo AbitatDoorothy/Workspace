@@ -48,11 +48,14 @@ interface TestDaemonJob {
   type: string;
   status: string;
   payloadJson: unknown;
+  errorMessage?: string | null;
+  updatedAt?: Date;
 }
 
 type JobFindFirstArgs = {
   where: {
     status: { in: string[] };
+    machineId?: string;
     type?: string | { in: string[] };
   };
 };
@@ -95,6 +98,8 @@ function createConversationDb(existingJob?: TestDaemonJob) {
         return data;
       },
       findMany: async () => Array.from(conversations.values()),
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        conversations.get(where.id) ?? null,
       update: async ({
         where,
         data
@@ -122,12 +127,22 @@ function createConversationDb(existingJob?: TestDaemonJob) {
         Array.from(jobs.values()).find(
           (job) =>
             where.status.in.includes(job.status) &&
+            (!where.machineId || job.machineId === where.machineId) &&
             (!where.type ||
               (typeof where.type === "string"
                 ? job.type === where.type
                 : where.type.in.includes(job.type)))
         ) ?? null,
-      findMany: async () => Array.from(jobs.values()),
+      findMany: async ({ where }: { where?: JobFindFirstArgs["where"] } = {}) =>
+        Array.from(jobs.values()).filter(
+          (job) =>
+            (!where?.status || where.status.in.includes(job.status)) &&
+            (!where?.machineId || job.machineId === where.machineId) &&
+            (!where?.type ||
+              (typeof where.type === "string"
+                ? job.type === where.type
+                : where.type.in.includes(job.type)))
+        ),
       update: async ({ where, data }: { where: { id: string }; data: Partial<TestDaemonJob> }) => {
         const current = jobs.get(where.id);
 
@@ -135,7 +150,7 @@ function createConversationDb(existingJob?: TestDaemonJob) {
           throw new Error(`Missing job ${where.id}`);
         }
 
-        const next = { ...current, ...data };
+        const next = { ...current, ...data, updatedAt: data.updatedAt ?? new Date() };
         jobs.set(where.id, next);
         return next;
       }
@@ -236,6 +251,12 @@ describe("conversation queue service", () => {
       },
       ackJob: async () => {
         throw databaseError;
+      },
+      cancelConversation: async () => {
+        throw databaseError;
+      },
+      recoverStaleJobs: async () => {
+        throw databaseError;
       }
     };
     const fallback = createConversationQueueService(createConversationDb());
@@ -304,6 +325,106 @@ describe("conversation queue service", () => {
       commitSha: "abc123",
       prUrl: "https://github.com/AbitatDoorothy/Workspace/pull/1",
       errorMessage: "gh is not authenticated"
+    });
+  });
+
+  it("cancels a conversation and its active daemon jobs", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Add a useful page."
+    });
+
+    await service.cancelConversation(conversation.id, { userId: "user_demo" });
+
+    expect((await db.conversation.findMany())[0]).toMatchObject({
+      status: "cancelled",
+      errorMessage: "Cancelled by user_demo"
+    });
+    expect((await db.daemonJob.findMany())[0]).toMatchObject({
+      status: "cancelled",
+      errorMessage: "Cancelled by user_demo"
+    });
+  });
+
+  it("recovers stale running jobs after daemon reconnect", async () => {
+    const db = createConversationDb({
+      id: "job_existing",
+      workspaceId: "workspace_demo",
+      machineId: "machine_demo",
+      conversationId: "conversation_existing",
+      projectId: "project_demo",
+      type: "start_conversation",
+      status: "running",
+      payloadJson: {},
+      updatedAt: new Date("2026-04-24T00:00:00.000Z")
+    });
+    await db.conversation.create({
+      data: {
+        id: "conversation_existing",
+        workspaceId: "workspace_demo",
+        projectId: "project_demo",
+        agentId: "agent_demo",
+        createdByUserId: "user_demo",
+        type: "feature",
+        status: "running",
+        prompt: "Add a useful page."
+      }
+    });
+    const service = createConversationQueueService(db);
+
+    await expect(
+      service.recoverStaleJobs("machine_demo", {
+        now: new Date("2026-04-24T00:05:01.000Z"),
+        staleAfterMs: 300_000
+      })
+    ).resolves.toBe(1);
+    expect((await db.conversation.findMany())[0]).toMatchObject({
+      status: "failed",
+      errorMessage: "Daemon reconnected before this job completed"
+    });
+  });
+
+  it("does not recover the daemon's active conversation", async () => {
+    const db = createConversationDb({
+      id: "job_existing",
+      workspaceId: "workspace_demo",
+      machineId: "machine_demo",
+      conversationId: "conversation_existing",
+      projectId: "project_demo",
+      type: "start_conversation",
+      status: "running",
+      payloadJson: {},
+      updatedAt: new Date("2026-04-24T00:00:00.000Z")
+    });
+    await db.conversation.create({
+      data: {
+        id: "conversation_existing",
+        workspaceId: "workspace_demo",
+        projectId: "project_demo",
+        agentId: "agent_demo",
+        createdByUserId: "user_demo",
+        type: "feature",
+        status: "running",
+        prompt: "Add a useful page."
+      }
+    });
+    const service = createConversationQueueService(db);
+
+    await expect(
+      service.recoverStaleJobs("machine_demo", {
+        activeConversationId: "conversation_existing",
+        now: new Date("2026-04-24T00:05:01.000Z"),
+        staleAfterMs: 300_000
+      })
+    ).resolves.toBe(0);
+    expect((await db.conversation.findMany())[0]).toMatchObject({
+      status: "running"
     });
   });
 });

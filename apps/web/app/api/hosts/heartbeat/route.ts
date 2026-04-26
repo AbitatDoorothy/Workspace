@@ -1,13 +1,18 @@
 import { hostHeartbeatRequestSchema } from "@abitat/shared";
 import { NextResponse } from "next/server";
 
+import { conversationQueueService } from "../../../../server/conversations";
 import { hostService } from "../../../../server/hosts";
 
 export async function POST(request: Request) {
   try {
     const body = hostHeartbeatRequestSchema.parse(await request.json());
     const token = getBearerToken(request);
-    return NextResponse.json(await hostService.recordHeartbeat(body, token));
+    const response = await hostService.recordHeartbeat(body, token);
+    await conversationQueueService.recoverStaleJobs(body.machineId, {
+      activeConversationId: body.activeConversationId
+    });
+    return NextResponse.json(response);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to record heartbeat" },
