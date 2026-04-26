@@ -8,8 +8,8 @@ import { collectChangeset } from "../git/changeset.js";
 import { resolveRepoPath } from "../git/paths.js";
 import { commitAndPushWorktree, tryCreatePullRequest } from "../git/publish.js";
 import { cleanupConversationWorktree, setupConversationWorktree } from "../git/worktree.js";
-import { createMockRuntimeAdapter } from "../runtime/mock.js";
-import type { RuntimeEvent } from "../runtime/adapter.js";
+import type { RuntimeAdapter, RuntimeEvent } from "../runtime/adapter.js";
+import { createRuntimeAdapter } from "../runtime/index.js";
 import { HostApiClient } from "../transport/api-client.js";
 import { createToolScanner } from "../tools/scanner.js";
 import { resolveDaemonConnection } from "./daemon-connection.js";
@@ -153,21 +153,21 @@ async function pollDaemonJob(client: HostApiClient, machineId: string, workspace
       worktreePath: setup.worktreePath
     });
 
-    if (job.payload.agentRuntime === "mock") {
-      await runMockConversation(client, job.conversationId, {
-        worktreePath: setup.worktreePath,
-        prompt: job.payload.prompt,
-        model: job.payload.model,
-        instructions: job.payload.instructions
-      });
-      const changeSet = await collectChangeset(setup.worktreePath);
-      await client.uploadChangeSet(job.conversationId, changeSet);
-      await client.ackJob(job.id, {
-        status: "completed",
-        branchName: setup.branchName,
-        worktreePath: setup.worktreePath
-      });
-    }
+    await runConversationRuntime(client, createRuntimeAdapter(job.payload.agentRuntime), {
+      conversationId: job.conversationId,
+      worktreePath: setup.worktreePath,
+      prompt: job.payload.prompt,
+      model: job.payload.model,
+      instructions: job.payload.instructions,
+      allowedTools: job.payload.allowedTools
+    });
+    const changeSet = await collectChangeset(setup.worktreePath);
+    await client.uploadChangeSet(job.conversationId, changeSet);
+    await client.ackJob(job.id, {
+      status: "completed",
+      branchName: setup.branchName,
+      worktreePath: setup.worktreePath
+    });
   } catch (error) {
     await client.ackJob(job.id, {
       status: "failed",
@@ -207,20 +207,22 @@ async function commitAndPushConversation(
   }
 }
 
-async function runMockConversation(
+async function runConversationRuntime(
   client: HostApiClient,
-  conversationId: string,
+  adapter: RuntimeAdapter,
   input: {
+    conversationId: string;
     worktreePath: string;
     prompt: string;
     model: string;
     instructions: string;
+    allowedTools: string[];
   }
 ) {
   let sequence = 1;
 
-  await createMockRuntimeAdapter().run(input, async (event: RuntimeEvent) => {
-    await client.ingestRunEvent(conversationId, {
+  await adapter.run(input, async (event: RuntimeEvent) => {
+    await client.ingestRunEvent(input.conversationId, {
       sequence,
       type: event.type,
       content: event.content,

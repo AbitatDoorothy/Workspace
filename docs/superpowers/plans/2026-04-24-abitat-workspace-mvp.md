@@ -902,13 +902,13 @@ Outcome: daemon can run at least one real coding-agent CLI after mock loop is st
 
 Tasks:
 
-- [ ] Implement `codex` adapter if Codex CLI is installed.
-- [ ] Implement `claude` adapter if Claude CLI is installed.
-- [ ] Add runtime availability check.
-- [ ] Stream stdout/stderr.
-- [ ] Capture non-zero exit codes.
-- [ ] Add UI warning when selected runtime is unavailable.
-- [ ] Add integration test guarded by environment variable so CI can skip it.
+- [x] Implement `codex` adapter if Codex CLI is installed.
+- [x] Implement `claude` adapter if Claude CLI is installed.
+- [x] Add runtime availability check.
+- [x] Stream stdout/stderr.
+- [x] Capture non-zero exit codes.
+- [x] Add UI warning when selected runtime is unavailable.
+- [x] Add integration test guarded by environment variable so CI can skip it.
 
 Acceptance:
 

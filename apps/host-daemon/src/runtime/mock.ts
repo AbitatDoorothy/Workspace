@@ -5,6 +5,10 @@ import type { RuntimeAdapter } from "./adapter.js";
 
 export function createMockRuntimeAdapter(): RuntimeAdapter {
   return {
+    name: "mock",
+    async isAvailable() {
+      return { installed: true };
+    },
     async run(input, emit) {
       await emit({ type: "status", content: "Mock runtime starting" });
       await emit({ type: "stdout", content: `Prompt: ${input.prompt}` });

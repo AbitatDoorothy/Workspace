@@ -46,6 +46,17 @@ export function runtimeChoicesFromTools(tools: Pick<HostTool, "name" | "installe
   return choices;
 }
 
+export function runtimeAvailabilityWarning(
+  runtime: Runtime,
+  tools: Pick<HostTool, "name" | "installed">[]
+) {
+  if (runtime === "mock" || tools.some((tool) => tool.name === runtime && tool.installed)) {
+    return null;
+  }
+
+  return `${runtime === "codex" ? "Codex" : "Claude"} CLI is unavailable on the host.`;
+}
+
 export function createAgentService(db: AgentDb) {
   return {
     async createAgent(input: AgentCreateInput) {

@@ -264,6 +264,12 @@ h1 {
   font-weight: 700;
 }
 
+.runtime-warning {
+  color: #9a4d00;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .status-label {
   border: 1px solid #abc2d6;
   border-radius: 999px;

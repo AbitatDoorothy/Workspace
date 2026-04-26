@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { createAgentService, runtimeChoicesFromTools } from "../server/agents/agent-service";
+import {
+  createAgentService,
+  runtimeAvailabilityWarning,
+  runtimeChoicesFromTools
+} from "../server/agents/agent-service";
 
 interface TestAgent {
   id: string;
@@ -44,6 +48,14 @@ describe("agent service", () => {
         { name: "claude", installed: false }
       ])
     ).toEqual(["mock", "codex"]);
+  });
+
+  it("warns when a real runtime is selected but unavailable", () => {
+    expect(runtimeAvailabilityWarning("mock", [])).toBeNull();
+    expect(runtimeAvailabilityWarning("codex", [{ name: "codex", installed: false }])).toBe(
+      "Codex CLI is unavailable on the host."
+    );
+    expect(runtimeAvailabilityWarning("claude", [{ name: "claude", installed: true }])).toBeNull();
   });
 
   it("creates project agents with validated instructions and runtime", async () => {

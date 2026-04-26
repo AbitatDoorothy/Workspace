@@ -1,8 +1,16 @@
+import type { HostTool } from "@abitat/shared";
+
 import { agentService } from "../../server/agents";
+import { runtimeAvailabilityWarning } from "../../server/agents/agent-service";
+import { hostService } from "../../server/hosts";
 import { projectService } from "../../server/projects";
 
 export default async function AgentsPage() {
-  const [agents, projects] = await Promise.all([getAgents(), getProjects()]);
+  const [agents, hostTools, projects] = await Promise.all([
+    getAgents(),
+    getHostTools(),
+    getProjects()
+  ]);
   const firstProjectId = projects[0]?.id ?? "project_demo";
 
   return (
@@ -76,6 +84,11 @@ export default async function AgentsPage() {
               <p>{agent.role}</p>
               <p>{agent.model}</p>
               <strong>{agent.runtime}</strong>
+              {runtimeAvailabilityWarning(agent.runtime, hostTools) ? (
+                <p className="runtime-warning">
+                  {runtimeAvailabilityWarning(agent.runtime, hostTools)}
+                </p>
+              ) : null}
             </article>
           ))}
         </div>
@@ -87,6 +100,15 @@ export default async function AgentsPage() {
 async function getAgents() {
   try {
     return await agentService.listAgents();
+  } catch {
+    return [];
+  }
+}
+
+async function getHostTools() {
+  try {
+    const host = await hostService.getDemoHost();
+    return Array.isArray(host?.installedToolsJson) ? (host.installedToolsJson as HostTool[]) : [];
   } catch {
     return [];
   }
