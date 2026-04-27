@@ -12,6 +12,7 @@ interface TestProject {
   workspaceId: string;
   repoUrl: string;
   defaultBranch: string;
+  hostLocalPath?: string | null;
 }
 
 interface TestAgent {
@@ -37,6 +38,7 @@ interface TestConversation {
   commitSha?: string | null;
   prUrl?: string | null;
   errorMessage?: string | null;
+  runtimeSessionId?: string | null;
 }
 
 interface TestDaemonJob {
@@ -86,7 +88,11 @@ function createConversationDb(existingJob?: TestDaemonJob) {
   return {
     project: {
       findUnique: async ({ where }: { where: { id: string } }) =>
-        where.id === project.id ? project : null
+        where.id === project.id ? project : null,
+      update: async ({ data }: { where: { id: string }; data: Partial<TestProject> }) => {
+        Object.assign(project, data);
+        return project;
+      }
     },
     agent: {
       findUnique: async ({ where }: { where: { id: string } }) =>
@@ -182,6 +188,39 @@ describe("conversation queue service", () => {
     });
   });
 
+  it("queues local folder conversations with the host local path", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+    await db.project.update({
+      where: { id: "project_demo" },
+      data: {
+        repoUrl: "/Users/reece/Desktop/Test",
+        defaultBranch: "local",
+        hostLocalPath: "/Users/reece/Desktop/Test"
+      }
+    });
+
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Create a local success file."
+    });
+    const jobs = await db.daemonJob.findMany();
+
+    expect(jobs.at(-1)).toMatchObject({
+      type: "start_conversation",
+      conversationId: conversation.id,
+      payloadJson: {
+        repoUrl: "/Users/reece/Desktop/Test",
+        defaultBranch: "local",
+        hostLocalPath: "/Users/reece/Desktop/Test"
+      }
+    });
+  });
+
   it("prevents creating a second active daemon job", async () => {
     const service = createConversationQueueService(
       createConversationDb({
@@ -226,13 +265,65 @@ describe("conversation queue service", () => {
 
     await service.ackJob(job?.id ?? "", "running", {
       branchName: "abitat/bugfix/abc123-fix-a-useful-page",
-      worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo"
+      worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo",
+      runtimeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce"
     });
     expect((await db.conversation.findMany())[0]).toMatchObject({
       id: conversation.id,
       status: "running",
       branchName: "abitat/bugfix/abc123-fix-a-useful-page",
-      worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo"
+      worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo",
+      runtimeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce"
+    });
+  });
+
+  it("continues an existing conversation on its stored runtime session", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Create the first file."
+    });
+    await db.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        status: "awaiting_approval",
+        branchName: "abitat/feature/abcdef12-create-the-first-file",
+        worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo",
+        runtimeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce"
+      }
+    });
+    await db.daemonJob.update({
+      where: { id: (await db.daemonJob.findMany())[0]?.id ?? "" },
+      data: { status: "completed" }
+    });
+
+    const continued = await service.continueConversation(conversation.id, {
+      prompt: "Continue by creating the second file.",
+      userId: "user_demo"
+    });
+    const jobs = await db.daemonJob.findMany();
+
+    expect(continued).toMatchObject({
+      id: conversation.id,
+      status: "queued",
+      prompt: "Continue by creating the second file.",
+      runtimeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce"
+    });
+    expect(jobs.at(-1)).toMatchObject({
+      type: "start_conversation",
+      status: "queued",
+      conversationId: conversation.id,
+      payloadJson: {
+        resumeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce",
+        worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo",
+        branchName: "abitat/feature/abcdef12-create-the-first-file",
+        prompt: "Continue by creating the second file."
+      }
     });
   });
 
@@ -256,6 +347,9 @@ describe("conversation queue service", () => {
         throw databaseError;
       },
       recoverStaleJobs: async () => {
+        throw databaseError;
+      },
+      continueConversation: async () => {
         throw databaseError;
       }
     };

@@ -47,6 +47,7 @@ export function createCliRuntimeAdapter(input: CliRuntimeAdapterInput): RuntimeA
     },
     async run(runInput, emit) {
       const availability = await runner.check(input.command);
+      let lastOutput = "";
 
       if (!availability.installed) {
         throw new Error(availability.reason ?? `${input.name} CLI is unavailable`);
@@ -60,11 +61,18 @@ export function createCliRuntimeAdapter(input: CliRuntimeAdapterInput): RuntimeA
           cwd: runInput.worktreePath,
           stdin: runtimePrompt(runInput)
         },
-        emit
+        async (event) => {
+          if (event.content.trim().length > 0) {
+            lastOutput = event.content.trim();
+          }
+
+          await emit(event);
+        }
       );
 
       if (exitCode !== 0) {
-        throw new Error(`${input.name} exited with code ${exitCode}`);
+        const details = lastOutput ? `: ${lastOutput}` : "";
+        throw new Error(`${input.name} exited with code ${exitCode}${details}`);
       }
 
       await emit({ type: "status", content: `${input.name} runtime completed` });
@@ -99,16 +107,21 @@ export const defaultCliRuntimeRunner: CliRuntimeRunner = {
       });
       const flushStdout = createLineEmitter("stdout", emit);
       const flushStderr = createLineEmitter("stderr", emit);
+      const queue = createAsyncQueue();
 
       child.stdout.on("data", (chunk: Buffer) => {
-        void flushStdout.write(chunk.toString("utf8"));
+        queue.add(() => flushStdout.write(chunk.toString("utf8")));
       });
       child.stderr.on("data", (chunk: Buffer) => {
-        void flushStderr.write(chunk.toString("utf8"));
+        queue.add(() => flushStderr.write(chunk.toString("utf8")));
       });
       child.on("error", reject);
       child.on("close", (code) => {
-        Promise.all([flushStdout.close(), flushStderr.close()])
+        queue
+          .add(async () => {
+            await flushStdout.close();
+            await flushStderr.close();
+          })
           .then(() => resolve(code ?? 1))
           .catch(reject);
       });
@@ -116,6 +129,18 @@ export const defaultCliRuntimeRunner: CliRuntimeRunner = {
     });
   }
 };
+
+function createAsyncQueue() {
+  let current = Promise.resolve();
+
+  return {
+    add(task: () => Promise<void>) {
+      const next = current.then(task, task);
+      current = next.catch(() => undefined);
+      return next;
+    }
+  };
+}
 
 async function readVersion(command: string) {
   try {
@@ -128,10 +153,29 @@ async function readVersion(command: string) {
 
 function runtimeArgs(name: CliRuntimeName, input: RuntimeRunInput) {
   if (name === "codex") {
-    return ["exec", "--model", input.model];
+    const localFolderArgs = input.skipGitRepoCheck ? ["--skip-git-repo-check"] : [];
+
+    if (input.resumeSessionId) {
+      return [
+        "exec",
+        "resume",
+        ...localFolderArgs,
+        "--model",
+        resolveCodexModel(input.model),
+        "--full-auto",
+        input.resumeSessionId,
+        "-"
+      ];
+    }
+
+    return ["exec", ...localFolderArgs, "--model", resolveCodexModel(input.model), "--full-auto"];
   }
 
   return ["--model", input.model, "--print"];
+}
+
+function resolveCodexModel(model: string) {
+  return /^\d+(?:\.\d+)+$/.test(model) ? `gpt-${model}` : model;
 }
 
 function runtimePrompt(input: RuntimeRunInput) {

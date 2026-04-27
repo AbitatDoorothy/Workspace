@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { collectChangeset, parseChangedFiles } from "../src/git/changeset";
 
@@ -36,5 +39,21 @@ describe("changeset collection", () => {
       summary: "Changed 1 file."
     });
     expect(commands[0]).toEqual(["git", "-C", "/tmp/worktree", "add", "-N", "."]);
+  });
+
+  it("collects a local directory changeset when the folder is not a git repo", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "abitat-local-"));
+
+    try {
+      await writeFile(join(folder, "success.md"), "Local folder success.\n");
+
+      await expect(collectChangeset(folder)).resolves.toMatchObject({
+        filesChanged: ["success.md"],
+        diffText: expect.stringContaining("Local folder success."),
+        summary: "Changed 1 file."
+      });
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
   });
 });

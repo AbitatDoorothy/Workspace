@@ -27,11 +27,16 @@ export function createRunEventService(db: RunEventDb) {
   return {
     async ingestEvent(conversationId: string, input: RunEventIngestRequest) {
       const parsed = runEventIngestRequestSchema.parse(input);
+      const events = await this.listEvents(conversationId);
+      const latestSequence = events.reduce((max, event) => Math.max(max, event.sequence), 0);
+      const usedSequences = new Set(events.map((event) => event.sequence));
+      const sequence = usedSequences.has(parsed.sequence) ? latestSequence + 1 : parsed.sequence;
+
       return db.runEvent.create({
         data: {
           id: `event_${randomBytes(8).toString("hex")}`,
           conversationId,
-          sequence: parsed.sequence,
+          sequence,
           type: parsed.type,
           content: parsed.content,
           metadataJson: parsed.metadata

@@ -70,4 +70,24 @@ describe("run event service", () => {
       { sequence: 5, type: "approval", content: "Conversation approved" }
     ]);
   });
+
+  it("moves ingested runtime events after existing conversation events", async () => {
+    const service = createRunEventService(createRunEventDb());
+
+    await service.appendAuditEvent("conversation_demo", {
+      content: "Conversation started",
+      metadata: { action: "start" }
+    });
+    await service.ingestEvent("conversation_demo", {
+      sequence: 1,
+      type: "status",
+      content: "Codex runtime starting",
+      metadata: {}
+    });
+
+    expect(await service.listEvents("conversation_demo")).toMatchObject([
+      { sequence: 1, type: "approval", content: "Conversation started" },
+      { sequence: 2, type: "status", content: "Codex runtime starting" }
+    ]);
+  });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   commitWorktree,
+  defaultRepoRuntime,
   fetchRepo,
   gitDiff,
   gitStatus,
@@ -70,5 +71,36 @@ describe("syncRepo", () => {
       ["git", "-C", "/worktree", "commit", "-am", "feat: demo"],
       ["git", "-C", "/repo", "push", "-u", "origin", "abitat/feature/demo"]
     ]);
+  });
+});
+
+describe("defaultRepoRuntime", () => {
+  it("runs child processes with noninteractive git prompt settings", async () => {
+    const output = await defaultRepoRuntime.run(process.execPath, [
+      "-e",
+      "console.log(JSON.stringify({ prompt: process.env.GIT_TERMINAL_PROMPT, ssh: process.env.GIT_SSH_COMMAND }))"
+    ]);
+
+    expect(JSON.parse(String(output))).toMatchObject({
+      prompt: "0",
+      ssh: expect.stringContaining("BatchMode=yes")
+    });
+  });
+
+  it("fails stalled child processes with a timeout", async () => {
+    const previousTimeout = process.env.ABITAT_GIT_TIMEOUT_MS;
+    process.env.ABITAT_GIT_TIMEOUT_MS = "10";
+
+    try {
+      await expect(
+        defaultRepoRuntime.run(process.execPath, ["-e", "setTimeout(() => {}, 1000)"])
+      ).rejects.toThrow("timed out");
+    } finally {
+      if (previousTimeout === undefined) {
+        delete process.env.ABITAT_GIT_TIMEOUT_MS;
+      } else {
+        process.env.ABITAT_GIT_TIMEOUT_MS = previousTimeout;
+      }
+    }
   });
 });

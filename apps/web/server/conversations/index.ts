@@ -55,7 +55,14 @@ function createPrismaConversationDb(db: PrismaClient) {
         data: Partial<
           Pick<
             ConversationRecord,
-            "branchName" | "commitSha" | "errorMessage" | "prUrl" | "status" | "worktreePath"
+            | "branchName"
+            | "commitSha"
+            | "errorMessage"
+            | "prompt"
+            | "prUrl"
+            | "runtimeSessionId"
+            | "status"
+            | "worktreePath"
           >
         >;
       }) {
@@ -138,13 +145,15 @@ function normalizeProject(project: {
   name: string;
   repoUrl: string;
   defaultBranch: string;
+  hostLocalPath: string | null;
 }): ProjectRecord {
   return {
     id: project.id,
     workspaceId: project.workspaceId,
     name: project.name,
     repoUrl: project.repoUrl,
-    defaultBranch: project.defaultBranch
+    defaultBranch: project.defaultBranch,
+    hostLocalPath: project.hostLocalPath
   };
 }
 
@@ -181,6 +190,7 @@ function normalizeConversation(conversation: {
   prompt: string;
   branchName: string | null;
   worktreePath: string | null;
+  runtimeSessionId: string | null;
   commitSha: string | null;
   prUrl: string | null;
   errorMessage: string | null;
@@ -197,6 +207,7 @@ function normalizeConversation(conversation: {
     prompt: conversation.prompt,
     branchName: conversation.branchName,
     worktreePath: conversation.worktreePath,
+    runtimeSessionId: conversation.runtimeSessionId,
     commitSha: conversation.commitSha,
     prUrl: conversation.prUrl,
     errorMessage: conversation.errorMessage,
@@ -236,8 +247,9 @@ function createDemoConversationDb() {
     id: "project_demo",
     workspaceId: "workspace_demo",
     name: "Workspace",
-    repoUrl: "https://github.com/AbitatDoorothy/Workspace.git",
-    defaultBranch: "main"
+    repoUrl: "git@github.com:AbitatDoorothy/Workspace.git",
+    defaultBranch: "main",
+    hostLocalPath: null
   };
   const agent: AgentRecord = {
     id: "agent_demo",
@@ -277,7 +289,14 @@ function createDemoConversationDb() {
         data: Partial<
           Pick<
             ConversationRecord,
-            "branchName" | "commitSha" | "errorMessage" | "prUrl" | "status" | "worktreePath"
+            | "branchName"
+            | "commitSha"
+            | "errorMessage"
+            | "prompt"
+            | "prUrl"
+            | "runtimeSessionId"
+            | "status"
+            | "worktreePath"
           >
         >;
       }) => {

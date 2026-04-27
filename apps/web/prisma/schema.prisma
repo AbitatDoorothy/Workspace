@@ -178,6 +178,7 @@ model Conversation {
   prompt           String
   branchName       String?
   worktreePath     String?
+  runtimeSessionId String?
   summary          String?
   testsJson        Json?
   commitSha        String?

@@ -26,6 +26,7 @@ export interface ConversationRecord extends ConversationCreateInput {
   status: ConversationStatus;
   branchName?: string | null;
   worktreePath?: string | null;
+  runtimeSessionId?: string | null;
   commitSha?: string | null;
   prUrl?: string | null;
   errorMessage?: string | null;
@@ -38,6 +39,7 @@ export interface ProjectRecord {
   name?: string;
   repoUrl: string;
   defaultBranch: string;
+  hostLocalPath?: string | null;
 }
 
 export interface AgentRecord {
@@ -79,7 +81,14 @@ interface ConversationDb {
       data: Partial<
         Pick<
           ConversationRecord,
-          "branchName" | "commitSha" | "errorMessage" | "prUrl" | "status" | "worktreePath"
+          | "branchName"
+          | "commitSha"
+          | "errorMessage"
+          | "prompt"
+          | "prUrl"
+          | "runtimeSessionId"
+          | "status"
+          | "worktreePath"
         >
       >;
     }): Promise<ConversationRecord>;
@@ -105,6 +114,10 @@ interface ConversationDb {
 
 const createConversationInputSchema = conversationCreateRequestSchema.extend({
   createdByUserId: z.string().min(1)
+});
+const continueConversationInputSchema = z.object({
+  prompt: z.string().trim().min(1),
+  userId: z.string().min(1)
 });
 
 const activeConversationJobStatuses = ["queued", "preparing", "running"];
@@ -165,6 +178,7 @@ export function createConversationQueueService(db: ConversationDb) {
           payloadJson: {
             repoUrl: project.repoUrl,
             defaultBranch: project.defaultBranch,
+            hostLocalPath: project.hostLocalPath ?? undefined,
             conversationType: created.type,
             agentRuntime: agent.runtime,
             model: agent.model,
@@ -176,6 +190,88 @@ export function createConversationQueueService(db: ConversationDb) {
       });
 
       return created;
+    },
+
+    async continueConversation(conversationId: string, input: { prompt: string; userId: string }) {
+      const parsed = continueConversationInputSchema.parse(input);
+      const conversation = await db.conversation.findUnique({ where: { id: conversationId } });
+
+      if (!conversation) {
+        throw new Error("Conversation not found");
+      }
+
+      const [project, agent, activeJob] = await Promise.all([
+        db.project.findUnique({ where: { id: conversation.projectId } }),
+        db.agent.findUnique({ where: { id: conversation.agentId } }),
+        db.daemonJob.findFirst({
+          where: {
+            type: "start_conversation",
+            status: { in: activeConversationJobStatuses }
+          }
+        })
+      ]);
+
+      if (!project || project.workspaceId !== conversation.workspaceId) {
+        throw new Error("Project not found");
+      }
+
+      if (!agent || agent.projectId !== conversation.projectId) {
+        throw new Error("Agent not found");
+      }
+
+      if (activeJob) {
+        throw new Error("An active daemon job is already running");
+      }
+
+      if (!conversation.worktreePath || !conversation.branchName) {
+        throw new Error("Conversation is missing git worktree metadata");
+      }
+
+      if (!conversation.runtimeSessionId && agent.runtime !== "mock") {
+        throw new Error("Conversation is missing runtime session metadata");
+      }
+
+      assertWorkspaceMember({
+        workspaceId: conversation.workspaceId,
+        userId: parsed.userId
+      });
+
+      const updated = await db.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          errorMessage: null,
+          prompt: parsed.prompt,
+          status: "queued"
+        }
+      });
+
+      await db.daemonJob.create({
+        data: {
+          id: `job_${randomBytes(8).toString("hex")}`,
+          workspaceId: updated.workspaceId,
+          machineId: null,
+          projectId: updated.projectId,
+          conversationId: updated.id,
+          type: "start_conversation",
+          status: "queued",
+          payloadJson: {
+            repoUrl: project.repoUrl,
+            defaultBranch: project.defaultBranch,
+            hostLocalPath: project.hostLocalPath ?? undefined,
+            conversationType: updated.type,
+            agentRuntime: agent.runtime,
+            model: agent.model,
+            instructions: agent.instructions,
+            prompt: updated.prompt,
+            allowedTools: agent.allowedToolsJson,
+            resumeSessionId: updated.runtimeSessionId ?? undefined,
+            worktreePath: updated.worktreePath ?? undefined,
+            branchName: updated.branchName ?? undefined
+          }
+        }
+      });
+
+      return updated;
     },
 
     listConversations(workspaceId: string) {
@@ -217,6 +313,7 @@ export function createConversationQueueService(db: ConversationDb) {
         commitSha?: string;
         errorMessage?: string;
         prUrl?: string;
+        runtimeSessionId?: string;
         worktreePath?: string;
       } = {}
     ) {
@@ -232,7 +329,13 @@ export function createConversationQueueService(db: ConversationDb) {
         const conversationData: Partial<
           Pick<
             ConversationRecord,
-            "branchName" | "commitSha" | "errorMessage" | "prUrl" | "status" | "worktreePath"
+            | "branchName"
+            | "commitSha"
+            | "errorMessage"
+            | "prUrl"
+            | "runtimeSessionId"
+            | "status"
+            | "worktreePath"
           >
         > = {
           status: statusToConversationStatus(status, job.type)
@@ -244,6 +347,10 @@ export function createConversationQueueService(db: ConversationDb) {
 
         if (details.worktreePath !== undefined) {
           conversationData.worktreePath = details.worktreePath;
+        }
+
+        if (details.runtimeSessionId !== undefined) {
+          conversationData.runtimeSessionId = details.runtimeSessionId;
         }
 
         if (details.commitSha !== undefined) {
@@ -376,6 +483,13 @@ export function createResilientConversationQueueService(
       return runWithFallback(
         () => primary.listConversations(workspaceId),
         () => fallback.listConversations(workspaceId)
+      );
+    },
+
+    continueConversation(conversationId, input) {
+      return runWithFallback(
+        () => primary.continueConversation(conversationId, input),
+        () => fallback.continueConversation(conversationId, input)
       );
     },
 

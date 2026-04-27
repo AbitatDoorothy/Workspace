@@ -6,7 +6,9 @@ import { projectService } from "../../../server/projects";
 const projectRequestSchema = z.object({
   workspaceId: z.string().min(1).default("workspace_demo"),
   name: z.string().min(1),
-  repoUrl: z.string().min(1),
+  sourceType: z.enum(["github", "local"]).default("github"),
+  repoUrl: z.string().min(1).optional(),
+  hostLocalPath: z.string().min(1).optional(),
   defaultBranch: z.string().min(1).default("main"),
   createdByUserId: z.string().min(1).default("user_demo")
 });

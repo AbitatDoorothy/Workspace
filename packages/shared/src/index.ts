@@ -8,6 +8,7 @@ export const packageInfo = {
 const idSchema = z.string().min(1);
 const metadataSchema = z.record(z.string(), z.unknown());
 const emptyPayloadSchema = z.object({}).strict().default({});
+const repoUrlSchema = z.string().min(1);
 
 export const machineTypeSchema = z.enum(["host", "client"]);
 export const machineStatusSchema = z.enum(["pending", "online", "offline", "error"]);
@@ -118,7 +119,8 @@ export const approvalResponseSchema = z.object({
 });
 
 export const daemonJobPollRequestSchema = z.object({
-  machineId: idSchema
+  machineId: idSchema,
+  activeConversationId: idSchema.optional()
 });
 
 export const daemonJobAckRequestSchema = z.object({
@@ -126,6 +128,7 @@ export const daemonJobAckRequestSchema = z.object({
   errorMessage: z.string().min(1).optional(),
   branchName: z.string().min(1).optional(),
   worktreePath: z.string().min(1).optional(),
+  runtimeSessionId: z.string().min(1).optional(),
   commitSha: z.string().min(1).optional(),
   prUrl: z.string().url().optional()
 });
@@ -143,7 +146,7 @@ export const cloneRepoJobSchema = daemonJobBaseSchema.extend({
   type: z.literal("clone_repo"),
   projectId: idSchema,
   payload: z.object({
-    repoUrl: z.string().url(),
+    repoUrl: repoUrlSchema,
     defaultBranch: z.string().min(1)
   })
 });
@@ -152,14 +155,18 @@ export const startConversationJobSchema = daemonJobBaseSchema.extend({
   type: z.literal("start_conversation"),
   conversationId: idSchema,
   payload: z.object({
-    repoUrl: z.string().url(),
+    repoUrl: repoUrlSchema,
     defaultBranch: z.string().min(1),
     conversationType: conversationTypeSchema,
     agentRuntime: runtimeSchema,
     model: z.string().min(1),
     instructions: z.string().min(1),
     prompt: z.string().min(1),
-    allowedTools: z.array(z.string().min(1)).default([])
+    allowedTools: z.array(z.string().min(1)).default([]),
+    resumeSessionId: z.string().min(1).optional(),
+    worktreePath: z.string().min(1).optional(),
+    branchName: z.string().min(1).optional(),
+    hostLocalPath: z.string().min(1).optional()
   })
 });
 

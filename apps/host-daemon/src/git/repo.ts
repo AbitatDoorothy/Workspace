@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const DEFAULT_GIT_TIMEOUT_MS = 120_000;
 
 export interface RepoRuntime {
   exists(path: string): Promise<boolean>;
@@ -97,7 +98,63 @@ export const defaultRepoRuntime: RepoRuntime = {
     }
   },
   async run(command, args) {
-    const { stdout } = await execFileAsync(command, args);
-    return stdout;
+    const timeoutMs = gitTimeoutMs();
+
+    try {
+      const { stdout } = await execFileAsync(command, args, {
+        env: gitProcessEnv(),
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: timeoutMs
+      });
+      return stdout;
+    } catch (error) {
+      throw formatProcessError(command, args, error, timeoutMs);
+    }
   }
 };
+
+function gitTimeoutMs() {
+  const value = Number(process.env.ABITAT_GIT_TIMEOUT_MS ?? DEFAULT_GIT_TIMEOUT_MS);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_GIT_TIMEOUT_MS;
+}
+
+function gitProcessEnv() {
+  return {
+    ...process.env,
+    GIT_ASKPASS: process.env.GIT_ASKPASS ?? "echo",
+    GIT_TERMINAL_PROMPT: "0",
+    SSH_ASKPASS: process.env.SSH_ASKPASS ?? "echo",
+    GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes"
+  };
+}
+
+function formatProcessError(command: string, args: string[], error: unknown, timeoutMs: number) {
+  const details = processErrorDetails(error);
+  const timedOut = details.killed && details.signal === "SIGTERM";
+  const commandLine = [command, ...args].join(" ");
+  const message = timedOut
+    ? `Command timed out after ${timeoutMs}ms`
+    : (details.message ?? "Command failed");
+  const stderr = details.stderr ? `\n${details.stderr}` : "";
+
+  return new Error(`${message}: ${commandLine}${stderr}`);
+}
+
+function processErrorDetails(error: unknown) {
+  if (!(error instanceof Error)) {
+    return {};
+  }
+
+  const processError = error as Error & {
+    killed?: boolean;
+    signal?: NodeJS.Signals;
+    stderr?: string | Buffer;
+  };
+
+  return {
+    killed: processError.killed,
+    message: processError.message,
+    signal: processError.signal,
+    stderr: processError.stderr?.toString().trim()
+  };
+}

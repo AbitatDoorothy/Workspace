@@ -11,6 +11,8 @@ export interface RuntimeRunInput {
   model: string;
   instructions: string;
   allowedTools?: string[];
+  resumeSessionId?: string;
+  skipGitRepoCheck?: boolean;
 }
 
 export interface RuntimeAvailability {

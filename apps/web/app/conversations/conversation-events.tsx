@@ -1,22 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { RunEventType } from "@abitat/shared";
 
-interface RunEventView {
-  id: string;
-  conversationId: string;
-  sequence: number;
-  type: RunEventType;
-  content: string;
-}
+import { toChatMessages, type RunEventView } from "./chat-events";
 
 interface ConversationEventsProps {
   conversationId: string;
   initialEvents: RunEventView[];
+  savedPrompt?: string;
 }
 
-export function ConversationEvents({ conversationId, initialEvents }: ConversationEventsProps) {
+export function ConversationEvents({
+  conversationId,
+  initialEvents,
+  savedPrompt
+}: ConversationEventsProps) {
   const [events, setEvents] = useState(initialEvents);
 
   useEffect(() => {
@@ -36,16 +34,17 @@ export function ConversationEvents({ conversationId, initialEvents }: Conversati
     };
   }, [conversationId]);
 
-  if (events.length === 0) {
+  const messages = toChatMessages(events, savedPrompt);
+
+  if (messages.length === 0) {
     return null;
   }
 
   return (
-    <ol className="event-list">
-      {events.map((event) => (
-        <li key={event.id}>
-          <span>{event.type}</span>
-          <p>{event.content}</p>
+    <ol className="chat-thread" aria-label="Conversation messages">
+      {messages.map((message) => (
+        <li className={`chat-message chat-message-${message.side}`} key={message.id}>
+          <p className="chat-bubble">{message.content}</p>
         </li>
       ))}
     </ol>

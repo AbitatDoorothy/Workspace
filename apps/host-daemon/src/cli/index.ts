@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import { homedir } from "node:os";
+import { access } from "node:fs/promises";
 import { runtimeSchema, type DaemonJob } from "@abitat/shared";
 
 import { defaultConfigPath, loadHostConfig, saveHostConfig } from "../config/host-config.js";
 import { collectChangeset } from "../git/changeset.js";
-import { resolveRepoPath } from "../git/paths.js";
+import { branchNameForConversation, resolveRepoPath } from "../git/paths.js";
 import { commitAndPushWorktree, tryCreatePullRequest } from "../git/publish.js";
 import { cleanupConversationWorktree, setupConversationWorktree } from "../git/worktree.js";
 import type { RuntimeAdapter, RuntimeEvent } from "../runtime/adapter.js";
@@ -13,6 +14,7 @@ import { createRuntimeAdapter } from "../runtime/index.js";
 import { HostApiClient } from "../transport/api-client.js";
 import { createToolScanner } from "../tools/scanner.js";
 import { resolveDaemonConnection } from "./daemon-connection.js";
+import { runHeartbeatWithRecovery } from "./heartbeat-loop.js";
 import { parseStartOptions } from "./start-options.js";
 
 const args = process.argv.slice(2);
@@ -96,12 +98,10 @@ async function startDaemon(args: string[]) {
     await pollDaemonJob(client, connection.machineId, workspaceRoot, activeState);
   };
 
-  await beat();
+  await runHeartbeatWithRecovery(beat);
   const heartbeat = setInterval(
     () => {
-      void beat().catch((error: unknown) => {
-        console.error(error instanceof Error ? error.message : "heartbeat failed");
-      });
+      void runHeartbeatWithRecovery(beat);
     },
     Math.max(pollIntervalMs, 1000)
   );
@@ -124,7 +124,7 @@ async function pollDaemonJob(
   workspaceRoot: string,
   activeState: { conversationId?: string }
 ) {
-  const { job } = await client.pollJob(machineId);
+  const { job } = await client.pollJob(machineId, activeState.conversationId);
 
   if (!job) {
     return;
@@ -151,14 +151,25 @@ async function pollDaemonJob(
   }
 
   try {
-    const setup = await setupConversationWorktree({
-      workspaceRoot,
-      conversationId: job.conversationId,
-      conversationType: job.payload.conversationType,
-      prompt: job.payload.prompt,
-      repoUrl: job.payload.repoUrl,
-      defaultBranch: job.payload.defaultBranch
-    });
+    const setup =
+      job.payload.resumeSessionId && job.payload.worktreePath && job.payload.branchName
+        ? {
+            branchName: job.payload.branchName,
+            repoPath: job.payload.hostLocalPath
+              ? undefined
+              : resolveRepoPath(workspaceRoot, job.payload.repoUrl),
+            worktreePath: job.payload.worktreePath
+          }
+        : job.payload.hostLocalPath
+          ? await setupLocalConversationFolder(job)
+          : await setupConversationWorktree({
+              workspaceRoot,
+              conversationId: job.conversationId,
+              conversationType: job.payload.conversationType,
+              prompt: job.payload.prompt,
+              repoUrl: job.payload.repoUrl,
+              defaultBranch: job.payload.defaultBranch
+            });
 
     console.log(`branch=${setup.branchName}`);
     console.log(`worktree=${setup.worktreePath}`);
@@ -168,20 +179,27 @@ async function pollDaemonJob(
       worktreePath: setup.worktreePath
     });
 
-    await runConversationRuntime(client, createRuntimeAdapter(job.payload.agentRuntime), {
-      conversationId: job.conversationId,
-      worktreePath: setup.worktreePath,
-      prompt: job.payload.prompt,
-      model: job.payload.model,
-      instructions: job.payload.instructions,
-      allowedTools: job.payload.allowedTools
-    });
+    const runtimeSessionId = await runConversationRuntime(
+      client,
+      createRuntimeAdapter(job.payload.agentRuntime),
+      {
+        conversationId: job.conversationId,
+        worktreePath: setup.worktreePath,
+        prompt: job.payload.prompt,
+        model: job.payload.model,
+        instructions: job.payload.instructions,
+        allowedTools: job.payload.allowedTools,
+        resumeSessionId: job.payload.resumeSessionId,
+        skipGitRepoCheck: Boolean(job.payload.hostLocalPath)
+      }
+    );
     const changeSet = await collectChangeset(setup.worktreePath);
     await client.uploadChangeSet(job.conversationId, changeSet);
     await client.ackJob(job.id, {
       status: "completed",
       branchName: setup.branchName,
-      worktreePath: setup.worktreePath
+      worktreePath: setup.worktreePath,
+      runtimeSessionId
     });
   } catch (error) {
     await client.ackJob(job.id, {
@@ -191,6 +209,23 @@ async function pollDaemonJob(
   } finally {
     activeState.conversationId = undefined;
   }
+}
+
+async function setupLocalConversationFolder(
+  job: Extract<DaemonJob, { type: "start_conversation" }>
+) {
+  const worktreePath = job.payload.hostLocalPath ?? "";
+  await access(worktreePath);
+
+  return {
+    branchName: branchNameForConversation({
+      conversationId: job.conversationId,
+      conversationType: job.payload.conversationType,
+      prompt: job.payload.prompt
+    }),
+    repoPath: undefined,
+    worktreePath
+  };
 }
 
 async function commitAndPushConversation(
@@ -234,11 +269,15 @@ async function runConversationRuntime(
     model: string;
     instructions: string;
     allowedTools: string[];
+    resumeSessionId?: string;
+    skipGitRepoCheck?: boolean;
   }
 ) {
   let sequence = 1;
+  let runtimeSessionId = input.resumeSessionId;
 
   await adapter.run(input, async (event: RuntimeEvent) => {
+    runtimeSessionId = runtimeSessionId ?? parseRuntimeSessionId(event.content);
     await client.ingestRunEvent(input.conversationId, {
       sequence,
       type: event.type,
@@ -247,6 +286,13 @@ async function runConversationRuntime(
     });
     sequence += 1;
   });
+
+  return runtimeSessionId;
+}
+
+function parseRuntimeSessionId(content: string) {
+  const match = /^session id:\s*(\S+)/i.exec(content.trim());
+  return match?.[1];
 }
 
 async function cleanupWorktree(args: string[]) {

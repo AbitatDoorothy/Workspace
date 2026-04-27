@@ -28,8 +28,11 @@ export class HostApiClient {
     return this.post<{ ok: true }>("/api/hosts/tools", input);
   }
 
-  pollJob(machineId: string) {
-    return this.post<DaemonJobPollResponse>("/api/daemon/jobs/poll", { machineId });
+  pollJob(machineId: string, activeConversationId?: string) {
+    return this.post<DaemonJobPollResponse>("/api/daemon/jobs/poll", {
+      machineId,
+      ...(activeConversationId ? { activeConversationId } : {})
+    });
   }
 
   ackJob(jobId: string, input: DaemonJobAckRequest) {

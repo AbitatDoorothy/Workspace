@@ -8,6 +8,7 @@ interface TestProject {
   name: string;
   repoUrl: string;
   defaultBranch: string;
+  hostLocalPath?: string | null;
   createdByUserId: string;
   githubOwner: string;
   githubRepo: string;
@@ -92,5 +93,29 @@ describe("project service", () => {
       status: "queued",
       projectId: project.id
     });
+  });
+
+  it("creates a local folder project without queueing a clone job", async () => {
+    const db = createProjectDb();
+    const service = createProjectService(db);
+
+    const project = await service.createProject({
+      workspaceId: "workspace_demo",
+      name: "Desktop Test",
+      sourceType: "local",
+      hostLocalPath: "/Users/reece/Desktop/Test",
+      defaultBranch: "local",
+      createdByUserId: "user_demo"
+    });
+
+    const jobs = await db.daemonJob.findMany();
+    expect(project).toMatchObject({
+      repoUrl: "/Users/reece/Desktop/Test",
+      hostLocalPath: "/Users/reece/Desktop/Test",
+      githubOwner: "",
+      githubRepo: "",
+      repoSyncStatus: "ready"
+    });
+    expect(jobs).toHaveLength(0);
   });
 });

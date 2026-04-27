@@ -16,6 +16,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       commitSha: input.commitSha,
       errorMessage: input.errorMessage,
       prUrl: input.prUrl,
+      runtimeSessionId: input.runtimeSessionId,
       worktreePath: input.worktreePath
     });
     await appendDaemonAuditEvent(job.conversationId, input);

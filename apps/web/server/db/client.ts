@@ -6,7 +6,7 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 const connectionString =
-  process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/abitat_workspace";
+  process.env.DATABASE_URL ?? "postgresql://reece@localhost:5432/abitat_workspace";
 const adapter = new PrismaPg({ connectionString });
 
 export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });

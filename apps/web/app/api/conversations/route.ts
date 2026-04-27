@@ -8,22 +8,25 @@ import { runEventService } from "../../../server/run-events";
 const conversationRequestSchema = conversationCreateRequestSchema.extend({
   workspaceId: z.string().min(1).default("workspace_demo"),
   createdByUserId: z.string().min(1).default("user_demo"),
-  prompt: z.string().trim().min(1)
+  prompt: z.string().trim().min(1),
+  redirectTo: z.string().min(1).optional()
 });
 
 export async function POST(request: Request) {
   try {
     const body = await parseRequest(request);
-    const conversation = await conversationQueueService.createConversation(
-      conversationRequestSchema.parse(body)
-    );
+    const input = conversationRequestSchema.parse(body);
+    const conversation = await conversationQueueService.createConversation(input);
     await runEventService.appendAuditEvent(conversation.id, {
-      content: "Conversation started",
-      metadata: { action: "start", userId: conversation.createdByUserId }
+      content: input.prompt,
+      metadata: { action: "start", role: "user", userId: conversation.createdByUserId }
     });
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
-      return NextResponse.redirect(new URL("/conversations", request.url), 303);
+      return NextResponse.redirect(
+        new URL(input.redirectTo ?? `/projects/${conversation.projectId}`, request.url),
+        303
+      );
     }
 
     return NextResponse.json(

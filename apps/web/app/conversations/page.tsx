@@ -1,3 +1,4 @@
+import { AppShell, Icon } from "../components/app-shell";
 import { agentService } from "../../server/agents";
 import { conversationQueueService } from "../../server/conversations";
 import { projectService } from "../../server/projects";
@@ -19,24 +20,27 @@ export default async function ConversationsPage() {
   const firstAgentId = agents[0]?.id ?? "agent_demo";
 
   return (
-    <main>
-      <section className="workspace-shell">
-        <div className="topbar">
+    <AppShell active="queue">
+      <section className="workspace-shell compact-shell">
+        <div className="page-header">
           <div className="title-stack">
             <p className="eyebrow">Conversations</p>
             <h1>Queued Work</h1>
+            <p>Start, monitor, approve, cancel, and continue coding-agent conversations.</p>
           </div>
           <div className="nav-actions">
             <a className="button-link" href="/projects">
+              <Icon>folder_managed</Icon>
               Projects
             </a>
             <a className="button-link" href="/agents">
+              <Icon>smart_toy</Icon>
               Agents
             </a>
           </div>
         </div>
 
-        <form className="panel project-form" action="/api/conversations" method="post">
+        <form className="glass-panel panel project-form" action="/api/conversations" method="post">
           <input type="hidden" name="workspaceId" value="workspace_demo" />
           <input type="hidden" name="createdByUserId" value="user_demo" />
           <label>
@@ -86,13 +90,21 @@ export default async function ConversationsPage() {
         <div className="conversation-list">
           {conversations.length > 0 ? (
             conversations.map((conversation) => (
-              <article className="panel conversation-row" key={conversation.id}>
+              <article className="conversation-row" key={conversation.id}>
                 <div>
-                  <h2>{conversation.type}</h2>
-                  <p>{conversation.prompt}</p>
+                  <div className="project-title-row">
+                    <span className="avatar-disc">
+                      <Icon filled>smart_toy</Icon>
+                    </span>
+                    <div>
+                      <h2>{conversation.type}</h2>
+                      <p>{conversation.status}</p>
+                    </div>
+                  </div>
                   <ConversationEvents
                     conversationId={conversation.id}
                     initialEvents={eventGroups.get(conversation.id) ?? []}
+                    savedPrompt={conversation.prompt}
                   />
                   {changeSets.get(conversation.id) ? (
                     <div className="diff-review">
@@ -147,7 +159,7 @@ export default async function ConversationsPage() {
               </article>
             ))
           ) : (
-            <article className="panel conversation-row">
+            <article className="conversation-row">
               <div>
                 <h2>No conversations</h2>
                 <p>Queued work will appear here.</p>
@@ -157,7 +169,7 @@ export default async function ConversationsPage() {
           )}
         </div>
       </section>
-    </main>
+    </AppShell>
   );
 }
 

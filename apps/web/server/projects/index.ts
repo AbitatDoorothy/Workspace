@@ -42,6 +42,7 @@ function normalizeProject(project: {
   name: string;
   repoUrl: string;
   defaultBranch: string;
+  hostLocalPath: string | null;
   createdByUserId: string;
   githubOwner: string | null;
   githubRepo: string | null;
@@ -53,6 +54,7 @@ function normalizeProject(project: {
     name: project.name,
     repoUrl: project.repoUrl,
     defaultBranch: project.defaultBranch,
+    hostLocalPath: project.hostLocalPath,
     createdByUserId: project.createdByUserId,
     githubOwner: project.githubOwner ?? "",
     githubRepo: project.githubRepo ?? "",

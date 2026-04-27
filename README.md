@@ -6,26 +6,46 @@ Abitat Workspace is a web-controlled local coding-agent runtime. This scaffold i
 
 - Node.js 24 or newer
 - pnpm 10.33.0 or newer
+- PostgreSQL running on `localhost:5432`
 
 ## Local Setup
 
 ```bash
 pnpm install
 cp .env.example .env.local
+brew install postgresql@16
+brew services start postgresql@16
+/opt/homebrew/opt/postgresql@16/bin/createdb abitat_workspace
+pnpm db:migrate:dev
+pnpm db:seed
 ```
+
+If your macOS user is not `reece`, update `DATABASE_URL` in `.env.local` to use your local Postgres role.
 
 ## Commands
 
-Start the web app:
+Start the web app and host daemon together:
 
 ```bash
 pnpm dev
 ```
 
-Start the host daemon in mock mode:
+Run just the web app:
 
 ```bash
-pnpm --filter host-daemon dev
+pnpm dev:web
+```
+
+Run just the host daemon in Codex mode:
+
+```bash
+pnpm dev:daemon
+```
+
+Run the host daemon in mock mode:
+
+```bash
+pnpm --filter host-daemon dev:mock
 ```
 
 Run checks:

@@ -6,6 +6,9 @@ import { conversationQueueService } from "../../../../../server/conversations";
 export async function POST(request: Request) {
   try {
     const input = daemonJobPollRequestSchema.parse(await request.json());
+    await conversationQueueService.recoverStaleJobs(input.machineId, {
+      activeConversationId: input.activeConversationId
+    });
     const job = await conversationQueueService.pollNextJob(input.machineId);
 
     return NextResponse.json({ job });

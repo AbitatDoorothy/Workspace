@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  cloneRepoJobSchema,
   commitAndPushJobSchema,
   conversationCreateRequestSchema,
   conversationTypeSchema,
+  daemonJobPollRequestSchema,
   daemonJobAckRequestSchema,
   daemonJobPollResponseSchema,
+  startConversationJobSchema,
   runtimeSchema,
   toolScanUploadRequestSchema
 } from "../src/index";
@@ -80,19 +83,79 @@ describe("shared schema validation", () => {
     });
   });
 
+  it("accepts SSH GitHub repo URLs in daemon job payloads", () => {
+    expect(
+      cloneRepoJobSchema.parse({
+        id: "job_clone",
+        type: "clone_repo",
+        projectId: "project_123",
+        payload: {
+          repoUrl: "git@github.com:AbitatDoorothy/Workspace.git",
+          defaultBranch: "main"
+        }
+      })
+    ).toMatchObject({
+      payload: {
+        repoUrl: "git@github.com:AbitatDoorothy/Workspace.git"
+      }
+    });
+
+    expect(
+      startConversationJobSchema.parse({
+        id: "job_start",
+        type: "start_conversation",
+        conversationId: "conversation_123",
+        payload: {
+          repoUrl: "git@github.com:AbitatDoorothy/Workspace.git",
+          defaultBranch: "main",
+          conversationType: "feature",
+          agentRuntime: "codex",
+          model: "5.4",
+          instructions: "Create the requested file.",
+          prompt: "Create success.md.",
+          resumeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce",
+          worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_123",
+          branchName: "abitat/feature/abcdef12-add-success",
+          hostLocalPath: "/Users/reece/Desktop/Test"
+        }
+      })
+    ).toMatchObject({
+      payload: {
+        repoUrl: "git@github.com:AbitatDoorothy/Workspace.git",
+        resumeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce",
+        worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_123",
+        hostLocalPath: "/Users/reece/Desktop/Test"
+      }
+    });
+  });
+
+  it("accepts active conversation metadata when polling daemon jobs", () => {
+    expect(
+      daemonJobPollRequestSchema.parse({
+        machineId: "machine_demo",
+        activeConversationId: "conversation_123"
+      })
+    ).toEqual({
+      machineId: "machine_demo",
+      activeConversationId: "conversation_123"
+    });
+  });
+
   it("accepts worktree metadata on daemon job acknowledgment", () => {
     expect(
       daemonJobAckRequestSchema.parse({
         status: "running",
         branchName: "abitat/feature/abcdef12-add-a-useful-page",
         worktreePath:
-          "/tmp/AbitatWorkspace/worktrees/conversation_abcdef123456-abitat-feature-abcdef12-add-a-useful-page"
+          "/tmp/AbitatWorkspace/worktrees/conversation_abcdef123456-abitat-feature-abcdef12-add-a-useful-page",
+        runtimeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce"
       })
     ).toEqual({
       status: "running",
       branchName: "abitat/feature/abcdef12-add-a-useful-page",
       worktreePath:
-        "/tmp/AbitatWorkspace/worktrees/conversation_abcdef123456-abitat-feature-abcdef12-add-a-useful-page"
+        "/tmp/AbitatWorkspace/worktrees/conversation_abcdef123456-abitat-feature-abcdef12-add-a-useful-page",
+      runtimeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce"
     });
   });
 

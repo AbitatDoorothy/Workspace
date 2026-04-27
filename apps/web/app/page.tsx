@@ -1,5 +1,6 @@
 import type { HostTool } from "@abitat/shared";
 
+import { AppShell, Icon } from "./components/app-shell";
 import { appInfo } from "../lib/app-info";
 import { DEMO_PAIRING_CODE } from "../server/hosts/host-service";
 import { hostService } from "../server/hosts";
@@ -10,72 +11,154 @@ export default async function Home() {
     ? (host.installedToolsJson as HostTool[])
     : [];
 
+  const installedTools = tools.filter((tool) => tool.installed);
+
   return (
-    <main>
+    <AppShell active="dashboard">
       <section className="workspace-shell">
-        <div className="topbar">
-          <div className="title-stack">
-            <p className="eyebrow">{appInfo.phase}</p>
-            <h1>{appInfo.name}</h1>
-          </div>
-          <div className="status-pill">
-            <span className="status-dot" aria-hidden="true" />
-            Host {host?.status ?? "pending"}
-          </div>
-        </div>
-
-        <div className="overview-grid">
-          <article className="panel">
-            <h2>Host Pairing</h2>
-            <p>{DEMO_PAIRING_CODE}</p>
-            <div className="command">
-              pnpm --filter host-daemon dev pair --code {DEMO_PAIRING_CODE}
+        <section className="glass-panel dashboard-host">
+          <div className="host-title">
+            <h1>Host Status</h1>
+            <div className="host-name">
+              <span className="status-dot" aria-hidden="true" />
+              {host?.name ?? "Mac Studio"} (Local)
             </div>
-          </article>
+            <p>
+              {appInfo.name} controls coding-agent work from this paired host. Pairing code{" "}
+              <strong>{DEMO_PAIRING_CODE}</strong>.
+            </p>
+          </div>
 
-          <article className="panel">
-            <h2>Host Daemon</h2>
-            <p>{host?.name ?? "Demo Host"}</p>
-            <div className="command">pnpm --filter host-daemon dev</div>
-          </article>
+          <div className="host-metrics">
+            <div className="metric">
+              <span>Host</span>
+              <strong>{host?.status ?? "pending"}</strong>
+            </div>
+            <div className="metric">
+              <span>Daemon command</span>
+              <strong>pnpm dev</strong>
+            </div>
+          </div>
+        </section>
 
-          <article className="panel">
-            <h2>Installed Tools</h2>
-            <ul className="tool-list">
-              {tools.length > 0 ? (
-                tools.map((tool) => (
-                  <li key={tool.name}>
-                    <span>{tool.name}</span>
-                    <strong>{tool.installed ? "installed" : "missing"}</strong>
+        <div className="content-grid">
+          <section>
+            <div className="section-heading">
+              <h2>Quick Access</h2>
+            </div>
+
+            <div className="quick-grid">
+              <div className="glass-card quick-card quick-card-clickable">
+                <a aria-label="Open projects" className="card-cover-link" href="/projects" />
+                <div className="card-topline">
+                  <span className="icon-tile">
+                    <Icon>code</Icon>
+                  </span>
+                  <span className="muted">Repos</span>
+                </div>
+                <div>
+                  <h3>Projects</h3>
+                  <p>GitHub repos and local folders.</p>
+                </div>
+              </div>
+              <div className="glass-card quick-card quick-card-clickable">
+                <a aria-label="Open agents" className="card-cover-link" href="/agents" />
+                <div className="card-topline">
+                  <span className="icon-tile icon-tile-warm">
+                    <Icon>smart_toy</Icon>
+                  </span>
+                  <span className="muted">Runtime</span>
+                </div>
+                <div>
+                  <h3>Agents</h3>
+                  <p>Codex, Claude, and mock agent profiles.</p>
+                </div>
+              </div>
+              <div className="glass-card quick-card quick-card-clickable">
+                <a aria-label="Open queue" className="card-cover-link" href="/conversations" />
+                <div className="card-topline">
+                  <span className="icon-tile">
+                    <Icon>forum</Icon>
+                  </span>
+                  <span className="status-pill">
+                    <span className="status-dot" aria-hidden="true" />
+                    Active
+                  </span>
+                </div>
+                <div>
+                  <h3>Queue</h3>
+                  <p>Review agent messages, changed files, and approvals.</p>
+                </div>
+              </div>
+              <div className="glass-card quick-card">
+                <div className="card-topline">
+                  <span className="icon-tile">
+                    <Icon>vpn_key</Icon>
+                  </span>
+                  <span className="muted">{DEMO_PAIRING_CODE}</span>
+                </div>
+                <div>
+                  <h3>Host Pairing</h3>
+                  <p>pnpm --filter host-daemon dev pair --code {DEMO_PAIRING_CODE}</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside className="dashboard-side">
+            <section className="glass-card health-card">
+              <h2>System Health</h2>
+              <div className="progress-row">
+                <div>
+                  <span>Installed runtimes</span>
+                  <span>{installedTools.length}</span>
+                </div>
+                <div className="progress-track">
+                  <div
+                    className="progress-value"
+                    style={{ width: `${Math.min(100, installedTools.length * 18)}%` }}
+                  />
+                </div>
+              </div>
+              <div className="progress-row">
+                <div>
+                  <span>Daemon</span>
+                  <span>{host?.status ?? "pending"}</span>
+                </div>
+                <div className="progress-track">
+                  <div className="progress-value" style={{ width: host?.status ? "82%" : "18%" }} />
+                </div>
+              </div>
+            </section>
+
+            <section className="glass-card tool-card">
+              <h2>Installed Tools</h2>
+              <ul className="tool-list">
+                {tools.length > 0 ? (
+                  tools.map((tool) => (
+                    <li key={tool.name}>
+                      <span>
+                        <Icon>{tool.name === "git" ? "account_tree" : "terminal"}</Icon>
+                        {tool.name}
+                      </span>
+                      <strong>{tool.installed ? "installed" : "missing"}</strong>
+                    </li>
+                  ))
+                ) : (
+                  <li>
+                    <span>
+                      <Icon>sync</Icon>
+                      scan
+                    </span>
+                    <strong>pending</strong>
                   </li>
-                ))
-              ) : (
-                <li>
-                  <span>scan</span>
-                  <strong>pending</strong>
-                </li>
-              )}
-            </ul>
-          </article>
-
-          <article className="panel">
-            <h2>Projects</h2>
-            <p>Workspace repository sync</p>
-            <a className="button-link" href="/projects">
-              Open projects
-            </a>
-          </article>
-
-          <article className="panel">
-            <h2>Conversations</h2>
-            <p>Queued agent work</p>
-            <a className="button-link" href="/conversations">
-              Open conversations
-            </a>
-          </article>
+                )}
+              </ul>
+            </section>
+          </aside>
         </div>
       </section>
-    </main>
+    </AppShell>
   );
 }
 
