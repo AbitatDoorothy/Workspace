@@ -1,17 +1,12 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type DragEvent as ReactDragEvent
-} from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import { Icon } from "../../components/app-shell";
 import {
   canStartConversationCardDrag,
+  canOpenConversationSummary,
   conversationDragMimeType,
   conversationDropTarget,
   conversationLabelFromStatus,
@@ -115,10 +110,7 @@ export function ConversationBoard({
     setDropTarget(null);
   }
 
-  function handleColumnDrop(
-    event: ReactDragEvent<HTMLElement>,
-    targetLabel: ConversationLabel
-  ) {
+  function handleColumnDrop(event: ReactDragEvent<HTMLElement>, targetLabel: ConversationLabel) {
     if (!hasConversationDragData(event)) {
       return;
     }
@@ -283,13 +275,20 @@ export function ConversationBoard({
                         Open CLI
                       </button>
                     </form>
-                    <a
-                      className="ghost-button"
-                      href={`/projects/${projectId}/conversations/${conversation.id}`}
-                    >
-                      <Icon>article</Icon>
-                      Summary
-                    </a>
+                    {canOpenConversationSummary(conversation.status) ? (
+                      <a
+                        className="ghost-button"
+                        href={`/projects/${projectId}/conversations/${conversation.id}`}
+                      >
+                        <Icon>article</Icon>
+                        Summary
+                      </a>
+                    ) : (
+                      <button className="ghost-button" disabled type="button">
+                        <Icon>article</Icon>
+                        Summary
+                      </button>
+                    )}
                     <form
                       action={`/api/conversations/${conversation.id}/delete`}
                       method="post"

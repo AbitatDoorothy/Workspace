@@ -62,35 +62,6 @@ export default async function Home() {
                   <p>GitHub repos and local folders.</p>
                 </div>
               </div>
-              <div className="glass-card quick-card quick-card-clickable">
-                <a aria-label="Open agents" className="card-cover-link" href="/agents" />
-                <div className="card-topline">
-                  <span className="icon-tile icon-tile-warm">
-                    <Icon>smart_toy</Icon>
-                  </span>
-                  <span className="muted">Runtime</span>
-                </div>
-                <div>
-                  <h3>Agents</h3>
-                  <p>Codex, Claude, and mock agent profiles.</p>
-                </div>
-              </div>
-              <div className="glass-card quick-card quick-card-clickable">
-                <a aria-label="Open queue" className="card-cover-link" href="/conversations" />
-                <div className="card-topline">
-                  <span className="icon-tile">
-                    <Icon>forum</Icon>
-                  </span>
-                  <span className="status-pill">
-                    <span className="status-dot" aria-hidden="true" />
-                    Active
-                  </span>
-                </div>
-                <div>
-                  <h3>Queue</h3>
-                  <p>Review agent messages, changed files, and approvals.</p>
-                </div>
-              </div>
               <div className="glass-card quick-card">
                 <div className="card-topline">
                   <span className="icon-tile">

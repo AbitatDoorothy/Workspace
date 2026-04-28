@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     const agent = await agentService.createAgent(agentRequestSchema.parse(body));
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
-      return NextResponse.redirect(createPublicRedirectUrl(request, "/agents"), 303);
+      return NextResponse.redirect(createPublicRedirectUrl(request, "/projects"), 303);
     }
 
     return NextResponse.json(agent, { status: 201 });

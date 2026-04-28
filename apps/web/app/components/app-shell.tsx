@@ -1,13 +1,6 @@
 import type { ReactNode } from "react";
 
-type ActiveNav = "dashboard" | "projects" | "agents" | "queue";
-
-const navItems: Array<{ active: ActiveNav; href: string; icon: string; label: string }> = [
-  { active: "dashboard", href: "/", icon: "dashboard", label: "Dashboard" },
-  { active: "projects", href: "/projects", icon: "folder_managed", label: "Projects" },
-  { active: "agents", href: "/agents", icon: "smart_toy", label: "Agents" },
-  { active: "queue", href: "/conversations", icon: "slow_motion_video", label: "Queue" }
-];
+import { navItems, type ActiveNav } from "./nav-items";
 
 interface AppShellProps {
   active: ActiveNav;
@@ -60,10 +53,6 @@ export function AppShell({ active, children }: AppShellProps) {
           <a className="nav-item" href="/projects">
             <Icon>settings</Icon>
             <span>Settings</span>
-          </a>
-          <a className="nav-item" href="/conversations">
-            <Icon>contact_support</Icon>
-            <span>Support</span>
           </a>
           <button className="switch-workspace" type="button">
             <Icon>swap_horiz</Icon>

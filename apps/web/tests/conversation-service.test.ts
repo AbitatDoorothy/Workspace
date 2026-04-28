@@ -6,6 +6,7 @@ import {
   createResilientConversationQueueService,
   type ConversationQueueService
 } from "../server/conversations/conversation-queue-service";
+import { createDemoConversationDb } from "../server/conversations";
 
 interface TestProject {
   id: string;
@@ -18,10 +19,13 @@ interface TestProject {
 interface TestAgent {
   id: string;
   projectId: string;
+  name?: string;
+  role?: string;
   runtime: "mock" | "codex" | "claude";
   model: string;
   instructions: string;
   allowedToolsJson: string[];
+  createdByUserId?: string;
 }
 
 interface TestConversation {
@@ -65,6 +69,7 @@ type JobFindFirstArgs = {
 function createConversationDb(existingJob?: TestDaemonJob) {
   const conversations = new Map<string, TestConversation>();
   const jobs = new Map<string, TestDaemonJob>();
+  const agents = new Map<string, TestAgent>();
 
   if (existingJob) {
     jobs.set(existingJob.id, existingJob);
@@ -79,11 +84,15 @@ function createConversationDb(existingJob?: TestDaemonJob) {
   const agent: TestAgent = {
     id: "agent_demo",
     projectId: "project_demo",
+    name: "Mock Agent",
+    role: "Careful coding agent",
     runtime: "mock",
     model: "mock-model",
     instructions: "Use mock runtime.",
-    allowedToolsJson: ["git", "node"]
+    allowedToolsJson: ["git", "node"],
+    createdByUserId: "user_demo"
   };
+  agents.set(agent.id, agent);
 
   return {
     project: {
@@ -95,8 +104,22 @@ function createConversationDb(existingJob?: TestDaemonJob) {
       }
     },
     agent: {
-      findUnique: async ({ where }: { where: { id: string } }) =>
-        where.id === agent.id ? agent : null
+      findUnique: async ({ where }: { where: { id: string } }) => agents.get(where.id) ?? null,
+      findFirst: async ({
+        where
+      }: {
+        where: { projectId?: string; runtime?: "mock" | "codex" | "claude"; role?: string };
+      }) =>
+        Array.from(agents.values()).find(
+          (candidate) =>
+            (!where.projectId || candidate.projectId === where.projectId) &&
+            (!where.runtime || candidate.runtime === where.runtime) &&
+            (!where.role || candidate.role === where.role)
+        ) ?? null,
+      create: async ({ data }: { data: TestAgent }) => {
+        agents.set(data.id, data);
+        return data;
+      }
     },
     conversation: {
       create: async ({ data }: { data: TestConversation }) => {
@@ -223,6 +246,140 @@ describe("conversation queue service", () => {
         prompt: ""
       }
     });
+  });
+
+  it("starts a Codex conversation without requiring the user to choose an agent", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      createdByUserId: "user_demo",
+      runtime: "codex"
+    });
+    const jobs = await db.daemonJob.findMany();
+
+    expect(conversation).toMatchObject({
+      agentId: expect.stringMatching(/^agent_/),
+      prompt: "",
+      status: "queued",
+      type: "investigation"
+    });
+    expect(jobs.at(-1)).toMatchObject({
+      type: "start_conversation",
+      conversationId: conversation.id,
+      payloadJson: {
+        agentRuntime: "codex",
+        instructions: expect.stringContaining("Codex"),
+        prompt: ""
+      }
+    });
+    expect((jobs.at(-1)?.payloadJson as { model?: string }).model).toBeUndefined();
+  });
+
+  it("uses the task title for the card without sending it as the initial Codex prompt", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      createdByUserId: "user_demo",
+      runtime: "codex",
+      type: "bugfix",
+      prompt: "Fix login redirect"
+    });
+    const jobs = await db.daemonJob.findMany();
+
+    expect(conversation).toMatchObject({
+      prompt: "Fix login redirect",
+      type: "bugfix"
+    });
+    expect(jobs.at(-1)).toMatchObject({
+      type: "start_conversation",
+      payloadJson: {
+        agentRuntime: "codex",
+        conversationType: "bugfix",
+        prompt: "",
+        taskTitle: "Fix login redirect"
+      }
+    });
+  });
+
+  it("queues a hidden same-thread summary job when a conversation is marked complete", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      createdByUserId: "user_demo",
+      runtime: "codex",
+      type: "feature",
+      prompt: "Add local notes"
+    });
+    await db.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        branchName: "abitat/feature/local-notes",
+        runtimeSessionId: "session_123",
+        status: "running",
+        worktreePath: "/tmp/local-notes"
+      }
+    });
+
+    const completed = await service.setConversationLabel(conversation.id, {
+      label: "complete",
+      userId: "user_demo"
+    });
+    const jobs = await db.daemonJob.findMany();
+
+    expect(completed.status).toBe("pushed");
+    expect(jobs.at(-1)).toMatchObject({
+      conversationId: conversation.id,
+      type: "summarize_conversation",
+      status: "queued",
+      payloadJson: {
+        agentRuntime: "codex",
+        branchName: "abitat/feature/local-notes",
+        presentation: "inline",
+        resumeSessionId: "session_123",
+        taskTitle: "Add local notes",
+        worktreePath: "/tmp/local-notes"
+      }
+    });
+    expect((jobs.at(-1)?.payloadJson as { prompt?: string }).prompt).toContain("Summarize");
+  });
+
+  it("hydrates hot-reloaded demo storage before creating a default runtime agent", async () => {
+    const globalForConversations = globalThis as typeof globalThis & {
+      abitatDemoConversationStore?: {
+        conversations: Map<string, TestConversation>;
+        agents?: Map<string, TestAgent>;
+        jobs: Map<string, TestDaemonJob>;
+      };
+    };
+    const previousStore = globalForConversations.abitatDemoConversationStore;
+
+    try {
+      globalForConversations.abitatDemoConversationStore = {
+        conversations: new Map<string, TestConversation>(),
+        jobs: new Map<string, TestDaemonJob>()
+      };
+
+      const service = createConversationQueueService(createDemoConversationDb());
+      const conversation = await service.createConversation({
+        workspaceId: "workspace_demo",
+        projectId: "project_demo",
+        createdByUserId: "user_demo",
+        runtime: "codex"
+      });
+
+      expect(conversation.agentId).toMatch(/^agent_/);
+      expect(globalForConversations.abitatDemoConversationStore.agents).toBeInstanceOf(Map);
+    } finally {
+      globalForConversations.abitatDemoConversationStore = previousStore;
+    }
   });
 
   it("continues an existing conversation without an initial web prompt", async () => {
@@ -416,7 +573,9 @@ describe("conversation queue service", () => {
     await expect(
       service.deleteConversation(conversation.id, { userId: "user_demo" })
     ).resolves.toEqual({ ok: true });
-    await expect(db.conversation.findUnique({ where: { id: conversation.id } })).resolves.toBeNull();
+    await expect(
+      db.conversation.findUnique({ where: { id: conversation.id } })
+    ).resolves.toBeNull();
   });
 
   it("cancels active daemon jobs before deleting a conversation", async () => {

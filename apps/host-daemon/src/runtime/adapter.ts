@@ -8,7 +8,7 @@ export interface RuntimeEvent {
 export interface RuntimeRunInput {
   worktreePath: string;
   prompt: string;
-  model: string;
+  model?: string;
   instructions: string;
   conversationId?: string;
   allowedTools?: string[];

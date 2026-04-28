@@ -25,6 +25,27 @@ function createPrismaConversationDb(db: PrismaClient) {
       }
     },
     agent: {
+      async create(args: {
+        data: {
+          id: string;
+          projectId: string;
+          name: string;
+          role: string;
+          runtime: Runtime;
+          model: string;
+          instructions: string;
+          allowedToolsJson: string[];
+          createdByUserId: string;
+        };
+      }) {
+        return normalizeAgent(
+          await db.agent.create({ data: args.data as Prisma.AgentUncheckedCreateInput })
+        );
+      },
+      async findFirst(args: { where: { projectId?: string; runtime?: Runtime; role?: string } }) {
+        const agent = await db.agent.findFirst({ where: args.where });
+        return agent ? normalizeAgent(agent) : null;
+      },
       async findUnique(args: { where: { id: string } }) {
         const agent = await db.agent.findUnique({ where: args.where });
         return agent ? normalizeAgent(agent) : null;
@@ -164,21 +185,25 @@ function normalizeAgent(agent: {
   id: string;
   projectId: string;
   name: string;
+  role: string;
   runtime: Runtime;
   model: string;
   instructions: string;
   allowedToolsJson: Prisma.JsonValue;
+  createdByUserId: string;
 }): AgentRecord {
   return {
     id: agent.id,
     projectId: agent.projectId,
     name: agent.name,
+    role: agent.role,
     runtime: agent.runtime,
     model: agent.model,
     instructions: agent.instructions,
     allowedToolsJson: Array.isArray(agent.allowedToolsJson)
       ? agent.allowedToolsJson.filter((tool): tool is string => typeof tool === "string")
-      : []
+      : [],
+    createdByUserId: agent.createdByUserId
   };
 }
 
@@ -246,7 +271,7 @@ function normalizeDaemonJob(job: {
   };
 }
 
-function createDemoConversationDb() {
+export function createDemoConversationDb() {
   const store = getDemoConversationStore();
   const project: ProjectRecord = {
     id: "project_demo",
@@ -260,11 +285,14 @@ function createDemoConversationDb() {
     id: "agent_demo",
     projectId: "project_demo",
     name: "Mock Agent",
+    role: "Careful coding agent",
     runtime: "mock",
     model: "mock-model",
     instructions: "Use the mock runtime and keep changes small.",
-    allowedToolsJson: ["git", "node"]
+    allowedToolsJson: ["git", "node"],
+    createdByUserId: "user_demo"
   };
+  store.agents.set(agent.id, agent);
 
   return {
     project: {
@@ -272,8 +300,22 @@ function createDemoConversationDb() {
         where.id === project.id ? project : null
     },
     agent: {
-      findUnique: async ({ where }: { where: { id: string } }) =>
-        where.id === agent.id ? agent : null
+      create: async ({ data }: { data: AgentRecord }) => {
+        store.agents.set(data.id, data);
+        return data;
+      },
+      findFirst: async ({
+        where
+      }: {
+        where: { projectId?: string; runtime?: Runtime; role?: string };
+      }) =>
+        Array.from(store.agents.values()).find(
+          (candidate) =>
+            (!where.projectId || candidate.projectId === where.projectId) &&
+            (!where.runtime || candidate.runtime === where.runtime) &&
+            (!where.role || candidate.role === where.role)
+        ) ?? null,
+      findUnique: async ({ where }: { where: { id: string } }) => store.agents.get(where.id) ?? null
     },
     conversation: {
       create: async ({ data }: { data: ConversationRecord }) => {
@@ -388,14 +430,21 @@ function getDemoConversationStore() {
   const globalForConversations = globalThis as typeof globalThis & {
     abitatDemoConversationStore?: {
       conversations: Map<string, ConversationRecord>;
+      agents?: Map<string, AgentRecord>;
       jobs: Map<string, DaemonJobRecord>;
     };
   };
 
   globalForConversations.abitatDemoConversationStore ??= {
     conversations: new Map<string, ConversationRecord>(),
+    agents: new Map<string, AgentRecord>(),
     jobs: new Map<string, DaemonJobRecord>()
   };
+  globalForConversations.abitatDemoConversationStore.agents ??= new Map<string, AgentRecord>();
 
-  return globalForConversations.abitatDemoConversationStore;
+  return globalForConversations.abitatDemoConversationStore as {
+    conversations: Map<string, ConversationRecord>;
+    agents: Map<string, AgentRecord>;
+    jobs: Map<string, DaemonJobRecord>;
+  };
 }

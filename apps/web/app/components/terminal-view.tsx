@@ -56,7 +56,7 @@ export function TerminalView({ conversationId, initialPrompt }: TerminalViewProp
         for (const line of prompt.split("\n")) {
           term.writeln(line);
         }
-        term.writeln("--- Starting agent ---");
+        term.writeln("--- Starting runtime ---");
         term.writeln("");
       };
 
@@ -92,7 +92,7 @@ export function TerminalView({ conversationId, initialPrompt }: TerminalViewProp
       wsRef.current = ws;
 
       ws.addEventListener("open", () => {
-        term.writeln("connecting to agent...");
+        term.writeln("connecting to runtime...");
       });
 
       ws.addEventListener("message", (event) => {
@@ -114,7 +114,7 @@ export function TerminalView({ conversationId, initialPrompt }: TerminalViewProp
         if (msg.type === "exit") {
           finishedRef.current = true;
           term.writeln("");
-          term.writeln(`--- Agent exited (code ${msg.exitCode ?? "?"}) ---`);
+          term.writeln(`--- Runtime exited (code ${msg.exitCode ?? "?"}) ---`);
         }
       });
 

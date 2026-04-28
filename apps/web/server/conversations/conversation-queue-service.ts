@@ -15,14 +15,21 @@ import { assertWorkspaceMember } from "../auth/role-checks";
 export interface ConversationCreateInput {
   workspaceId: string;
   projectId: string;
+  agentId?: string;
+  runtime?: Runtime;
+  createdByUserId: string;
+  type?: ConversationType;
+  prompt?: string;
+}
+
+export interface ConversationRecord {
+  id: string;
+  workspaceId: string;
+  projectId: string;
   agentId: string;
   createdByUserId: string;
   type: ConversationType;
   prompt: string;
-}
-
-export interface ConversationRecord extends ConversationCreateInput {
-  id: string;
   status: ConversationStatus;
   branchName?: string | null;
   worktreePath?: string | null;
@@ -47,10 +54,24 @@ export interface AgentRecord {
   id: string;
   projectId: string;
   name?: string;
+  role?: string;
   runtime: Runtime;
   model: string;
   instructions: string;
   allowedToolsJson: string[];
+  createdByUserId?: string;
+}
+
+interface AgentCreateRecord {
+  id: string;
+  projectId: string;
+  name: string;
+  role: string;
+  runtime: Runtime;
+  model: string;
+  instructions: string;
+  allowedToolsJson: string[];
+  createdByUserId: string;
 }
 
 export interface DaemonJobRecord {
@@ -71,6 +92,10 @@ interface ConversationDb {
     findUnique(args: { where: { id: string } }): Promise<ProjectRecord | null>;
   };
   agent: {
+    create(args: { data: AgentCreateRecord }): Promise<AgentRecord>;
+    findFirst(args: {
+      where: { projectId?: string; runtime?: Runtime; role?: string };
+    }): Promise<AgentRecord | null>;
     findUnique(args: { where: { id: string } }): Promise<AgentRecord | null>;
   };
   conversation: {
@@ -122,22 +147,23 @@ const continueConversationInputSchema = z.object({
   userId: z.string().min(1)
 });
 const conversationLabelSchema = z.enum(["in_process", "complete"]);
+const internalDefaultAgentRole = "internal_default_runtime";
+const defaultRuntimeInstructions = {
+  codex:
+    "Start an interactive Codex CLI in this project. Use the user's local Codex configuration and wait for the user's terminal instructions.",
+  claude:
+    "Start an interactive Claude CLI in this project. Use the user's local Claude configuration and wait for the user's terminal instructions.",
+  mock: "Use the mock runtime and keep changes small."
+} satisfies Record<Runtime, string>;
 
 export function createConversationQueueService(db: ConversationDb) {
   return {
     async createConversation(input: ConversationCreateInput) {
       const parsed = createConversationInputSchema.parse(input);
-      const [project, agent] = await Promise.all([
-        db.project.findUnique({ where: { id: parsed.projectId } }),
-        db.agent.findUnique({ where: { id: parsed.agentId } })
-      ]);
+      const project = await db.project.findUnique({ where: { id: parsed.projectId } });
 
       if (!project || project.workspaceId !== parsed.workspaceId) {
         throw new Error("Project not found");
-      }
-
-      if (!agent || agent.projectId !== parsed.projectId) {
-        throw new Error("Agent not found");
       }
 
       assertWorkspaceMember({
@@ -145,11 +171,22 @@ export function createConversationQueueService(db: ConversationDb) {
         userId: parsed.createdByUserId
       });
 
+      const agent = await resolveConversationAgent(db, {
+        agentId: parsed.agentId,
+        createdByUserId: parsed.createdByUserId,
+        projectId: parsed.projectId,
+        runtime: parsed.runtime
+      });
+
+      if (!agent || agent.projectId !== parsed.projectId) {
+        throw new Error("Agent not found");
+      }
+
       const conversation: ConversationRecord = {
         id: `conversation_${randomBytes(8).toString("hex")}`,
         workspaceId: parsed.workspaceId,
         projectId: parsed.projectId,
-        agentId: parsed.agentId,
+        agentId: agent.id,
         createdByUserId: parsed.createdByUserId,
         type: parsed.type,
         status: "queued",
@@ -166,17 +203,7 @@ export function createConversationQueueService(db: ConversationDb) {
           conversationId: created.id,
           type: "start_conversation",
           status: "queued",
-          payloadJson: {
-            repoUrl: project.repoUrl,
-            defaultBranch: project.defaultBranch,
-            hostLocalPath: project.hostLocalPath ?? undefined,
-            conversationType: created.type,
-            agentRuntime: agent.runtime,
-            model: agent.model,
-            instructions: agent.instructions,
-            prompt: created.prompt,
-            allowedTools: agent.allowedToolsJson
-          }
+          payloadJson: startConversationPayload(project, agent, created)
         }
       });
 
@@ -235,20 +262,11 @@ export function createConversationQueueService(db: ConversationDb) {
           conversationId: updated.id,
           type: "start_conversation",
           status: "queued",
-          payloadJson: {
-            repoUrl: project.repoUrl,
-            defaultBranch: project.defaultBranch,
-            hostLocalPath: project.hostLocalPath ?? undefined,
-            conversationType: updated.type,
-            agentRuntime: agent.runtime,
-            model: agent.model,
-            instructions: agent.instructions,
-            prompt: updated.prompt,
-            allowedTools: agent.allowedToolsJson,
+          payloadJson: startConversationPayload(project, agent, updated, {
+            branchName: updated.branchName ?? undefined,
             resumeSessionId: updated.runtimeSessionId ?? undefined,
-            worktreePath: updated.worktreePath ?? undefined,
-            branchName: updated.branchName ?? undefined
-          }
+            worktreePath: updated.worktreePath ?? undefined
+          })
         }
       });
 
@@ -276,12 +294,50 @@ export function createConversationQueueService(db: ConversationDb) {
         userId: parsed.userId
       });
 
-      return db.conversation.update({
+      const updated = await db.conversation.update({
         where: { id: conversation.id },
         data: {
           status: parsed.label === "complete" ? "pushed" : "running"
         }
       });
+
+      if (parsed.label !== "complete") {
+        return updated;
+      }
+
+      const [project, agent] = await Promise.all([
+        db.project.findUnique({ where: { id: conversation.projectId } }),
+        db.agent.findUnique({ where: { id: conversation.agentId } })
+      ]);
+
+      if (
+        project &&
+        agent &&
+        conversation.branchName &&
+        conversation.runtimeSessionId &&
+        conversation.worktreePath
+      ) {
+        await db.daemonJob.create({
+          data: {
+            id: `job_${randomBytes(8).toString("hex")}`,
+            workspaceId: conversation.workspaceId,
+            machineId: null,
+            projectId: conversation.projectId,
+            conversationId: conversation.id,
+            type: "summarize_conversation",
+            status: "queued",
+            payloadJson: startConversationPayload(project, agent, conversation, {
+              branchName: conversation.branchName,
+              presentation: "inline",
+              prompt: summaryPrompt(conversation),
+              resumeSessionId: conversation.runtimeSessionId,
+              worktreePath: conversation.worktreePath
+            })
+          }
+        });
+      }
+
+      return updated;
     },
 
     async deleteConversation(conversationId: string, input: { userId: string }) {
@@ -334,7 +390,7 @@ export function createConversationQueueService(db: ConversationDb) {
     async pollNextJob(machineId: string): Promise<DaemonJob | null> {
       const job = await db.daemonJob.findFirst({
         where: {
-          type: { in: ["start_conversation", "commit_and_push"] },
+          type: { in: ["start_conversation", "commit_and_push", "summarize_conversation"] },
           status: { in: ["queued"] }
         }
       });
@@ -632,10 +688,88 @@ function toDaemonJob(job: DaemonJobRecord) {
   });
 }
 
+async function resolveConversationAgent(
+  db: ConversationDb,
+  input: {
+    agentId?: string;
+    createdByUserId: string;
+    projectId: string;
+    runtime: Runtime;
+  }
+) {
+  if (input.agentId) {
+    return db.agent.findUnique({ where: { id: input.agentId } });
+  }
+
+  const existing = await db.agent.findFirst({
+    where: {
+      projectId: input.projectId,
+      runtime: input.runtime,
+      role: internalDefaultAgentRole
+    }
+  });
+
+  if (existing) {
+    return existing;
+  }
+
+  return db.agent.create({
+    data: {
+      id: `agent_${randomBytes(8).toString("hex")}`,
+      projectId: input.projectId,
+      name: input.runtime === "codex" ? "Codex" : input.runtime === "claude" ? "Claude" : "Mock",
+      role: internalDefaultAgentRole,
+      runtime: input.runtime,
+      model: "",
+      instructions: defaultRuntimeInstructions[input.runtime],
+      allowedToolsJson: [],
+      createdByUserId: input.createdByUserId
+    }
+  });
+}
+
+function startConversationPayload(
+  project: ProjectRecord,
+  agent: AgentRecord,
+  conversation: ConversationRecord,
+  continuation: {
+    branchName?: string;
+    presentation?: "terminal" | "inline";
+    prompt?: string;
+    resumeSessionId?: string;
+    worktreePath?: string;
+  } = {}
+) {
+  const runtimePrompt =
+    continuation.prompt ??
+    (agent.role === internalDefaultAgentRole && !continuation.resumeSessionId
+      ? ""
+      : conversation.prompt);
+
+  return {
+    repoUrl: project.repoUrl,
+    defaultBranch: project.defaultBranch,
+    hostLocalPath: project.hostLocalPath ?? undefined,
+    conversationType: conversation.type,
+    agentRuntime: agent.runtime,
+    ...(agent.model.trim() ? { model: agent.model } : {}),
+    instructions: agent.instructions,
+    presentation: continuation.presentation ?? "terminal",
+    prompt: runtimePrompt,
+    taskTitle: conversation.prompt || undefined,
+    allowedTools: agent.allowedToolsJson,
+    ...continuation
+  };
+}
+
 function statusToConversationStatus(
   status: "running" | "completed" | "failed",
   jobType: string
 ): ConversationStatus {
+  if (jobType === "summarize_conversation") {
+    return "pushed";
+  }
+
   if (jobType === "commit_and_push") {
     if (status === "completed") {
       return "pushed";
@@ -654,5 +788,20 @@ function statusToConversationStatus(
 }
 
 function jobTypeToPreparingStatus(jobType: string): ConversationStatus {
+  if (jobType === "summarize_conversation") {
+    return "pushed";
+  }
+
   return jobType === "commit_and_push" ? "committing" : "preparing";
+}
+
+function summaryPrompt(conversation: ConversationRecord) {
+  return [
+    "Summarize what has been done in this Codex thread for the web summary page.",
+    "Return a concise plain-text summary with the main changes, decisions, and any remaining follow-up.",
+    "Do not continue implementation work.",
+    conversation.prompt ? `Task title: ${conversation.prompt}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

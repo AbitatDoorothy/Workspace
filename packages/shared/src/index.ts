@@ -42,6 +42,7 @@ export const daemonJobTypeSchema = z.enum([
   "scan_tools",
   "clone_repo",
   "start_conversation",
+  "summarize_conversation",
   "collect_changeset",
   "commit_and_push",
   "create_pr",
@@ -92,8 +93,9 @@ export const okResponseSchema = z.object({
 export const conversationCreateRequestSchema = z.object({
   workspaceId: idSchema,
   projectId: idSchema,
-  agentId: idSchema,
-  type: conversationTypeSchema,
+  agentId: idSchema.optional(),
+  runtime: runtimeSchema.default("codex"),
+  type: conversationTypeSchema.default("investigation"),
   prompt: z.string().default("")
 });
 
@@ -153,22 +155,34 @@ export const cloneRepoJobSchema = daemonJobBaseSchema.extend({
   })
 });
 
+const conversationRuntimeJobPayloadSchema = z.object({
+  repoUrl: repoUrlSchema,
+  defaultBranch: z.string().min(1),
+  conversationType: conversationTypeSchema,
+  agentRuntime: runtimeSchema,
+  model: z.string().min(1).optional(),
+  instructions: z.string().min(1),
+  prompt: z.string(),
+  allowedTools: z.array(z.string().min(1)).default([]),
+  resumeSessionId: z.string().min(1).optional(),
+  worktreePath: z.string().min(1).optional(),
+  branchName: z.string().min(1).optional(),
+  hostLocalPath: z.string().min(1).optional(),
+  presentation: z.enum(["terminal", "inline"]).default("terminal"),
+  taskTitle: z.string().optional()
+});
+
 export const startConversationJobSchema = daemonJobBaseSchema.extend({
   type: z.literal("start_conversation"),
   conversationId: idSchema,
-  payload: z.object({
-    repoUrl: repoUrlSchema,
-    defaultBranch: z.string().min(1),
-    conversationType: conversationTypeSchema,
-    agentRuntime: runtimeSchema,
-    model: z.string().min(1),
-    instructions: z.string().min(1),
-    prompt: z.string(),
-    allowedTools: z.array(z.string().min(1)).default([]),
-    resumeSessionId: z.string().min(1).optional(),
-    worktreePath: z.string().min(1).optional(),
-    branchName: z.string().min(1).optional(),
-    hostLocalPath: z.string().min(1).optional()
+  payload: conversationRuntimeJobPayloadSchema
+});
+
+export const summarizeConversationJobSchema = daemonJobBaseSchema.extend({
+  type: z.literal("summarize_conversation"),
+  conversationId: idSchema,
+  payload: conversationRuntimeJobPayloadSchema.extend({
+    presentation: z.literal("inline")
   })
 });
 
@@ -207,6 +221,7 @@ export const daemonJobSchema = z.discriminatedUnion("type", [
   scanToolsJobSchema,
   cloneRepoJobSchema,
   startConversationJobSchema,
+  summarizeConversationJobSchema,
   collectChangesetJobSchema,
   commitAndPushJobSchema,
   createPrJobSchema,

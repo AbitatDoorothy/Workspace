@@ -172,8 +172,7 @@ function ptyArgs(name: PtiRuntimeName, input: RuntimeRunInput): string[] {
       "plugins",
       "--disable",
       "general_analytics",
-      "--model",
-      resolveCodexModel(input.model),
+      ...codexModelArgs(input.model),
       "--full-auto"
     ];
     if (input.resumeSessionId) {
@@ -181,7 +180,7 @@ function ptyArgs(name: PtiRuntimeName, input: RuntimeRunInput): string[] {
     }
     return ["exec", ...localFolderArgs, ...modelArgs, "-"];
   }
-  return ["--model", input.model, "--print"];
+  return [...plainModelArgs(input.model), "--print"];
 }
 
 async function defaultCheckCommand(name: PtiRuntimeName): Promise<RuntimeAvailability> {
@@ -255,6 +254,16 @@ function rawToString(raw: unknown) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function codexModelArgs(model?: string) {
+  const trimmed = model?.trim();
+  return trimmed ? ["--model", resolveCodexModel(trimmed)] : [];
+}
+
+function plainModelArgs(model?: string) {
+  const trimmed = model?.trim();
+  return trimmed ? ["--model", trimmed] : [];
 }
 
 function resolveCodexModel(model: string) {

@@ -19,11 +19,11 @@ export function createMockRuntimeAdapter(): RuntimeAdapter {
   };
 }
 
-function runLog(input: { prompt: string; model: string; instructions: string }) {
+function runLog(input: { prompt: string; model?: string; instructions: string }) {
   return [
     "# Abitat Mock Runtime Log",
     "",
-    `Model: ${input.model}`,
+    `Model: ${input.model ?? "default"}`,
     "",
     "## Prompt",
     "",

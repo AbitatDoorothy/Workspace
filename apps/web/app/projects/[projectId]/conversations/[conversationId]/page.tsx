@@ -20,7 +20,7 @@ export default async function ProjectConversationPage({
 
   if (!project || !conversation) {
     return (
-      <AppShell active="queue">
+      <AppShell active="projects">
         <section className="workspace-shell">
           <div className="page-header">
             <div className="title-stack">
@@ -37,7 +37,7 @@ export default async function ProjectConversationPage({
   }
 
   return (
-    <AppShell active="queue">
+    <AppShell active="projects">
       <section className="conversation-summary-shell">
         <ConversationSummaryPanel
           conversationId={conversation.id}

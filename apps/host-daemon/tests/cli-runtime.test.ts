@@ -102,6 +102,39 @@ describe("CLI runtime adapter", () => {
     ]);
   });
 
+  it("lets interactive Codex use its default configured model when no model is provided", async () => {
+    let capturedArgs: string[] = [];
+    const adapter = createCliRuntimeAdapter({
+      name: "codex",
+      command: "codex",
+      runner: {
+        interactive: true,
+        check: async () => ({ installed: true, version: "0.125.0", path: "/usr/bin/codex" }),
+        run: async (_command, args) => {
+          capturedArgs = args;
+          return 0;
+        }
+      }
+    });
+
+    await adapter.run(
+      {
+        worktreePath: "/tmp/worktree",
+        prompt: "",
+        instructions: "Open Codex."
+      },
+      async () => {}
+    );
+
+    expect(capturedArgs).toEqual([
+      "--disable",
+      "plugins",
+      "--disable",
+      "general_analytics",
+      "--full-auto"
+    ]);
+  });
+
   it("allows Codex to run in local folders that are not git repos", async () => {
     let capturedArgs: string[] = [];
     const adapter = createCliRuntimeAdapter({
@@ -381,6 +414,90 @@ describe("CLI runtime adapter", () => {
     }
   });
 
+  it("launches interactive Codex in iTerm2 with the default configured model", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "abitat-terminal-codex-default-"));
+    let launched = false;
+
+    try {
+      const runner = createTerminalCliRuntimeRunner({
+        check: async () => ({ installed: true, path: "/usr/bin/codex" }),
+        launch: async ({ scriptPath, logPath, exitMarker }) => {
+          const script = await readFile(scriptPath, "utf8");
+          launched = true;
+
+          expect(script).toContain("'/usr/bin/codex'");
+          expect(script).not.toContain("'exec'");
+          expect(script).not.toContain("'--model'");
+          expect(script).not.toContain("$(cat ");
+
+          await appendFile(logPath, "session id: default-codex-session\n", "utf8");
+          await appendFile(logPath, `${exitMarker}:0\n`, "utf8");
+        }
+      });
+      const adapter = createCliRuntimeAdapter({
+        name: "codex",
+        command: "codex",
+        runner
+      });
+
+      await adapter.run(
+        {
+          worktreePath: tmp,
+          prompt: "",
+          instructions: "Use local Codex defaults."
+        },
+        async () => {}
+      );
+
+      expect(launched).toBe(true);
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes Codex resume instructions into a stored runtime session id", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "abitat-terminal-codex-resume-line-"));
+    const events: { type: string; content: string }[] = [];
+
+    try {
+      const runner = createTerminalCliRuntimeRunner({
+        check: async () => ({ installed: true, path: "/usr/bin/codex" }),
+        launch: async ({ logPath, exitMarker }) => {
+          await appendFile(logPath, "Created first-poem.md with a poem.\n", "utf8");
+          await appendFile(
+            logPath,
+            "To continue this session, run codex resume 019dd431-1212-73e2-a40d-4345d8645c76\n",
+            "utf8"
+          );
+          await appendFile(logPath, `${exitMarker}:0\n`, "utf8");
+        }
+      });
+      const adapter = createCliRuntimeAdapter({
+        name: "codex",
+        command: "codex",
+        runner
+      });
+
+      await adapter.run(
+        {
+          worktreePath: tmp,
+          prompt: "",
+          instructions: "Use local Codex defaults."
+        },
+        async (event) => {
+          events.push(event);
+        }
+      );
+
+      expect(events).toContainEqual({
+        type: "stdout",
+        content: "session id: 019dd431-1212-73e2-a40d-4345d8645c76"
+      });
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("opens terminal scripts in a new iTerm2 tab", async () => {
     const calls: Array<{ command: string; args: string[] }> = [];
 
@@ -416,14 +533,9 @@ describe("CLI runtime adapter", () => {
       });
 
       const result = await Promise.race([
-        runner.run(
-          "codex",
-          ["--model", "gpt-5.4"],
-          { cwd: tmp, stdin: "" },
-          async (event) => {
-            events.push(event);
-          }
-        ),
+        runner.run("codex", ["--model", "gpt-5.4"], { cwd: tmp, stdin: "" }, async (event) => {
+          events.push(event);
+        }),
         new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 1000))
       ]);
 

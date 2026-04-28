@@ -365,6 +365,7 @@ async function watchTerminalLog(
   let offset = 0;
   let buffered = "";
   let shellPid: number | null = null;
+  let sawSessionId = false;
   const startedAt = Date.now();
   const emittedLines: string[] = [];
 
@@ -391,15 +392,20 @@ async function watchTerminalLog(
           }
           return {
             exitCode: Number(line.slice(exitMarker.length + 1)) || 0,
-            sawSessionId: emittedLines.some((emittedLine) =>
-              /^session id:/i.test(cleanTerminalLine(emittedLine))
-            )
+            sawSessionId
           };
         }
 
         if (line.length > 0) {
           emittedLines.push(line);
           await emit({ type: "stdout", content: line });
+          const sessionId = parseTerminalSessionId(line);
+          if (sessionId) {
+            sawSessionId = true;
+            if (!/^session id:/i.test(cleanTerminalLine(line))) {
+              await emit({ type: "stdout", content: `session id: ${sessionId}` });
+            }
+          }
         }
       }
     }
@@ -412,9 +418,7 @@ async function watchTerminalLog(
 
       return {
         exitCode: 130,
-        sawSessionId: emittedLines.some((emittedLine) =>
-          /^session id:/i.test(cleanTerminalLine(emittedLine))
-        )
+        sawSessionId
       };
     }
 
@@ -426,7 +430,7 @@ async function watchTerminalLog(
 
       return {
         exitCode: 124,
-        sawSessionId: false
+        sawSessionId
       };
     }
 
@@ -541,6 +545,18 @@ function cleanTerminalLine(line: string) {
     .trim();
 }
 
+function parseTerminalSessionId(line: string) {
+  const cleaned = cleanTerminalLine(line);
+  const direct = /^session id:\s*(\S+)/i.exec(cleaned);
+
+  if (direct) {
+    return direct[1];
+  }
+
+  const resume = /\bcodex\s+resume\s+(\S+)/i.exec(cleaned);
+  return resume?.[1]?.replace(/[.,;:]+$/u, "");
+}
+
 function cleanSummaryLine(line: string) {
   let cleaned = line
     .replace(/^[\u2022\-\s]+/u, "")
@@ -621,12 +637,7 @@ function runtimeArgs(name: CliRuntimeName, input: RuntimeRunInput, interactive: 
     const vpnStableArgs = ["--disable", "plugins", "--disable", "general_analytics"];
 
     if (interactive) {
-      const interactiveArgs = [
-        ...vpnStableArgs,
-        "--model",
-        resolveCodexModel(input.model),
-        "--full-auto"
-      ];
+      const interactiveArgs = [...vpnStableArgs, ...codexModelArgs(input.model), "--full-auto"];
       if (input.resumeSessionId) {
         return [...interactiveArgs, "resume", input.resumeSessionId];
       }
@@ -639,8 +650,7 @@ function runtimeArgs(name: CliRuntimeName, input: RuntimeRunInput, interactive: 
         "resume",
         ...localFolderArgs,
         ...vpnStableArgs,
-        "--model",
-        resolveCodexModel(input.model),
+        ...codexModelArgs(input.model),
         "--full-auto",
         input.resumeSessionId,
         "-"
@@ -651,8 +661,7 @@ function runtimeArgs(name: CliRuntimeName, input: RuntimeRunInput, interactive: 
       "exec",
       ...localFolderArgs,
       ...vpnStableArgs,
-      "--model",
-      resolveCodexModel(input.model),
+      ...codexModelArgs(input.model),
       "--full-auto"
     ];
   }
@@ -661,7 +670,17 @@ function runtimeArgs(name: CliRuntimeName, input: RuntimeRunInput, interactive: 
     return [];
   }
 
-  return ["--model", input.model, "--print"];
+  return [...plainModelArgs(input.model), "--print"];
+}
+
+function codexModelArgs(model?: string) {
+  const trimmed = model?.trim();
+  return trimmed ? ["--model", resolveCodexModel(trimmed)] : [];
+}
+
+function plainModelArgs(model?: string) {
+  const trimmed = model?.trim();
+  return trimmed ? ["--model", trimmed] : [];
 }
 
 function resolveCodexModel(model: string) {

@@ -22,7 +22,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
-      return NextResponse.redirect(createPublicRedirectUrl(request, "/conversations"), 303);
+      return NextResponse.redirect(createPublicRedirectUrl(request, "/projects"), 303);
     }
 
     return NextResponse.json(response);

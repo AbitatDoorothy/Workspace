@@ -5,6 +5,7 @@ import {
   commitAndPushJobSchema,
   conversationCreateRequestSchema,
   conversationTypeSchema,
+  daemonJobSchema,
   daemonJobPollRequestSchema,
   daemonJobAckRequestSchema,
   daemonJobPollResponseSchema,
@@ -59,6 +60,71 @@ describe("shared schema validation", () => {
     ).toMatchObject({
       payload: {
         prompt: ""
+      }
+    });
+  });
+
+  it("defaults project starts to Codex without an explicit agent or model", () => {
+    expect(
+      conversationCreateRequestSchema.parse({
+        workspaceId: "workspace_123",
+        projectId: "project_123"
+      })
+    ).toMatchObject({
+      runtime: "codex",
+      type: "investigation",
+      prompt: ""
+    });
+
+    expect(
+      startConversationJobSchema.parse({
+        id: "job_start",
+        type: "start_conversation",
+        conversationId: "conversation_123",
+        payload: {
+          repoUrl: "/Users/reece/Desktop/Test",
+          defaultBranch: "local",
+          conversationType: "investigation",
+          agentRuntime: "codex",
+          instructions: "Start Codex in iTerm2.",
+          prompt: "",
+          hostLocalPath: "/Users/reece/Desktop/Test"
+        }
+      })
+    ).toMatchObject({
+      payload: {
+        agentRuntime: "codex"
+      }
+    });
+  });
+
+  it("accepts hidden same-thread conversation summary jobs", () => {
+    expect(
+      daemonJobSchema.parse({
+        id: "job_summary",
+        type: "summarize_conversation",
+        conversationId: "conversation_123",
+        payload: {
+          repoUrl: "/Users/reece/Desktop/Test",
+          defaultBranch: "local",
+          conversationType: "feature",
+          agentRuntime: "codex",
+          instructions: "Summarize the thread.",
+          prompt: "Summarize what has been done.",
+          allowedTools: [],
+          resumeSessionId: "session_123",
+          worktreePath: "/Users/reece/Desktop/Test",
+          branchName: "abitat/feature/demo",
+          hostLocalPath: "/Users/reece/Desktop/Test",
+          presentation: "inline",
+          taskTitle: "Demo task"
+        }
+      })
+    ).toMatchObject({
+      type: "summarize_conversation",
+      payload: {
+        presentation: "inline",
+        taskTitle: "Demo task"
       }
     });
   });

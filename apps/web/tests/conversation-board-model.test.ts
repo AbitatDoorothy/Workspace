@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canStartConversationCardDrag,
+  canOpenConversationSummary,
   createConversationDeleteRequest,
   createConversationDragPayload,
   conversationDropTarget,
@@ -41,6 +42,12 @@ describe("conversation board model", () => {
     expect(conversationLabelFromStatus("pushed")).toBe("complete");
     expect(conversationLabelFromStatus("running")).toBe("in_process");
     expect(conversationLabelFromStatus("failed")).toBe("in_process");
+  });
+
+  it("only opens summary pages for completed conversations", () => {
+    expect(canOpenConversationSummary("pushed")).toBe(true);
+    expect(canOpenConversationSummary("running")).toBe(false);
+    expect(canOpenConversationSummary("awaiting_approval")).toBe(false);
   });
 
   it("starts card drags from card chrome but not interactive controls", () => {

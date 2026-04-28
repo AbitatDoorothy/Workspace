@@ -13,16 +13,6 @@ export default async function ProjectsPage() {
             <h1>Workspace Repos</h1>
             <p>Connect GitHub repositories or local folders on this Mac.</p>
           </div>
-          <div className="nav-actions">
-            <a className="button-link" href="/agents">
-              <Icon>smart_toy</Icon>
-              Agents
-            </a>
-            <a className="button-link" href="/conversations">
-              <Icon>slow_motion_video</Icon>
-              Conversations
-            </a>
-          </div>
         </div>
 
         <form className="panel project-form" action="/api/projects" method="post">

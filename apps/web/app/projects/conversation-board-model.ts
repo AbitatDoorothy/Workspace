@@ -43,6 +43,10 @@ export function conversationStatusForLabel(label: ConversationLabel): Conversati
   return label === "complete" ? "pushed" : "running";
 }
 
+export function canOpenConversationSummary(status: string) {
+  return conversationLabelFromStatus(status) === "complete";
+}
+
 export function conversationTitle(prompt: string) {
   return prompt.trim() || "Untitled conversation";
 }

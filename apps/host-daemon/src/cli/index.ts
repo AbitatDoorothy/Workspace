@@ -9,10 +9,10 @@ import { collectChangeset } from "../git/changeset.js";
 import { branchNameForConversation, resolveRepoPath } from "../git/paths.js";
 import { commitAndPushWorktree, tryCreatePullRequest } from "../git/publish.js";
 import { cleanupConversationWorktree, setupConversationWorktree } from "../git/worktree.js";
-import type { RuntimeAdapter, RuntimeEvent } from "../runtime/adapter.js";
 import { createRuntimeAdapter } from "../runtime/index.js";
 import { HostApiClient } from "../transport/api-client.js";
 import { createToolScanner } from "../tools/scanner.js";
+import { runConversationRuntime } from "./conversation-runtime.js";
 import { resolveDaemonConnection } from "./daemon-connection.js";
 import { runHeartbeatWithRecovery } from "./heartbeat-loop.js";
 import { createRetryableTask } from "./retryable-task.js";
@@ -210,6 +210,13 @@ async function pollDaemonJob(
     return;
   }
 
+  if (job.type === "summarize_conversation") {
+    activeState.conversationIds.add(job.conversationId);
+    const task = runSummarizeConversationJob(client, job, activeState, apiUrl, hostToken);
+    trackBackgroundTask(activeState, task);
+    return;
+  }
+
   if (job.type !== "start_conversation") {
     await client.ackJob(job.id, { status: "running" });
     return;
@@ -244,7 +251,7 @@ async function runStartConversationJob(
               workspaceRoot,
               conversationId: job.conversationId,
               conversationType: job.payload.conversationType,
-              prompt: job.payload.prompt,
+              prompt: job.payload.taskTitle ?? job.payload.prompt,
               repoUrl: job.payload.repoUrl,
               defaultBranch: job.payload.defaultBranch
             });
@@ -260,6 +267,7 @@ async function runStartConversationJob(
     const runtimeSessionId = await runConversationRuntime(
       client,
       createRuntimeAdapter(job.payload.agentRuntime, {
+        presentation: job.payload.presentation,
         pty: { apiUrl, hostToken }
       }),
       {
@@ -291,6 +299,61 @@ async function runStartConversationJob(
   }
 }
 
+async function runSummarizeConversationJob(
+  client: HostApiClient,
+  job: Extract<DaemonJob, { type: "summarize_conversation" }>,
+  activeState: ActiveDaemonState,
+  apiUrl: string,
+  hostToken?: string
+) {
+  try {
+    const worktreePath = job.payload.worktreePath ?? job.payload.hostLocalPath ?? "";
+    if (!worktreePath || !job.payload.branchName || !job.payload.resumeSessionId) {
+      throw new Error("Summary job is missing existing Codex thread metadata");
+    }
+
+    await access(worktreePath);
+    await client.ackJob(job.id, {
+      status: "running",
+      branchName: job.payload.branchName,
+      worktreePath
+    });
+
+    const runtimeSessionId = await runConversationRuntime(
+      client,
+      createRuntimeAdapter(job.payload.agentRuntime, {
+        presentation: "inline",
+        pty: { apiUrl, hostToken }
+      }),
+      {
+        allowedTools: job.payload.allowedTools,
+        captureSummary: true,
+        conversationId: job.conversationId,
+        instructions: job.payload.instructions,
+        model: job.payload.model,
+        prompt: job.payload.prompt,
+        resumeSessionId: job.payload.resumeSessionId,
+        skipGitRepoCheck: Boolean(job.payload.hostLocalPath),
+        worktreePath
+      }
+    );
+
+    await client.ackJob(job.id, {
+      status: "completed",
+      branchName: job.payload.branchName,
+      runtimeSessionId,
+      worktreePath
+    });
+  } catch (error) {
+    await client.ackJob(job.id, {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "summary job failed"
+    });
+  } finally {
+    activeState.conversationIds.delete(job.conversationId);
+  }
+}
+
 async function setupLocalConversationFolder(
   job: Extract<DaemonJob, { type: "start_conversation" }>
 ) {
@@ -301,7 +364,7 @@ async function setupLocalConversationFolder(
     branchName: branchNameForConversation({
       conversationId: job.conversationId,
       conversationType: job.payload.conversationType,
-      prompt: job.payload.prompt
+      prompt: job.payload.taskTitle ?? job.payload.prompt
     }),
     repoPath: undefined,
     worktreePath
@@ -337,42 +400,6 @@ async function commitAndPushConversation(
       errorMessage: error instanceof Error ? error.message : "commit and push failed"
     });
   }
-}
-
-async function runConversationRuntime(
-  client: HostApiClient,
-  adapter: RuntimeAdapter,
-  input: {
-    conversationId: string;
-    worktreePath: string;
-    prompt: string;
-    model: string;
-    instructions: string;
-    allowedTools: string[];
-    resumeSessionId?: string;
-    skipGitRepoCheck?: boolean;
-  }
-) {
-  let sequence = 1;
-  let runtimeSessionId = input.resumeSessionId;
-
-  await adapter.run(input, async (event: RuntimeEvent) => {
-    runtimeSessionId = runtimeSessionId ?? parseRuntimeSessionId(event.content);
-    await client.ingestRunEvent(input.conversationId, {
-      sequence,
-      type: event.type,
-      content: event.content,
-      metadata: {}
-    });
-    sequence += 1;
-  });
-
-  return runtimeSessionId;
-}
-
-function parseRuntimeSessionId(content: string) {
-  const match = /^session id:\s*(\S+)/i.exec(content.trim());
-  return match?.[1];
 }
 
 async function cleanupWorktree(args: string[]) {
