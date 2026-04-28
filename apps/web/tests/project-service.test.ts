@@ -39,6 +39,16 @@ function createProjectDb() {
         projects.set(data.id, data);
         return data;
       },
+      delete: async ({ where }: { where: { id: string } }) => {
+        const project = projects.get(where.id);
+
+        if (!project) {
+          throw new Error(`Missing project ${where.id}`);
+        }
+
+        projects.delete(where.id);
+        return project;
+      },
       findMany: async () => Array.from(projects.values())
     },
     daemonJob: {
@@ -117,5 +127,22 @@ describe("project service", () => {
       repoSyncStatus: "ready"
     });
     expect(jobs).toHaveLength(0);
+  });
+
+  it("deletes a project", async () => {
+    const db = createProjectDb();
+    const service = createProjectService(db);
+    const project = await service.createProject({
+      workspaceId: "workspace_demo",
+      name: "Desktop Test",
+      sourceType: "local",
+      hostLocalPath: "/Users/reece/Desktop/Test",
+      defaultBranch: "local",
+      createdByUserId: "user_demo"
+    });
+
+    await service.deleteProject(project.id);
+
+    expect(await service.listProjects("workspace_demo")).toEqual([]);
   });
 });

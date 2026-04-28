@@ -2,7 +2,10 @@ import type { HostTool } from "@abitat/shared";
 
 import { AppShell, Icon } from "../components/app-shell";
 import { agentService } from "../../server/agents";
-import { runtimeAvailabilityWarning } from "../../server/agents/agent-service";
+import {
+  preferredRuntimeFromTools,
+  runtimeAvailabilityWarning
+} from "../../server/agents/agent-service";
 import { hostService } from "../../server/hosts";
 import { projectService } from "../../server/projects";
 
@@ -13,6 +16,19 @@ export default async function AgentsPage() {
     getProjects()
   ]);
   const firstProjectId = projects[0]?.id ?? "project_demo";
+  const preferredRuntime = preferredRuntimeFromTools(hostTools);
+  const defaultAgentName =
+    preferredRuntime === "claude"
+      ? "Claude Agent"
+      : preferredRuntime === "codex"
+        ? "Codex Agent"
+        : "Mock Agent";
+  const defaultModel =
+    preferredRuntime === "claude" ? "sonnet" : preferredRuntime === "codex" ? "5.4" : "mock-model";
+  const defaultInstructions =
+    preferredRuntime === "mock"
+      ? "Use the mock runtime and keep changes small."
+      : "Use the local terminal runtime and keep changes small.";
 
   return (
     <AppShell active="agents">
@@ -113,11 +129,11 @@ export default async function AgentsPage() {
               </label>
               <label>
                 Name
-                <input name="name" defaultValue="Mock Agent" required />
+                <input name="name" defaultValue={defaultAgentName} required />
               </label>
               <label>
                 Runtime
-                <select name="runtime" defaultValue="mock">
+                <select name="runtime" defaultValue={preferredRuntime}>
                   <option value="mock">mock</option>
                   <option value="codex">codex</option>
                   <option value="claude">claude</option>
@@ -125,7 +141,7 @@ export default async function AgentsPage() {
               </label>
               <label>
                 Model
-                <input name="model" defaultValue="mock-model" required />
+                <input name="model" defaultValue={defaultModel} required />
               </label>
               <label>
                 Role
@@ -137,11 +153,7 @@ export default async function AgentsPage() {
               </label>
               <label className="wide-field">
                 Instructions
-                <textarea
-                  name="instructions"
-                  defaultValue="Use the mock runtime and keep changes small."
-                  required
-                />
+                <textarea name="instructions" defaultValue={defaultInstructions} required />
               </label>
               <button type="submit">Create agent</button>
             </form>

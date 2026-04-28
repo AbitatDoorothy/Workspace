@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { createPublicRedirectUrl } from "../../../server/auth/session";
 import { projectService } from "../../../server/projects";
 
 const projectRequestSchema = z.object({
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
     const project = await projectService.createProject(projectRequestSchema.parse(body));
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
-      return NextResponse.redirect(new URL("/projects", request.url), 303);
+      return NextResponse.redirect(createPublicRedirectUrl(request, "/projects"), 303);
     }
 
     return NextResponse.json(project, { status: 201 });

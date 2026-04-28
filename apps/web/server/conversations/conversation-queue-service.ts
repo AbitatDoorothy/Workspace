@@ -27,6 +27,7 @@ export interface ConversationRecord extends ConversationCreateInput {
   branchName?: string | null;
   worktreePath?: string | null;
   runtimeSessionId?: string | null;
+  summary?: string | null;
   commitSha?: string | null;
   prUrl?: string | null;
   errorMessage?: string | null;
@@ -74,6 +75,7 @@ interface ConversationDb {
   };
   conversation: {
     create(args: { data: ConversationRecord }): Promise<ConversationRecord>;
+    delete(args: { where: { id: string } }): Promise<ConversationRecord>;
     findUnique(args: { where: { id: string } }): Promise<ConversationRecord | null>;
     findMany(args?: { where?: { workspaceId?: string } }): Promise<ConversationRecord[]>;
     update(args: {
@@ -116,25 +118,18 @@ const createConversationInputSchema = conversationCreateRequestSchema.extend({
   createdByUserId: z.string().min(1)
 });
 const continueConversationInputSchema = z.object({
-  prompt: z.string().trim().min(1),
+  prompt: z.string().trim().default(""),
   userId: z.string().min(1)
 });
-
-const activeConversationJobStatuses = ["queued", "preparing", "running"];
+const conversationLabelSchema = z.enum(["in_process", "complete"]);
 
 export function createConversationQueueService(db: ConversationDb) {
   return {
     async createConversation(input: ConversationCreateInput) {
       const parsed = createConversationInputSchema.parse(input);
-      const [project, agent, activeJob] = await Promise.all([
+      const [project, agent] = await Promise.all([
         db.project.findUnique({ where: { id: parsed.projectId } }),
-        db.agent.findUnique({ where: { id: parsed.agentId } }),
-        db.daemonJob.findFirst({
-          where: {
-            type: "start_conversation",
-            status: { in: activeConversationJobStatuses }
-          }
-        })
+        db.agent.findUnique({ where: { id: parsed.agentId } })
       ]);
 
       if (!project || project.workspaceId !== parsed.workspaceId) {
@@ -143,10 +138,6 @@ export function createConversationQueueService(db: ConversationDb) {
 
       if (!agent || agent.projectId !== parsed.projectId) {
         throw new Error("Agent not found");
-      }
-
-      if (activeJob) {
-        throw new Error("An active daemon job is already running");
       }
 
       assertWorkspaceMember({
@@ -200,15 +191,9 @@ export function createConversationQueueService(db: ConversationDb) {
         throw new Error("Conversation not found");
       }
 
-      const [project, agent, activeJob] = await Promise.all([
+      const [project, agent] = await Promise.all([
         db.project.findUnique({ where: { id: conversation.projectId } }),
-        db.agent.findUnique({ where: { id: conversation.agentId } }),
-        db.daemonJob.findFirst({
-          where: {
-            type: "start_conversation",
-            status: { in: activeConversationJobStatuses }
-          }
-        })
+        db.agent.findUnique({ where: { id: conversation.agentId } })
       ]);
 
       if (!project || project.workspaceId !== conversation.workspaceId) {
@@ -217,10 +202,6 @@ export function createConversationQueueService(db: ConversationDb) {
 
       if (!agent || agent.projectId !== conversation.projectId) {
         throw new Error("Agent not found");
-      }
-
-      if (activeJob) {
-        throw new Error("An active daemon job is already running");
       }
 
       if (!conversation.worktreePath || !conversation.branchName) {
@@ -240,7 +221,7 @@ export function createConversationQueueService(db: ConversationDb) {
         where: { id: conversation.id },
         data: {
           errorMessage: null,
-          prompt: parsed.prompt,
+          prompt: parsed.prompt || conversation.prompt,
           status: "queued"
         }
       });
@@ -272,6 +253,78 @@ export function createConversationQueueService(db: ConversationDb) {
       });
 
       return updated;
+    },
+
+    async setConversationLabel(
+      conversationId: string,
+      input: { label: z.infer<typeof conversationLabelSchema>; userId: string }
+    ) {
+      const parsed = z
+        .object({
+          label: conversationLabelSchema,
+          userId: z.string().min(1)
+        })
+        .parse(input);
+      const conversation = await db.conversation.findUnique({ where: { id: conversationId } });
+
+      if (!conversation) {
+        throw new Error("Conversation not found");
+      }
+
+      assertWorkspaceMember({
+        workspaceId: conversation.workspaceId,
+        userId: parsed.userId
+      });
+
+      return db.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          status: parsed.label === "complete" ? "pushed" : "running"
+        }
+      });
+    },
+
+    async deleteConversation(conversationId: string, input: { userId: string }) {
+      const parsed = z
+        .object({
+          userId: z.string().min(1)
+        })
+        .parse(input);
+      const conversation = await db.conversation.findUnique({ where: { id: conversationId } });
+
+      if (!conversation) {
+        throw new Error("Conversation not found");
+      }
+
+      assertWorkspaceMember({
+        workspaceId: conversation.workspaceId,
+        userId: parsed.userId
+      });
+
+      const message = `Deleted by ${parsed.userId}`;
+      const activeJobs = await db.daemonJob.findMany({
+        where: {
+          status: { in: ["queued", "preparing", "running"] }
+        }
+      });
+
+      await Promise.all(
+        activeJobs
+          .filter((job) => job.conversationId === conversation.id)
+          .map((job) =>
+            db.daemonJob.update({
+              where: { id: job.id },
+              data: {
+                status: "cancelled",
+                errorMessage: message
+              }
+            })
+          )
+      );
+
+      await db.conversation.delete({ where: { id: conversation.id } });
+
+      return { ok: true as const };
     },
 
     listConversations(workspaceId: string) {
@@ -417,10 +470,19 @@ export function createConversationQueueService(db: ConversationDb) {
 
     async recoverStaleJobs(
       machineId: string,
-      options: { activeConversationId?: string; now?: Date; staleAfterMs?: number } = {}
+      options: {
+        activeConversationId?: string;
+        activeConversationIds?: string[];
+        now?: Date;
+        staleAfterMs?: number;
+      } = {}
     ) {
       const now = options.now ?? new Date();
       const staleAfterMs = options.staleAfterMs ?? 5 * 60 * 1000;
+      const activeConversationIds = new Set([
+        ...(options.activeConversationId ? [options.activeConversationId] : []),
+        ...(options.activeConversationIds ?? [])
+      ]);
       const staleJobs = (
         await db.daemonJob.findMany({
           where: {
@@ -429,7 +491,7 @@ export function createConversationQueueService(db: ConversationDb) {
           }
         })
       ).filter((job) => {
-        if (job.conversationId === options.activeConversationId) {
+        if (job.conversationId && activeConversationIds.has(job.conversationId)) {
           return false;
         }
 
@@ -490,6 +552,20 @@ export function createResilientConversationQueueService(
       return runWithFallback(
         () => primary.continueConversation(conversationId, input),
         () => fallback.continueConversation(conversationId, input)
+      );
+    },
+
+    setConversationLabel(conversationId, input) {
+      return runWithFallback(
+        () => primary.setConversationLabel(conversationId, input),
+        () => fallback.setConversationLabel(conversationId, input)
+      );
+    },
+
+    deleteConversation(conversationId, input) {
+      return runWithFallback(
+        () => primary.deleteConversation(conversationId, input),
+        () => fallback.deleteConversation(conversationId, input)
       );
     },
 

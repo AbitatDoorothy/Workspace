@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { agentService } from "../../../server/agents";
+import { createPublicRedirectUrl } from "../../../server/auth/session";
 
 const agentRequestSchema = z.object({
   projectId: z.string().min(1),
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
     const agent = await agentService.createAgent(agentRequestSchema.parse(body));
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
-      return NextResponse.redirect(new URL("/agents", request.url), 303);
+      return NextResponse.redirect(createPublicRedirectUrl(request, "/agents"), 303);
     }
 
     return NextResponse.json(agent, { status: 201 });

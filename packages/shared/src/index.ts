@@ -64,7 +64,8 @@ export const hostPairingResponseSchema = z.object({
 export const hostHeartbeatRequestSchema = z.object({
   machineId: idSchema,
   status: machineStatusSchema,
-  activeConversationId: idSchema.optional()
+  activeConversationId: idSchema.optional(),
+  activeConversationIds: z.array(idSchema).optional()
 });
 
 export const hostHeartbeatResponseSchema = z.object({
@@ -93,7 +94,7 @@ export const conversationCreateRequestSchema = z.object({
   projectId: idSchema,
   agentId: idSchema,
   type: conversationTypeSchema,
-  prompt: z.string().min(1)
+  prompt: z.string().default("")
 });
 
 export const conversationCreateResponseSchema = z.object({
@@ -120,7 +121,8 @@ export const approvalResponseSchema = z.object({
 
 export const daemonJobPollRequestSchema = z.object({
   machineId: idSchema,
-  activeConversationId: idSchema.optional()
+  activeConversationId: idSchema.optional(),
+  activeConversationIds: z.array(idSchema).optional()
 });
 
 export const daemonJobAckRequestSchema = z.object({
@@ -161,7 +163,7 @@ export const startConversationJobSchema = daemonJobBaseSchema.extend({
     agentRuntime: runtimeSchema,
     model: z.string().min(1),
     instructions: z.string().min(1),
-    prompt: z.string().min(1),
+    prompt: z.string(),
     allowedTools: z.array(z.string().min(1)).default([]),
     resumeSessionId: z.string().min(1).optional(),
     worktreePath: z.string().min(1).optional(),

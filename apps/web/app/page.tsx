@@ -2,7 +2,7 @@ import type { HostTool } from "@abitat/shared";
 
 import { AppShell, Icon } from "./components/app-shell";
 import { appInfo } from "../lib/app-info";
-import { DEMO_PAIRING_CODE } from "../server/hosts/host-service";
+import { getHostPairingCode } from "../server/hosts/host-service";
 import { hostService } from "../server/hosts";
 
 export default async function Home() {
@@ -12,6 +12,7 @@ export default async function Home() {
     : [];
 
   const installedTools = tools.filter((tool) => tool.installed);
+  const pairingCode = getHostPairingCode();
 
   return (
     <AppShell active="dashboard">
@@ -25,7 +26,7 @@ export default async function Home() {
             </div>
             <p>
               {appInfo.name} controls coding-agent work from this paired host. Pairing code{" "}
-              <strong>{DEMO_PAIRING_CODE}</strong>.
+              <strong>{pairingCode}</strong>.
             </p>
           </div>
 
@@ -95,11 +96,11 @@ export default async function Home() {
                   <span className="icon-tile">
                     <Icon>vpn_key</Icon>
                   </span>
-                  <span className="muted">{DEMO_PAIRING_CODE}</span>
+                  <span className="muted">{pairingCode}</span>
                 </div>
                 <div>
                   <h3>Host Pairing</h3>
-                  <p>pnpm --filter host-daemon dev pair --code {DEMO_PAIRING_CODE}</p>
+                  <p>pnpm cloud</p>
                 </div>
               </div>
             </div>

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { createPublicRedirectUrl } from "../../../../../server/auth/session";
 import { conversationQueueService } from "../../../../../server/conversations";
 import { runEventService } from "../../../../../server/run-events";
 
 const continueRequestSchema = z.object({
-  prompt: z.string().trim().min(1),
+  prompt: z.string().trim().default(""),
   userId: z.string().min(1).default("user_demo"),
   redirectTo: z.string().min(1).optional()
 });
@@ -24,9 +25,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
       return NextResponse.redirect(
-        new URL(
-          input.redirectTo ?? `/projects/${conversation.projectId}/conversations/${id}`,
-          request.url
+        createPublicRedirectUrl(
+          request,
+          input.redirectTo ?? `/projects/${conversation.projectId}/conversations/${id}`
         ),
         303
       );

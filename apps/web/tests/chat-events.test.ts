@@ -90,4 +90,26 @@ describe("conversation chat events", () => {
       }
     ]);
   });
+
+  it("shows terminal session summaries as agent messages", () => {
+    const events: RunEventView[] = [
+      {
+        id: "event_1",
+        conversationId: "conversation_demo",
+        sequence: 1,
+        type: "summary",
+        content: "Codex terminal session ended.\n\nRecent activity:\n- Created hello.md.",
+        metadataJson: {}
+      }
+    ];
+
+    expect(toChatMessages(events)).toEqual([
+      {
+        id: "event_1",
+        side: "agent",
+        content: "Codex terminal session ended.\n\nRecent activity:\n- Created hello.md.",
+        sequence: 1
+      }
+    ]);
+  });
 });

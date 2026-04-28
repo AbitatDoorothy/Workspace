@@ -46,6 +46,20 @@ export function runtimeChoicesFromTools(tools: Pick<HostTool, "name" | "installe
   return choices;
 }
 
+export function preferredRuntimeFromTools(tools: Pick<HostTool, "name" | "installed">[]) {
+  const choices = runtimeChoicesFromTools(tools);
+
+  if (choices.includes("codex")) {
+    return "codex";
+  }
+
+  if (choices.includes("claude")) {
+    return "claude";
+  }
+
+  return "mock";
+}
+
 export function runtimeAvailabilityWarning(
   runtime: Runtime,
   tools: Pick<HostTool, "name" | "installed">[]

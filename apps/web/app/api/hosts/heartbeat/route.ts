@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { conversationQueueService } from "../../../../server/conversations";
 import { hostService } from "../../../../server/hosts";
+import { getBearerToken } from "../../../../server/hosts/request-auth";
 
 export async function POST(request: Request) {
   try {
@@ -10,7 +11,8 @@ export async function POST(request: Request) {
     const token = getBearerToken(request);
     const response = await hostService.recordHeartbeat(body, token);
     await conversationQueueService.recoverStaleJobs(body.machineId, {
-      activeConversationId: body.activeConversationId
+      activeConversationId: body.activeConversationId,
+      activeConversationIds: body.activeConversationIds
     });
     return NextResponse.json(response);
   } catch (error) {
@@ -19,9 +21,4 @@ export async function POST(request: Request) {
       { status: 401 }
     );
   }
-}
-
-function getBearerToken(request: Request) {
-  const header = request.headers.get("authorization") ?? "";
-  return header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
 }

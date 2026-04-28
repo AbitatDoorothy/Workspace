@@ -106,6 +106,16 @@ function createConversationDb(existingJob?: TestDaemonJob) {
       findMany: async () => Array.from(conversations.values()),
       findUnique: async ({ where }: { where: { id: string } }) =>
         conversations.get(where.id) ?? null,
+      delete: async ({ where }: { where: { id: string } }) => {
+        const conversation = conversations.get(where.id);
+
+        if (!conversation) {
+          throw new Error(`Missing conversation ${where.id}`);
+        }
+
+        conversations.delete(where.id);
+        return conversation;
+      },
       update: async ({
         where,
         data
@@ -188,6 +198,81 @@ describe("conversation queue service", () => {
     });
   });
 
+  it("queues a conversation without an initial web prompt", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: ""
+    });
+    const jobs = await db.daemonJob.findMany();
+
+    expect(conversation).toMatchObject({
+      status: "queued",
+      prompt: ""
+    });
+    expect(jobs.at(-1)).toMatchObject({
+      type: "start_conversation",
+      status: "queued",
+      payloadJson: {
+        prompt: ""
+      }
+    });
+  });
+
+  it("continues an existing conversation without an initial web prompt", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Create the first file."
+    });
+    await db.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        status: "awaiting_approval",
+        branchName: "abitat/feature/abcdef12-create-the-first-file",
+        worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo",
+        runtimeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce"
+      }
+    });
+    await db.daemonJob.update({
+      where: { id: (await db.daemonJob.findMany())[0]?.id ?? "" },
+      data: { status: "completed" }
+    });
+
+    const continued = await service.continueConversation(conversation.id, {
+      prompt: "",
+      userId: "user_demo"
+    });
+    const jobs = await db.daemonJob.findMany();
+
+    expect(continued).toMatchObject({
+      id: conversation.id,
+      status: "queued",
+      prompt: "Create the first file.",
+      runtimeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce"
+    });
+    expect(jobs.at(-1)).toMatchObject({
+      type: "start_conversation",
+      status: "queued",
+      conversationId: conversation.id,
+      payloadJson: {
+        resumeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce",
+        prompt: "Create the first file."
+      }
+    });
+  });
+
   it("queues local folder conversations with the host local path", async () => {
     const db = createConversationDb();
     const service = createConversationQueueService(db);
@@ -221,30 +306,43 @@ describe("conversation queue service", () => {
     });
   });
 
-  it("prevents creating a second active daemon job", async () => {
-    const service = createConversationQueueService(
-      createConversationDb({
-        id: "job_existing",
-        workspaceId: "workspace_demo",
-        machineId: null,
-        conversationId: "conversation_existing",
-        projectId: "project_demo",
-        type: "start_conversation",
-        status: "running",
-        payloadJson: {}
-      })
-    );
+  it("allows multiple active start conversation jobs", async () => {
+    const db = createConversationDb({
+      id: "job_existing",
+      workspaceId: "workspace_demo",
+      machineId: null,
+      conversationId: "conversation_existing",
+      projectId: "project_demo",
+      type: "start_conversation",
+      status: "running",
+      payloadJson: {}
+    });
+    const service = createConversationQueueService(db);
 
-    await expect(
-      service.createConversation({
-        workspaceId: "workspace_demo",
-        projectId: "project_demo",
-        agentId: "agent_demo",
-        createdByUserId: "user_demo",
-        type: "feature",
-        prompt: "Add a useful page."
-      })
-    ).rejects.toThrow("An active daemon job is already running");
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Add a useful page."
+    });
+    const jobs = await db.daemonJob.findMany();
+
+    expect(conversation.status).toBe("queued");
+    expect(jobs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "job_existing",
+          status: "running"
+        }),
+        expect.objectContaining({
+          type: "start_conversation",
+          status: "queued",
+          conversationId: conversation.id
+        })
+      ])
+    );
   });
 
   it("polls and acknowledges daemon jobs with conversation status transitions", async () => {
@@ -274,6 +372,72 @@ describe("conversation queue service", () => {
       branchName: "abitat/bugfix/abc123-fix-a-useful-page",
       worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo",
       runtimeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce"
+    });
+  });
+
+  it("changes a conversation label between in process and complete", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Launch checklist"
+    });
+
+    await expect(
+      service.setConversationLabel(conversation.id, {
+        label: "complete",
+        userId: "user_demo"
+      })
+    ).resolves.toMatchObject({ status: "pushed" });
+    await expect(
+      service.setConversationLabel(conversation.id, {
+        label: "in_process",
+        userId: "user_demo"
+      })
+    ).resolves.toMatchObject({ status: "running" });
+  });
+
+  it("deletes a conversation after checking workspace membership", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Remove me"
+    });
+
+    await expect(
+      service.deleteConversation(conversation.id, { userId: "user_demo" })
+    ).resolves.toEqual({ ok: true });
+    await expect(db.conversation.findUnique({ where: { id: conversation.id } })).resolves.toBeNull();
+  });
+
+  it("cancels active daemon jobs before deleting a conversation", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Remove me"
+    });
+
+    await expect(
+      service.deleteConversation(conversation.id, { userId: "user_demo" })
+    ).resolves.toEqual({ ok: true });
+
+    expect((await db.daemonJob.findMany())[0]).toMatchObject({
+      status: "cancelled",
+      errorMessage: "Deleted by user_demo"
     });
   });
 
@@ -327,6 +491,52 @@ describe("conversation queue service", () => {
     });
   });
 
+  it("continues a stored runtime session while another conversation is running", async () => {
+    const db = createConversationDb({
+      id: "job_existing",
+      workspaceId: "workspace_demo",
+      machineId: "machine_demo",
+      conversationId: "conversation_other",
+      projectId: "project_demo",
+      type: "start_conversation",
+      status: "running",
+      payloadJson: {}
+    });
+    const service = createConversationQueueService(db);
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Create the first file."
+    });
+    await db.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        status: "awaiting_approval",
+        branchName: "abitat/feature/abcdef12-create-the-first-file",
+        worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo",
+        runtimeSessionId: "019dc90a-2e03-7f91-828b-71bc3081edce"
+      }
+    });
+    await db.daemonJob.update({
+      where: { id: (await db.daemonJob.findMany())[1]?.id ?? "" },
+      data: { status: "completed" }
+    });
+
+    await expect(
+      service.continueConversation(conversation.id, {
+        prompt: "Continue this thread.",
+        userId: "user_demo"
+      })
+    ).resolves.toMatchObject({
+      id: conversation.id,
+      status: "queued",
+      prompt: "Continue this thread."
+    });
+  });
+
   it("falls back to demo queue storage when the primary database is unavailable", async () => {
     const databaseError = new Error("connection refused");
     Object.assign(databaseError, { code: "ECONNREFUSED" });
@@ -346,7 +556,13 @@ describe("conversation queue service", () => {
       cancelConversation: async () => {
         throw databaseError;
       },
+      deleteConversation: async () => {
+        throw databaseError;
+      },
       recoverStaleJobs: async () => {
+        throw databaseError;
+      },
+      setConversationLabel: async () => {
         throw databaseError;
       },
       continueConversation: async () => {
@@ -520,5 +736,74 @@ describe("conversation queue service", () => {
     expect((await db.conversation.findMany())[0]).toMatchObject({
       status: "running"
     });
+  });
+
+  it("does not recover any active conversations reported by the daemon", async () => {
+    const db = createConversationDb();
+    await db.conversation.create({
+      data: {
+        id: "conversation_one",
+        workspaceId: "workspace_demo",
+        projectId: "project_demo",
+        agentId: "agent_demo",
+        createdByUserId: "user_demo",
+        type: "feature",
+        status: "running",
+        prompt: "First active thread."
+      }
+    });
+    await db.conversation.create({
+      data: {
+        id: "conversation_two",
+        workspaceId: "workspace_demo",
+        projectId: "project_demo",
+        agentId: "agent_demo",
+        createdByUserId: "user_demo",
+        type: "bugfix",
+        status: "running",
+        prompt: "Second active thread."
+      }
+    });
+    await db.daemonJob.create({
+      data: {
+        id: "job_one",
+        workspaceId: "workspace_demo",
+        machineId: "machine_demo",
+        conversationId: "conversation_one",
+        projectId: "project_demo",
+        type: "start_conversation",
+        status: "running",
+        payloadJson: {},
+        updatedAt: new Date("2026-04-24T00:00:00.000Z")
+      }
+    });
+    await db.daemonJob.create({
+      data: {
+        id: "job_two",
+        workspaceId: "workspace_demo",
+        machineId: "machine_demo",
+        conversationId: "conversation_two",
+        projectId: "project_demo",
+        type: "start_conversation",
+        status: "running",
+        payloadJson: {},
+        updatedAt: new Date("2026-04-24T00:00:00.000Z")
+      }
+    });
+    const service = createConversationQueueService(db);
+
+    await expect(
+      service.recoverStaleJobs("machine_demo", {
+        activeConversationIds: ["conversation_one", "conversation_two"],
+        now: new Date("2026-04-24T00:05:01.000Z"),
+        staleAfterMs: 300_000
+      })
+    ).resolves.toBe(0);
+    expect(await db.conversation.findMany()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "conversation_one", status: "running" }),
+        expect.objectContaining({ id: "conversation_two", status: "running" })
+      ])
+    );
   });
 });

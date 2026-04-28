@@ -27,6 +27,42 @@ describe("shared schema validation", () => {
     ).toBe(false);
   });
 
+  it("accepts blank prompts for terminal-started conversations", () => {
+    expect(
+      conversationCreateRequestSchema.parse({
+        workspaceId: "workspace_123",
+        projectId: "project_123",
+        agentId: "agent_123",
+        type: "feature",
+        prompt: ""
+      })
+    ).toMatchObject({
+      prompt: ""
+    });
+
+    expect(
+      startConversationJobSchema.parse({
+        id: "job_start",
+        type: "start_conversation",
+        conversationId: "conversation_123",
+        payload: {
+          repoUrl: "/Users/reece/Desktop/Test",
+          defaultBranch: "local",
+          conversationType: "feature",
+          agentRuntime: "codex",
+          model: "5.4",
+          instructions: "Start Codex in Terminal.",
+          prompt: "",
+          hostLocalPath: "/Users/reece/Desktop/Test"
+        }
+      })
+    ).toMatchObject({
+      payload: {
+        prompt: ""
+      }
+    });
+  });
+
   it("rejects invalid runtimes", () => {
     expect(runtimeSchema.safeParse("gpt-999").success).toBe(false);
     expect(
@@ -138,6 +174,18 @@ describe("shared schema validation", () => {
     ).toEqual({
       machineId: "machine_demo",
       activeConversationId: "conversation_123"
+    });
+  });
+
+  it("accepts multiple active conversation ids when polling daemon jobs", () => {
+    expect(
+      daemonJobPollRequestSchema.parse({
+        machineId: "machine_demo",
+        activeConversationIds: ["conversation_123", "conversation_456"]
+      })
+    ).toEqual({
+      machineId: "machine_demo",
+      activeConversationIds: ["conversation_123", "conversation_456"]
     });
   });
 

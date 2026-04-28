@@ -51,6 +51,12 @@ export function AppShell({ active, children }: AppShellProps) {
         </nav>
 
         <div className="side-nav-footer">
+          <form action="/api/logout" method="post">
+            <button className="nav-item nav-button" type="submit">
+              <Icon>logout</Icon>
+              <span>Log out</span>
+            </button>
+          </form>
           <a className="nav-item" href="/projects">
             <Icon>settings</Icon>
             <span>Settings</span>

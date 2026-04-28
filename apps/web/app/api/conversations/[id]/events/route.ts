@@ -1,6 +1,7 @@
 import { runEventIngestRequestSchema } from "@abitat/shared";
 import { NextResponse } from "next/server";
 
+import { requireHostToken } from "../../../../../server/hosts/request-auth";
 import { runEventService } from "../../../../../server/run-events";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
@@ -12,6 +13,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
+    await requireHostToken(request);
     const [{ id }, input] = await Promise.all([
       context.params,
       runEventIngestRequestSchema.parseAsync(await request.json())
@@ -23,7 +25,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to ingest run event" },
-      { status: 400 }
+      { status: error instanceof Error && error.message === "Invalid host token" ? 401 : 400 }
     );
   }
 }

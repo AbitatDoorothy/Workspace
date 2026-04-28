@@ -28,10 +28,17 @@ export class HostApiClient {
     return this.post<{ ok: true }>("/api/hosts/tools", input);
   }
 
-  pollJob(machineId: string, activeConversationId?: string) {
+  pollJob(machineId: string, activeConversationIds?: string | string[]) {
+    const activeIds = Array.isArray(activeConversationIds)
+      ? activeConversationIds
+      : activeConversationIds
+        ? [activeConversationIds]
+        : [];
+
     return this.post<DaemonJobPollResponse>("/api/daemon/jobs/poll", {
       machineId,
-      ...(activeConversationId ? { activeConversationId } : {})
+      ...(activeIds[0] ? { activeConversationId: activeIds[0] } : {}),
+      ...(activeIds.length > 0 ? { activeConversationIds: activeIds } : {})
     });
   }
 

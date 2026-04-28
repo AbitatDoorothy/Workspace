@@ -38,6 +38,9 @@ function createPrismaConversationDb(db: PrismaClient) {
           })
         );
       },
+      async delete(args: { where: { id: string } }) {
+        return normalizeConversation(await db.conversation.delete({ where: args.where }));
+      },
       async findUnique(args: { where: { id: string } }) {
         const conversation = await db.conversation.findUnique({ where: args.where });
         return conversation ? normalizeConversation(conversation) : null;
@@ -191,6 +194,7 @@ function normalizeConversation(conversation: {
   branchName: string | null;
   worktreePath: string | null;
   runtimeSessionId: string | null;
+  summary: string | null;
   commitSha: string | null;
   prUrl: string | null;
   errorMessage: string | null;
@@ -208,6 +212,7 @@ function normalizeConversation(conversation: {
     branchName: conversation.branchName,
     worktreePath: conversation.worktreePath,
     runtimeSessionId: conversation.runtimeSessionId,
+    summary: conversation.summary,
     commitSha: conversation.commitSha,
     prUrl: conversation.prUrl,
     errorMessage: conversation.errorMessage,
@@ -274,6 +279,16 @@ function createDemoConversationDb() {
       create: async ({ data }: { data: ConversationRecord }) => {
         store.conversations.set(data.id, data);
         return data;
+      },
+      delete: async ({ where }: { where: { id: string } }) => {
+        const conversation = store.conversations.get(where.id);
+
+        if (!conversation) {
+          throw new Error(`Missing conversation ${where.id}`);
+        }
+
+        store.conversations.delete(where.id);
+        return conversation;
       },
       findUnique: async ({ where }: { where: { id: string } }) =>
         store.conversations.get(where.id) ?? null,

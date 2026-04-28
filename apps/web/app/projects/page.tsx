@@ -60,11 +60,7 @@ export default async function ProjectsPage() {
 
         <div className="overview-grid">
           {projects.map((project) => (
-            <a
-              className="panel project-card-link"
-              href={`/projects/${project.id}`}
-              key={project.id}
-            >
+            <article className="panel project-card-link project-card" key={project.id}>
               <div className="card-topline">
                 <span className="icon-tile">
                   <Icon>{project.hostLocalPath ? "folder" : "code"}</Icon>
@@ -78,8 +74,20 @@ export default async function ProjectsPage() {
               <p>
                 <Icon>call_split</Icon> {project.defaultBranch}
               </p>
-              <strong>{project.repoSyncStatus}</strong>
-            </a>
+              <div className="project-card-actions">
+                <strong>{project.repoSyncStatus}</strong>
+                <a className="ghost-button" href={`/projects/${project.id}`}>
+                  <Icon>folder_open</Icon>
+                  Open
+                </a>
+                <form action={`/api/projects/${project.id}/delete`} method="post">
+                  <button className="danger-button" type="submit">
+                    <Icon>delete</Icon>
+                    Delete
+                  </button>
+                </form>
+              </div>
+            </article>
           ))}
         </div>
       </section>

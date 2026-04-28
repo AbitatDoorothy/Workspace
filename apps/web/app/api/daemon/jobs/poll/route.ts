@@ -2,12 +2,15 @@ import { daemonJobPollRequestSchema } from "@abitat/shared";
 import { NextResponse } from "next/server";
 
 import { conversationQueueService } from "../../../../../server/conversations";
+import { requireHostToken } from "../../../../../server/hosts/request-auth";
 
 export async function POST(request: Request) {
   try {
     const input = daemonJobPollRequestSchema.parse(await request.json());
+    await requireHostToken(request, input.machineId);
     await conversationQueueService.recoverStaleJobs(input.machineId, {
-      activeConversationId: input.activeConversationId
+      activeConversationId: input.activeConversationId,
+      activeConversationIds: input.activeConversationIds
     });
     const job = await conversationQueueService.pollNextJob(input.machineId);
 
@@ -15,7 +18,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to poll daemon job" },
-      { status: 400 }
+      { status: error instanceof Error && error.message === "Invalid host token" ? 401 : 400 }
     );
   }
 }

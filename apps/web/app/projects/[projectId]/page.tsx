@@ -2,6 +2,8 @@ import { AppShell, Icon } from "../../components/app-shell";
 import { agentService } from "../../../server/agents";
 import { conversationQueueService } from "../../../server/conversations";
 import { projectService } from "../../../server/projects";
+import { ConversationBoard } from "./conversation-board";
+import type { ConversationBoardConversation } from "../conversation-board-model";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +36,17 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
   }
 
   const projectPath = project.hostLocalPath ?? project.repoUrl;
+  const boardConversations: ConversationBoardConversation[] = conversations.map(
+    (conversation) => ({
+      branchName: conversation.branchName,
+      id: conversation.id,
+      prompt: conversation.prompt,
+      runtimeSessionId: conversation.runtimeSessionId,
+      status: conversation.status,
+      type: conversation.type,
+      worktreePath: conversation.worktreePath
+    })
+  );
 
   return (
     <AppShell active="projects">
@@ -127,79 +140,13 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
             </select>
           </label>
           <label className="wide-field">
-            Prompt
-            <textarea name="prompt" defaultValue="Add a useful page." required />
+            Title
+            <input name="prompt" placeholder="Name this conversation" />
           </label>
-          <button type="submit">Add new conversation</button>
+          <button type="submit">Open Codex Terminal</button>
         </form>
 
-        <div className="content-grid">
-          <section>
-            <div className="section-heading">
-              <h2>Active Conversations</h2>
-              <a className="muted" href="/conversations">
-                View All
-              </a>
-            </div>
-            <div className="glass-card conversation-preview-list">
-              {conversations.length > 0 ? (
-                conversations.map((conversation) => (
-                  <a
-                    className="conversation-preview"
-                    href={`/projects/${project.id}/conversations/${conversation.id}`}
-                    key={conversation.id}
-                  >
-                    <span className="avatar-disc">
-                      <Icon filled>smart_toy</Icon>
-                    </span>
-                    <div>
-                      <h2>{conversation.type}</h2>
-                      <p>{conversation.prompt}</p>
-                      <span className={`status-label status-label-${conversation.status}`}>
-                        {conversation.status}
-                      </span>
-                    </div>
-                    <span className="muted">Open</span>
-                  </a>
-                ))
-              ) : (
-                <article className="conversation-preview">
-                  <span className="avatar-disc">
-                    <Icon>add_comment</Icon>
-                  </span>
-                  <div>
-                    <h2>No conversations</h2>
-                    <p>Add a new conversation to start a fresh Codex session.</p>
-                  </div>
-                </article>
-              )}
-            </div>
-          </section>
-
-          <section>
-            <div className="section-heading">
-              <h2>Recent Activity</h2>
-            </div>
-            <div className="glass-card tool-card">
-              {conversations.slice(0, 3).map((conversation) => (
-                <div className="conversation-preview" key={conversation.id}>
-                  <span className="avatar-disc">
-                    <Icon>commit</Icon>
-                  </span>
-                  <div>
-                    <h3>{conversation.type}</h3>
-                    <p>
-                      {conversation.status} on {project.defaultBranch}
-                    </p>
-                  </div>
-                </div>
-              ))}
-              {conversations.length === 0 ? (
-                <p>No project activity yet. New agent work will appear here.</p>
-              ) : null}
-            </div>
-          </section>
-        </div>
+        <ConversationBoard conversations={boardConversations} projectId={project.id} />
       </section>
     </AppShell>
   );

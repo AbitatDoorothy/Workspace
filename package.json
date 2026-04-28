@@ -5,6 +5,10 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "build": "pnpm -r build",
+    "cloud": "node scripts/cloud.mjs",
+    "cloud:dev": "node scripts/cloud-dev.mjs",
+    "cloud:host": "node scripts/cloud-host.mjs",
+    "cloud:up": "node scripts/cloud.mjs",
     "db:generate": "pnpm --filter web db:generate",
     "db:migrate": "pnpm --filter web db:migrate",
     "db:migrate:dev": "pnpm --filter web db:migrate:dev",
@@ -21,6 +25,7 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "25.6.0",
+    "ws": "^8.20.0",
     "eslint": "10.2.1",
     "prettier": "3.8.3",
     "typescript": "6.0.3",

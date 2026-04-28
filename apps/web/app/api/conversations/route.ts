@@ -2,13 +2,14 @@ import { conversationCreateRequestSchema } from "@abitat/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { createPublicRedirectUrl } from "../../../server/auth/session";
 import { conversationQueueService } from "../../../server/conversations";
 import { runEventService } from "../../../server/run-events";
 
 const conversationRequestSchema = conversationCreateRequestSchema.extend({
   workspaceId: z.string().min(1).default("workspace_demo"),
   createdByUserId: z.string().min(1).default("user_demo"),
-  prompt: z.string().trim().min(1),
+  prompt: z.string().trim().default(""),
   redirectTo: z.string().min(1).optional()
 });
 
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
       return NextResponse.redirect(
-        new URL(input.redirectTo ?? `/projects/${conversation.projectId}`, request.url),
+        createPublicRedirectUrl(request, input.redirectTo ?? `/projects/${conversation.projectId}`),
         303
       );
     }

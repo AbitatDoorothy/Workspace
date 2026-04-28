@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { requireHostToken } from "../../../../../server/hosts/request-auth";
 import { reviewService } from "../../../../../server/reviews";
 
 const changeSetRequestSchema = z.object({
@@ -18,6 +19,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
+    await requireHostToken(request);
     const [{ id }, input] = await Promise.all([
       context.params,
       changeSetRequestSchema.parseAsync(await request.json())
@@ -29,7 +31,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to store changeset" },
-      { status: 400 }
+      { status: error instanceof Error && error.message === "Invalid host token" ? 401 : 400 }
     );
   }
 }

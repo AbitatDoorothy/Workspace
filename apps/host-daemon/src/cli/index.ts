@@ -15,6 +15,7 @@ import { HostApiClient } from "../transport/api-client.js";
 import { createToolScanner } from "../tools/scanner.js";
 import { resolveDaemonConnection } from "./daemon-connection.js";
 import { runHeartbeatWithRecovery } from "./heartbeat-loop.js";
+import { createRetryableTask } from "./retryable-task.js";
 import { parseStartOptions } from "./start-options.js";
 
 const args = process.argv.slice(2);
@@ -67,9 +68,9 @@ async function startDaemon(args: string[]) {
   const pollIntervalMs = Number(process.env.ABITAT_DAEMON_POLL_INTERVAL_MS ?? 2000);
   const configPath = process.env.ABITAT_CONFIG_PATH ?? defaultConfigPath();
   const config = await readConfigIfAvailable(configPath);
-  const connection = resolveDaemonConnection({ config, env: process.env });
-  const client = new HostApiClient(connection.apiUrl, connection.hostToken);
-  const activeState: { conversationId?: string } = {};
+  let connection = resolveDaemonConnection({ config, env: process.env });
+  let client = new HostApiClient(connection.apiUrl, connection.hostToken);
+  const activeState = createActiveDaemonState();
 
   console.log("Abitat Workspace host daemon");
   console.log(`mode=${runtime}`);
@@ -79,23 +80,61 @@ async function startDaemon(args: string[]) {
   console.log(`paired=${connection.paired}`);
   console.log("status=online");
 
-  if (connection.paired) {
-    await uploadToolScan(client, connection.machineId);
+  // Auto-pair when starting unpaired (e.g. local dev via `pnpm dev`).
+  if (!connection.paired) {
+    const pairingCode = process.env.ABITAT_PAIRING_CODE;
+    if (pairingCode) {
+      try {
+        const pairClient = new HostApiClient(connection.apiUrl);
+        const result = await pairClient.pair({
+          pairingCode,
+          machineName: process.env.ABITAT_MACHINE_NAME ?? "Abitat Host",
+          daemonVersion: "0.1.0"
+        });
+        await saveHostConfig({ apiUrl: connection.apiUrl, ...result }, configPath);
+        connection = resolveDaemonConnection({
+          config: await loadHostConfig(configPath),
+          env: process.env
+        });
+        client = new HostApiClient(connection.apiUrl, connection.hostToken);
+        console.log(`paired=${connection.paired}`);
+        console.log(`machineId=${connection.machineId}`);
+      } catch (error) {
+        console.error("auto-pair failed:", error instanceof Error ? error.message : error);
+      }
+    }
   }
+
+  const toolScanUpload = createRetryableTask(async () => {
+    await uploadToolScan(client, connection.machineId);
+  });
 
   const beat = async () => {
     const timestamp = new Date().toISOString();
     console.log(`heartbeat=${timestamp}`);
 
     if (connection.paired) {
+      await toolScanUpload.run();
+    }
+
+    if (connection.paired) {
+      const activeConversationIds = getActiveConversationIds(activeState);
       await client.heartbeat({
         machineId: connection.machineId,
         status: "online",
-        activeConversationId: activeState.conversationId
+        activeConversationId: activeConversationIds[0],
+        activeConversationIds
       });
     }
 
-    await pollDaemonJob(client, connection.machineId, workspaceRoot, activeState);
+    await pollDaemonJob(
+      client,
+      connection.machineId,
+      workspaceRoot,
+      activeState,
+      connection.apiUrl,
+      connection.hostToken
+    );
   };
 
   await runHeartbeatWithRecovery(beat);
@@ -112,6 +151,33 @@ async function startDaemon(args: string[]) {
   });
 }
 
+interface ActiveDaemonState {
+  conversationIds: Set<string>;
+  tasks: Set<Promise<void>>;
+}
+
+function createActiveDaemonState(): ActiveDaemonState {
+  return {
+    conversationIds: new Set<string>(),
+    tasks: new Set<Promise<void>>()
+  };
+}
+
+function getActiveConversationIds(activeState: ActiveDaemonState) {
+  return Array.from(activeState.conversationIds);
+}
+
+function trackBackgroundTask(activeState: ActiveDaemonState, task: Promise<void>) {
+  activeState.tasks.add(task);
+  void task
+    .catch((error: unknown) => {
+      console.error(error instanceof Error ? error.message : "background job failed");
+    })
+    .finally(() => {
+      activeState.tasks.delete(task);
+    });
+}
+
 async function uploadToolScan(client: HostApiClient, machineId: string) {
   const tools = await createToolScanner().scan();
   await client.uploadTools(machineId, tools);
@@ -122,9 +188,11 @@ async function pollDaemonJob(
   client: HostApiClient,
   machineId: string,
   workspaceRoot: string,
-  activeState: { conversationId?: string }
+  activeState: ActiveDaemonState,
+  apiUrl: string,
+  hostToken?: string
 ) {
-  const { job } = await client.pollJob(machineId, activeState.conversationId);
+  const { job } = await client.pollJob(machineId, getActiveConversationIds(activeState));
 
   if (!job) {
     return;
@@ -132,15 +200,12 @@ async function pollDaemonJob(
 
   console.log(`job=${job.id} type=${job.type}`);
 
-  if ("conversationId" in job) {
-    activeState.conversationId = job.conversationId;
-  }
-
   if (job.type === "commit_and_push") {
     try {
+      activeState.conversationIds.add(job.conversationId);
       await commitAndPushConversation(client, job);
     } finally {
-      activeState.conversationId = undefined;
+      activeState.conversationIds.delete(job.conversationId);
     }
     return;
   }
@@ -150,6 +215,19 @@ async function pollDaemonJob(
     return;
   }
 
+  activeState.conversationIds.add(job.conversationId);
+  const task = runStartConversationJob(client, job, workspaceRoot, activeState, apiUrl, hostToken);
+  trackBackgroundTask(activeState, task);
+}
+
+async function runStartConversationJob(
+  client: HostApiClient,
+  job: Extract<DaemonJob, { type: "start_conversation" }>,
+  workspaceRoot: string,
+  activeState: ActiveDaemonState,
+  apiUrl: string,
+  hostToken?: string
+) {
   try {
     const setup =
       job.payload.resumeSessionId && job.payload.worktreePath && job.payload.branchName
@@ -181,7 +259,9 @@ async function pollDaemonJob(
 
     const runtimeSessionId = await runConversationRuntime(
       client,
-      createRuntimeAdapter(job.payload.agentRuntime),
+      createRuntimeAdapter(job.payload.agentRuntime, {
+        pty: { apiUrl, hostToken }
+      }),
       {
         conversationId: job.conversationId,
         worktreePath: setup.worktreePath,
@@ -207,7 +287,7 @@ async function pollDaemonJob(
       errorMessage: error instanceof Error ? error.message : "worktree setup failed"
     });
   } finally {
-    activeState.conversationId = undefined;
+    activeState.conversationIds.delete(job.conversationId);
   }
 }
 

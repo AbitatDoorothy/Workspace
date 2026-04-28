@@ -11,6 +11,9 @@ function createPrismaProjectDb(db: PrismaClient) {
       async create(args: { data: Prisma.ProjectUncheckedCreateInput }) {
         return normalizeProject(await db.project.create({ data: args.data }));
       },
+      async delete(args: { where: { id: string } }) {
+        return normalizeProject(await db.project.delete({ where: args.where }));
+      },
       async findMany(args?: { where?: Prisma.ProjectWhereInput }) {
         const projects = await db.project.findMany({
           where: args?.where,

@@ -1,7 +1,7 @@
 import type { RunEventType, Runtime } from "@abitat/shared";
 
 export interface RuntimeEvent {
-  type: Extract<RunEventType, "error" | "status" | "stdout" | "stderr">;
+  type: Extract<RunEventType, "error" | "status" | "stdout" | "stderr" | "summary">;
   content: string;
 }
 
@@ -10,6 +10,7 @@ export interface RuntimeRunInput {
   prompt: string;
   model: string;
   instructions: string;
+  conversationId?: string;
   allowedTools?: string[];
   resumeSessionId?: string;
   skipGitRepoCheck?: boolean;

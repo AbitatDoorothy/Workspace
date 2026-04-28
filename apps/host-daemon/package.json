@@ -17,9 +17,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@abitat/shared": "workspace:*"
+    "@abitat/shared": "workspace:*",
+    "node-pty": "^1.1.0",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
+    "@types/ws": "^8.18.1",
     "tsx": "4.21.0"
   }
 }

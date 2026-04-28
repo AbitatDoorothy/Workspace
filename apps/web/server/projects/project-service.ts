@@ -39,6 +39,7 @@ export interface DaemonJobRecord {
 interface ProjectDb {
   project: {
     create(args: { data: ProjectRecord }): Promise<ProjectRecord>;
+    delete(args: { where: { id: string } }): Promise<ProjectRecord>;
     findMany(args?: { where?: Partial<ProjectRecord> }): Promise<ProjectRecord[]>;
   };
   daemonJob: {
@@ -102,6 +103,10 @@ export function createProjectService(db: ProjectDb) {
 
     listProjects(workspaceId: string) {
       return db.project.findMany({ where: { workspaceId } });
+    },
+
+    deleteProject(projectId: string) {
+      return db.project.delete({ where: { id: projectId } });
     }
   };
 }

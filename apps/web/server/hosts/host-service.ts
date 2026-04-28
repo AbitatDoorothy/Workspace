@@ -38,10 +38,16 @@ export function hashHostToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export function createHostService(db: HostDb) {
+export function getHostPairingCode(env: Partial<Record<string, string | undefined>> = process.env) {
+  return env.ABITAT_PAIRING_CODE?.trim() || DEMO_PAIRING_CODE;
+}
+
+export function createHostService(db: HostDb, options: { pairingCode?: string } = {}) {
+  const pairingCode = options.pairingCode ?? getHostPairingCode();
+
   return {
     async pairHost(input: HostPairingRequest) {
-      if (input.pairingCode !== DEMO_PAIRING_CODE) {
+      if (input.pairingCode !== pairingCode) {
         throw new Error("Invalid pairing code");
       }
 
@@ -77,6 +83,20 @@ export function createHostService(db: HostDb) {
     async verifyHostToken(machineId: string, hostToken: string) {
       const machine = await db.machine.findUnique({ where: { id: machineId } });
       return machine?.pairingTokenHash === hashHostToken(hostToken);
+    },
+
+    async verifyAnyHostToken(hostToken: string) {
+      if (!hostToken) {
+        return false;
+      }
+
+      const machine = await db.machine.findFirst({
+        where: {
+          pairingTokenHash: hashHostToken(hostToken)
+        }
+      });
+
+      return Boolean(machine);
     },
 
     async recordHeartbeat(input: HostHeartbeatRequest, hostToken: string) {

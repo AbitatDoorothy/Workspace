@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { DEMO_PAIRING_CODE, createHostService, hashHostToken } from "../server/hosts/host-service";
+import {
+  DEMO_PAIRING_CODE,
+  createHostService,
+  getHostPairingCode,
+  hashHostToken
+} from "../server/hosts/host-service";
 
 interface TestMachine {
   id: string;
   workspaceId: string;
   name: string;
   status: string;
+  type: string;
   pairingTokenHash: string | null;
   installedToolsJson: unknown;
   lastSeenAt: Date | null;
@@ -33,6 +39,7 @@ function createHostDb() {
     workspaceId: "workspace_demo",
     name: "Demo Host",
     status: "pending",
+    type: "host",
     pairingTokenHash: hashHostToken("existing-token"),
     installedToolsJson: null,
     lastSeenAt: null
@@ -40,7 +47,19 @@ function createHostDb() {
 
   return {
     machine: {
-      findFirst: async () => machines.get("machine_demo") ?? null,
+      findFirst: async (args?: { where?: Partial<TestMachine> }) => {
+        if (!args?.where) {
+          return machines.get("machine_demo") ?? null;
+        }
+
+        return (
+          [...machines.values()].find((machine) =>
+            Object.entries(args.where ?? {}).every(
+              ([key, value]) => machine[key as keyof TestMachine] === value
+            )
+          ) ?? null
+        );
+      },
       findUnique: async ({ where }: TestMachineFindUniqueArgs) => machines.get(where.id) ?? null,
       update: async ({ where, data }: TestMachineUpdateArgs) => {
         const current = machines.get(where.id);
@@ -85,6 +104,31 @@ describe("host service", () => {
     ).rejects.toThrow("Invalid pairing code");
   });
 
+  it("uses a configured pairing code when one is provided", async () => {
+    const service = createHostService(createHostDb(), { pairingCode: "ABITAT-CLOUD" });
+
+    await expect(
+      service.pairHost({
+        pairingCode: DEMO_PAIRING_CODE,
+        machineName: "Reece MacBook Pro",
+        daemonVersion: "0.1.0"
+      })
+    ).rejects.toThrow("Invalid pairing code");
+
+    await expect(
+      service.pairHost({
+        pairingCode: "ABITAT-CLOUD",
+        machineName: "Reece MacBook Pro",
+        daemonVersion: "0.1.0"
+      })
+    ).resolves.toMatchObject({ machineId: "machine_demo" });
+  });
+
+  it("reads the pairing code from the environment with a demo fallback", () => {
+    expect(getHostPairingCode({ ABITAT_PAIRING_CODE: "ABITAT-123ABC" })).toBe("ABITAT-123ABC");
+    expect(getHostPairingCode({})).toBe(DEMO_PAIRING_CODE);
+  });
+
   it("records heartbeat status and tool scans", async () => {
     const db = createHostDb();
     const service = createHostService(db);
@@ -119,5 +163,17 @@ describe("host service", () => {
 
     expect(machine.status).toBe("online");
     expect(machine.installedToolsJson).toHaveLength(2);
+  });
+
+  it("can authenticate a paired host token without trusting arbitrary bearer strings", async () => {
+    const service = createHostService(createHostDb());
+    const paired = await service.pairHost({
+      pairingCode: DEMO_PAIRING_CODE,
+      machineName: "Reece MacBook Pro",
+      daemonVersion: "0.1.0"
+    });
+
+    await expect(service.verifyAnyHostToken(paired.hostToken)).resolves.toBe(true);
+    await expect(service.verifyAnyHostToken("host_not-real")).resolves.toBe(false);
   });
 });

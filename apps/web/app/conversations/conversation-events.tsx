@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { toChatMessages, type RunEventView } from "./chat-events";
 
@@ -16,6 +16,7 @@ export function ConversationEvents({
   savedPrompt
 }: ConversationEventsProps) {
   const [events, setEvents] = useState(initialEvents);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const source = new EventSource(`/api/conversations/${conversationId}/events/stream`);
@@ -34,6 +35,12 @@ export function ConversationEvents({
     };
   }, [conversationId]);
 
+  useEffect(() => {
+    if (bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    }
+  }, [events]);
+
   const messages = toChatMessages(events, savedPrompt);
 
   if (messages.length === 0) {
@@ -41,12 +48,28 @@ export function ConversationEvents({
   }
 
   return (
-    <ol className="chat-thread" aria-label="Conversation messages">
-      {messages.map((message) => (
-        <li className={`chat-message chat-message-${message.side}`} key={message.id}>
-          <p className="chat-bubble">{message.content}</p>
-        </li>
-      ))}
-    </ol>
+    <div className="terminal-pane">
+      <div className="terminal-pane-header">
+        <span className="terminal-pane-dot" />
+        <span className="terminal-pane-dot" />
+        <span className="terminal-pane-dot" />
+        <span className="terminal-pane-title">conversation — {conversationId}</span>
+      </div>
+      <div className="terminal-pane-body" ref={bodyRef}>
+        {messages.map((message) =>
+          message.side === "user" ? (
+            <div className="terminal-prompt-line" key={message.id}>
+              <span className="terminal-prompt-mark">❯</span>
+              <span className="terminal-prompt-text">{message.content}</span>
+            </div>
+          ) : (
+            <div className="terminal-output-line" key={message.id}>
+              {message.content}
+            </div>
+          )
+        )}
+        <span className="terminal-cursor" />
+      </div>
+    </div>
   );
 }

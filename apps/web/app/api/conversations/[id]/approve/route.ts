@@ -2,6 +2,7 @@ import { approvalRequestSchema } from "@abitat/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { createPublicRedirectUrl } from "../../../../../server/auth/session";
 import { reviewService } from "../../../../../server/reviews";
 import { runEventService } from "../../../../../server/run-events";
 
@@ -22,7 +23,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
-      return NextResponse.redirect(new URL("/conversations", request.url), 303);
+      return NextResponse.redirect(createPublicRedirectUrl(request, "/conversations"), 303);
     }
 
     return NextResponse.json(response);

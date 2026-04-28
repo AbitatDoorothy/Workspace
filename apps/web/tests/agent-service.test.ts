@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createAgentService,
+  preferredRuntimeFromTools,
   runtimeAvailabilityWarning,
   runtimeChoicesFromTools
 } from "../server/agents/agent-service";
@@ -48,6 +49,17 @@ describe("agent service", () => {
         { name: "claude", installed: false }
       ])
     ).toEqual(["mock", "codex"]);
+  });
+
+  it("prefers Codex for newly created agents when it is available", () => {
+    expect(
+      preferredRuntimeFromTools([
+        { name: "codex", installed: true },
+        { name: "claude", installed: true }
+      ])
+    ).toBe("codex");
+    expect(preferredRuntimeFromTools([{ name: "claude", installed: true }])).toBe("claude");
+    expect(preferredRuntimeFromTools([])).toBe("mock");
   });
 
   it("warns when a real runtime is selected but unavailable", () => {

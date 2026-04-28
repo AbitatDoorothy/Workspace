@@ -2,6 +2,7 @@ import { toolScanUploadRequestSchema } from "@abitat/shared";
 import { NextResponse } from "next/server";
 
 import { hostService } from "../../../../server/hosts";
+import { getBearerToken } from "../../../../server/hosts/request-auth";
 
 export async function POST(request: Request) {
   try {
@@ -14,9 +15,4 @@ export async function POST(request: Request) {
       { status: 401 }
     );
   }
-}
-
-function getBearerToken(request: Request) {
-  const header = request.headers.get("authorization") ?? "";
-  return header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
 }

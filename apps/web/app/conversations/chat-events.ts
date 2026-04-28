@@ -55,7 +55,7 @@ function toChatMessage(event: RunEventView): ChatMessage[] {
     ];
   }
 
-  if (event.type === "stdout") {
+  if (event.type === "stdout" || event.type === "summary") {
     return [
       {
         id: event.id,
