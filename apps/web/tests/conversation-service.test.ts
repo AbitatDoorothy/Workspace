@@ -12,7 +12,6 @@ interface TestProject {
   id: string;
   workspaceId: string;
   repoUrl: string;
-  defaultBranch: string;
   hostLocalPath?: string | null;
 }
 
@@ -92,8 +91,8 @@ function createConversationDb(existingJob?: TestDaemonJob) {
   const project: TestProject = {
     id: "project_demo",
     workspaceId: "workspace_demo",
-    repoUrl: "https://github.com/AbitatDoorothy/Workspace.git",
-    defaultBranch: "main"
+    repoUrl: "/Users/reece/Desktop/Test",
+    hostLocalPath: "/Users/reece/Desktop/Test"
   };
   const agent: TestAgent = {
     id: "agent_demo",
@@ -451,7 +450,6 @@ describe("conversation queue service", () => {
       where: { id: "project_demo" },
       data: {
         repoUrl: "/Users/reece/Desktop/Test",
-        defaultBranch: "local",
         hostLocalPath: "/Users/reece/Desktop/Test"
       }
     });
@@ -471,7 +469,6 @@ describe("conversation queue service", () => {
       conversationId: conversation.id,
       payloadJson: {
         repoUrl: "/Users/reece/Desktop/Test",
-        defaultBranch: "local",
         hostLocalPath: "/Users/reece/Desktop/Test"
       }
     });

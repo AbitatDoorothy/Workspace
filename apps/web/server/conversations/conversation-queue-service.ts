@@ -47,7 +47,6 @@ export interface ProjectRecord {
   workspaceId: string;
   name?: string;
   repoUrl: string;
-  defaultBranch: string;
   hostLocalPath?: string | null;
 }
 
@@ -758,7 +757,6 @@ function startConversationPayload(
 
   return {
     repoUrl: project.repoUrl,
-    defaultBranch: project.defaultBranch,
     hostLocalPath: project.hostLocalPath ?? undefined,
     conversationType: conversation.type,
     agentRuntime: agent.runtime,

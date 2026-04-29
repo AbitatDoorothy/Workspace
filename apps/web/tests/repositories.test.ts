@@ -128,7 +128,6 @@ function createFakeDb() {
         workspaceId: string;
         name: string;
         repoUrl: string;
-        defaultBranch: string;
         createdByUserId: string;
       }
     >(),
@@ -212,8 +211,7 @@ describe("backend repositories", () => {
       id: "project_demo",
       workspaceId: "workspace_demo",
       name: "Demo Repo",
-      repoUrl: "https://github.com/AbitatDoorothy/Workspace.git",
-      defaultBranch: "main",
+      repoUrl: "/Users/reece/Desktop/Test",
       createdByUserId: "user_demo"
     });
     await agents.create({
@@ -260,7 +258,7 @@ describe("backend repositories", () => {
       name: "Demo Workspace"
     });
     expect(await projects.findById("project_demo")).toMatchObject({
-      repoUrl: "https://github.com/AbitatDoorothy/Workspace.git"
+      repoUrl: "/Users/reece/Desktop/Test"
     });
     expect(await agents.findById("agent_demo")).toMatchObject({ runtime: "mock" });
     expect(await machines.findById("machine_demo")).toMatchObject({ status: "online" });

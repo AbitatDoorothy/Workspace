@@ -35,7 +35,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
     );
   }
 
-  const projectPath = project.hostLocalPath ?? project.repoUrl;
+  const projectPath = project.hostLocalPath;
   const boardConversations: ConversationBoardConversation[] = conversations.map((conversation) => ({
     branchName: conversation.branchName,
     id: conversation.id,
@@ -92,15 +92,6 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
             <div>
               <p>Last Sync Status</p>
               <h2>{project.repoSyncStatus}</h2>
-            </div>
-          </article>
-          <article className="glass-card stat-card project-summary">
-            <span className="icon-tile">
-              <Icon>call_split</Icon>
-            </span>
-            <div>
-              <p>Connected Branch</p>
-              <h2>{project.defaultBranch}</h2>
             </div>
           </article>
         </section>

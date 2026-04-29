@@ -414,7 +414,6 @@ a.quick-card *,
 
 .button-link,
 .primary-button,
-.project-form button,
 .diff-review button,
 .cancel-form button,
 .conversation-label-form button,
@@ -440,7 +439,6 @@ a.quick-card *,
 
 .button-link,
 .primary-button,
-.project-form button,
 .diff-review button {
   background: var(--primary);
   border: 1px solid rgba(59, 130, 246, 0.8);
@@ -450,7 +448,6 @@ a.quick-card *,
 
 .button-link:hover,
 .primary-button:hover,
-.project-form button:hover,
 .diff-review button:hover {
   filter: brightness(1.08);
 }
@@ -512,6 +509,20 @@ a.quick-card *,
   display: grid;
 }
 
+.create-project-overlay {
+  background: rgba(0, 0, 0, 0.56);
+  display: none;
+  inset: 0;
+  padding: 24px;
+  place-items: center;
+  position: fixed;
+  z-index: 50;
+}
+
+.create-project-overlay:target {
+  display: grid;
+}
+
 .task-start-dialog {
   background: var(--surface-solid);
   border: 1px solid var(--border);
@@ -521,6 +532,17 @@ a.quick-card *,
   max-width: min(420px, calc(100vw - 32px));
   padding: 0;
   width: 420px;
+}
+
+.create-project-dialog {
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+  color: var(--text);
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 0;
+  width: 520px;
 }
 
 .task-dialog-header {
@@ -578,10 +600,40 @@ a.quick-card *,
   padding: 0 12px;
 }
 
+.task-start-form input[readonly] {
+  color: var(--muted-strong);
+}
+
 .task-start-form input:focus,
 .task-start-form select:focus {
   border-color: var(--primary);
   outline: none;
+}
+
+.folder-picker-field {
+  display: grid;
+  gap: 8px;
+}
+
+.folder-picker-field > label {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.folder-picker-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.folder-picker-row .ghost-button {
+  min-width: 150px;
+}
+
+.form-error {
+  color: #fca5a5;
+  font-size: 0.84rem;
+  margin: 0;
 }
 
 .task-dialog-actions {
@@ -837,22 +889,6 @@ a.muted,
   font-weight: 600;
 }
 
-.project-form {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.project-form label {
-  color: var(--muted);
-  display: grid;
-  font-size: 0.8rem;
-  gap: 8px;
-}
-
-.project-form input,
-.project-form select,
-.project-form textarea,
 .diff-review input,
 .search-input {
   background: var(--surface);
@@ -863,14 +899,6 @@ a.muted,
   padding: 0 12px;
 }
 
-.project-form textarea {
-  min-height: 96px;
-  padding: 12px;
-}
-
-.project-form input:focus,
-.project-form select:focus,
-.project-form textarea:focus,
 .diff-review input:focus,
 .search-input:focus {
   border-color: var(--primary);
@@ -1643,12 +1671,12 @@ a.muted,
     display: grid;
   }
 
-  .project-form {
+  .todo-create-form {
+    align-items: stretch;
     grid-template-columns: 1fr;
   }
 
-  .todo-create-form {
-    align-items: stretch;
+  .folder-picker-row {
     grid-template-columns: 1fr;
   }
 

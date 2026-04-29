@@ -53,13 +53,13 @@ export default async function Home() {
                 <a aria-label="Open projects" className="card-cover-link" href="/projects" />
                 <div className="card-topline">
                   <span className="icon-tile">
-                    <Icon>code</Icon>
+                    <Icon>folder</Icon>
                   </span>
-                  <span className="muted">Repos</span>
+                  <span className="muted">Folders</span>
                 </div>
                 <div>
                   <h3>Projects</h3>
-                  <p>GitHub repos and local folders.</p>
+                  <p>Local folders on this Mac.</p>
                 </div>
               </div>
               <div className="glass-card quick-card">

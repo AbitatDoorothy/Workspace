@@ -169,7 +169,6 @@ function normalizeProject(project: {
   workspaceId: string;
   name: string;
   repoUrl: string;
-  defaultBranch: string;
   hostLocalPath: string | null;
 }): ProjectRecord {
   return {
@@ -177,7 +176,6 @@ function normalizeProject(project: {
     workspaceId: project.workspaceId,
     name: project.name,
     repoUrl: project.repoUrl,
-    defaultBranch: project.defaultBranch,
     hostLocalPath: project.hostLocalPath
   };
 }
@@ -278,9 +276,8 @@ export function createDemoConversationDb() {
     id: "project_demo",
     workspaceId: "workspace_demo",
     name: "Workspace",
-    repoUrl: "git@github.com:AbitatDoorothy/Workspace.git",
-    defaultBranch: "main",
-    hostLocalPath: null
+    repoUrl: "/Users/reece/Desktop/Test",
+    hostLocalPath: "/Users/reece/Desktop/Test"
   };
   const agent: AgentRecord = {
     id: "agent_demo",

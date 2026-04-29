@@ -1,8 +1,24 @@
+import { cookies } from "next/headers";
+
 import { AppShell, Icon } from "../components/app-shell";
 import { projectService } from "../../server/projects";
+import { PROJECT_DRAFT_COOKIE_NAME, getProjectDraft } from "../../server/projects/project-drafts";
+import { CreateProjectDialog } from "./create-project-dialog";
 
-export default async function ProjectsPage() {
-  const projects = await getProjects();
+export default async function ProjectsPage({
+  searchParams
+}: {
+  searchParams: Promise<{ projectDraftId?: string }>;
+}) {
+  const [{ projectDraftId }, projects, cookieStore] = await Promise.all([
+    searchParams,
+    getProjects(),
+    cookies()
+  ]);
+  const projectDraft = getProjectDraft(
+    projectDraftId,
+    cookieStore.get(PROJECT_DRAFT_COOKIE_NAME)?.value
+  );
 
   return (
     <AppShell active="projects">
@@ -11,59 +27,26 @@ export default async function ProjectsPage() {
           <div className="title-stack">
             <p className="eyebrow">Projects</p>
             <h1>Workspace Repos</h1>
-            <p>Connect GitHub repositories or local folders on this Mac.</p>
+            <p>Connect local folders on this Mac.</p>
+          </div>
+          <div className="nav-actions">
+            <CreateProjectDialog draft={projectDraft} workspaceId="workspace_demo" />
           </div>
         </div>
-
-        <form className="panel project-form" action="/api/projects" method="post">
-          <input type="hidden" name="workspaceId" value="workspace_demo" />
-          <input type="hidden" name="createdByUserId" value="user_demo" />
-          <label>
-            Name
-            <input name="name" defaultValue="Workspace" required />
-          </label>
-          <label>
-            Mode
-            <select name="sourceType" defaultValue="github">
-              <option value="github">GitHub</option>
-              <option value="local">Local folder</option>
-            </select>
-          </label>
-          <label>
-            GitHub URL
-            <input
-              name="repoUrl"
-              defaultValue="git@github.com:AbitatDoorothy/Workspace.git"
-              required
-            />
-          </label>
-          <label>
-            Local folder
-            <input name="hostLocalPath" defaultValue="/Users/reece/Desktop/Test" />
-          </label>
-          <label>
-            Default branch
-            <input name="defaultBranch" defaultValue="main" required />
-          </label>
-          <button type="submit">Create project</button>
-        </form>
 
         <div className="overview-grid">
           {projects.map((project) => (
             <article className="panel project-card-link project-card" key={project.id}>
               <div className="card-topline">
                 <span className="icon-tile">
-                  <Icon>{project.hostLocalPath ? "folder" : "code"}</Icon>
+                  <Icon>folder</Icon>
                 </span>
-                <span className="status-pill">{project.hostLocalPath ? "local" : "github"}</span>
+                <span className="status-pill">local</span>
               </div>
               <div>
                 <h2>{project.name}</h2>
-                <p>{project.hostLocalPath ?? project.repoUrl}</p>
+                <p>{project.hostLocalPath}</p>
               </div>
-              <p>
-                <Icon>call_split</Icon> {project.defaultBranch}
-              </p>
               <div className="project-card-actions">
                 <strong>{project.repoSyncStatus}</strong>
                 <a className="ghost-button" href={`/projects/${project.id}`}>

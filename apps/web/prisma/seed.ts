@@ -61,16 +61,17 @@ async function main() {
   await prisma.project.upsert({
     where: { id: "project_demo" },
     update: {
-      repoUrl: "git@github.com:AbitatDoorothy/Workspace.git"
+      repoUrl: "/Users/reece/Desktop/Test",
+      hostLocalPath: "/Users/reece/Desktop/Test",
+      repoSyncStatus: "ready"
     },
     create: {
       id: "project_demo",
       workspaceId: "workspace_demo",
       name: "Workspace",
-      repoUrl: "git@github.com:AbitatDoorothy/Workspace.git",
-      defaultBranch: "main",
-      githubOwner: "AbitatDoorothy",
-      githubRepo: "Workspace",
+      repoUrl: "/Users/reece/Desktop/Test",
+      hostLocalPath: "/Users/reece/Desktop/Test",
+      repoSyncStatus: "ready",
       createdByUserId: "user_demo"
     }
   });

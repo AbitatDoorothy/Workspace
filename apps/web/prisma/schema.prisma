@@ -127,11 +127,8 @@ model Project {
   workspaceId     String
   name            String
   repoUrl         String
-  defaultBranch   String         @default("main")
   hostLocalPath   String?
   repoSyncStatus  String         @default("pending")
-  githubOwner     String?
-  githubRepo      String?
   createdByUserId String
   workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy       User           @relation(fields: [createdByUserId], references: [id])

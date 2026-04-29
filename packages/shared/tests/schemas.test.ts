@@ -48,7 +48,6 @@ describe("shared schema validation", () => {
         conversationId: "conversation_123",
         payload: {
           repoUrl: "/Users/reece/Desktop/Test",
-          defaultBranch: "local",
           conversationType: "feature",
           agentRuntime: "codex",
           model: "5.4",
@@ -83,7 +82,6 @@ describe("shared schema validation", () => {
         conversationId: "conversation_123",
         payload: {
           repoUrl: "/Users/reece/Desktop/Test",
-          defaultBranch: "local",
           conversationType: "investigation",
           agentRuntime: "codex",
           instructions: "Start Codex in iTerm2.",
@@ -106,7 +104,6 @@ describe("shared schema validation", () => {
         conversationId: "conversation_123",
         payload: {
           repoUrl: "/Users/reece/Desktop/Test",
-          defaultBranch: "local",
           conversationType: "feature",
           agentRuntime: "codex",
           instructions: "Summarize the thread.",
@@ -139,7 +136,6 @@ describe("shared schema validation", () => {
           conversationId: "conv_123",
           payload: {
             repoUrl: "https://github.com/example/app.git",
-            defaultBranch: "main",
             conversationType: "feature",
             agentRuntime: "gpt-999",
             model: "mock-model",
@@ -209,7 +205,6 @@ describe("shared schema validation", () => {
         conversationId: "conversation_123",
         payload: {
           repoUrl: "git@github.com:AbitatDoorothy/Workspace.git",
-          defaultBranch: "main",
           conversationType: "feature",
           agentRuntime: "codex",
           model: "5.4",

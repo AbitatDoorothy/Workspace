@@ -157,7 +157,6 @@ export const cloneRepoJobSchema = daemonJobBaseSchema.extend({
 
 const conversationRuntimeJobPayloadSchema = z.object({
   repoUrl: repoUrlSchema,
-  defaultBranch: z.string().min(1),
   conversationType: conversationTypeSchema,
   agentRuntime: runtimeSchema,
   model: z.string().min(1).optional(),

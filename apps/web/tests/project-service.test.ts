@@ -1,37 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { createProjectService, parseGithubRepoUrl } from "../server/projects/project-service";
+import { createProjectService } from "../server/projects/project-service";
 
 interface TestProject {
   id: string;
   workspaceId: string;
   name: string;
   repoUrl: string;
-  defaultBranch: string;
   hostLocalPath?: string | null;
   createdByUserId: string;
-  githubOwner: string;
-  githubRepo: string;
   repoSyncStatus: string;
-}
-
-interface TestDaemonJob {
-  id: string;
-  workspaceId: string;
-  projectId: string;
-  type: "clone_repo";
-  status: "queued";
-  payloadJson: {
-    repoUrl: string;
-    defaultBranch: string;
-  };
 }
 
 type CreateArgs<TRecord> = { data: TRecord };
 
 function createProjectDb() {
   const projects = new Map<string, TestProject>();
-  const jobs = new Map<string, TestDaemonJob>();
 
   return {
     project: {
@@ -50,83 +34,42 @@ function createProjectDb() {
         return project;
       },
       findMany: async () => Array.from(projects.values())
-    },
-    daemonJob: {
-      create: async ({ data }: CreateArgs<TestDaemonJob>) => {
-        jobs.set(data.id, data);
-        return data;
-      },
-      findMany: async () => Array.from(jobs.values())
     }
   };
 }
 
 describe("project service", () => {
-  it("parses GitHub HTTPS and SSH URLs", () => {
-    expect(parseGithubRepoUrl("https://github.com/AbitatDoorothy/Workspace.git")).toEqual({
-      githubOwner: "AbitatDoorothy",
-      githubRepo: "Workspace"
-    });
-    expect(parseGithubRepoUrl("git@github.com:AbitatDoorothy/Workspace.git")).toEqual({
-      githubOwner: "AbitatDoorothy",
-      githubRepo: "Workspace"
-    });
-  });
-
-  it("rejects non-GitHub URLs", () => {
-    expect(() => parseGithubRepoUrl("https://example.com/nope.git")).toThrow(
-      "Invalid GitHub repo URL"
-    );
-  });
-
-  it("creates a project and queues a clone job", async () => {
-    const db = createProjectDb();
-    const service = createProjectService(db);
-
-    const project = await service.createProject({
-      workspaceId: "workspace_demo",
-      name: "Workspace",
-      repoUrl: "https://github.com/AbitatDoorothy/Workspace.git",
-      defaultBranch: "main",
-      createdByUserId: "user_demo"
-    });
-
-    const jobs = await db.daemonJob.findMany();
-    expect(project).toMatchObject({
-      githubOwner: "AbitatDoorothy",
-      githubRepo: "Workspace",
-      repoSyncStatus: "queued"
-    });
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0]).toMatchObject({
-      type: "clone_repo",
-      status: "queued",
-      projectId: project.id
-    });
-  });
-
-  it("creates a local folder project without queueing a clone job", async () => {
+  it("creates a local folder project without a source mode", async () => {
     const db = createProjectDb();
     const service = createProjectService(db);
 
     const project = await service.createProject({
       workspaceId: "workspace_demo",
       name: "Desktop Test",
-      sourceType: "local",
       hostLocalPath: "/Users/reece/Desktop/Test",
-      defaultBranch: "local",
       createdByUserId: "user_demo"
     });
 
-    const jobs = await db.daemonJob.findMany();
     expect(project).toMatchObject({
       repoUrl: "/Users/reece/Desktop/Test",
       hostLocalPath: "/Users/reece/Desktop/Test",
-      githubOwner: "",
-      githubRepo: "",
       repoSyncStatus: "ready"
     });
-    expect(jobs).toHaveLength(0);
+    expect(project).not.toHaveProperty("defaultBranch");
+  });
+
+  it("rejects project creation without an absolute local folder", async () => {
+    const db = createProjectDb();
+    const service = createProjectService(db);
+
+    await expect(
+      service.createProject({
+        workspaceId: "workspace_demo",
+        name: "Desktop Test",
+        hostLocalPath: "relative/path",
+        createdByUserId: "user_demo"
+      })
+    ).rejects.toThrow("Local folder path must be absolute");
   });
 
   it("deletes a project", async () => {
@@ -135,9 +78,7 @@ describe("project service", () => {
     const project = await service.createProject({
       workspaceId: "workspace_demo",
       name: "Desktop Test",
-      sourceType: "local",
       hostLocalPath: "/Users/reece/Desktop/Test",
-      defaultBranch: "local",
       createdByUserId: "user_demo"
     });
 

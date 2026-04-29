@@ -253,7 +253,7 @@ async function runStartConversationJob(
               conversationType: job.payload.conversationType,
               prompt: job.payload.taskTitle ?? job.payload.prompt,
               repoUrl: job.payload.repoUrl,
-              defaultBranch: job.payload.defaultBranch
+              defaultBranch: "main"
             });
 
     console.log(`branch=${setup.branchName}`);
