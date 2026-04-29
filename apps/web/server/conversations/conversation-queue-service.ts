@@ -11,6 +11,7 @@ import {
 import { z } from "zod";
 
 import { assertWorkspaceMember } from "../auth/role-checks";
+import type { TodoStore } from "../todos/todo-store";
 
 export interface ConversationCreateInput {
   workspaceId: string;
@@ -139,6 +140,10 @@ interface ConversationDb {
   };
 }
 
+interface ConversationQueueServiceOptions {
+  todoStore?: Pick<TodoStore, "completeConversationTask">;
+}
+
 const createConversationInputSchema = conversationCreateRequestSchema.extend({
   createdByUserId: z.string().min(1)
 });
@@ -156,7 +161,10 @@ const defaultRuntimeInstructions = {
   mock: "Use the mock runtime and keep changes small."
 } satisfies Record<Runtime, string>;
 
-export function createConversationQueueService(db: ConversationDb) {
+export function createConversationQueueService(
+  db: ConversationDb,
+  options: ConversationQueueServiceOptions = {}
+) {
   return {
     async createConversation(input: ConversationCreateInput) {
       const parsed = createConversationInputSchema.parse(input);
@@ -304,6 +312,8 @@ export function createConversationQueueService(db: ConversationDb) {
       if (parsed.label !== "complete") {
         return updated;
       }
+
+      options.todoStore?.completeConversationTask(conversation.id);
 
       const [project, agent] = await Promise.all([
         db.project.findUnique({ where: { id: conversation.projectId } }),

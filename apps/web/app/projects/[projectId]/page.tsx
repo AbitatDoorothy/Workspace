@@ -1,6 +1,7 @@
 import { AppShell, Icon } from "../../components/app-shell";
 import { conversationQueueService } from "../../../server/conversations";
 import { projectService } from "../../../server/projects";
+import { todoStore } from "../../../server/todos";
 import { ConversationBoard } from "./conversation-board";
 import { StartCodexDialog } from "./start-codex-dialog";
 import type { ConversationBoardConversation } from "../conversation-board-model";
@@ -9,9 +10,10 @@ export const dynamic = "force-dynamic";
 
 export default async function ProjectPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  const [project, conversations] = await Promise.all([
+  const [project, conversations, notStartedTodos] = await Promise.all([
     getProject(projectId),
-    getProjectConversations(projectId)
+    getProjectConversations(projectId),
+    getNotStartedTodos()
   ]);
 
   if (!project) {
@@ -65,7 +67,11 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
             </p>
           </div>
           <div className="nav-actions">
-            <StartCodexDialog projectId={project.id} workspaceId={project.workspaceId} />
+            <StartCodexDialog
+              projectId={project.id}
+              todoTasks={notStartedTodos}
+              workspaceId={project.workspaceId}
+            />
           </div>
         </header>
 
@@ -118,6 +124,14 @@ async function getProjectConversations(projectId: string) {
   try {
     const conversations = await conversationQueueService.listConversations("workspace_demo");
     return conversations.filter((conversation) => conversation.projectId === projectId);
+  } catch {
+    return [];
+  }
+}
+
+function getNotStartedTodos() {
+  try {
+    return todoStore.listByStatus("not_started");
   } catch {
     return [];
   }

@@ -1,7 +1,10 @@
 import { Fragment, createElement } from "react";
 
+import type { TodoTask } from "../../todo/todo-board-model";
+
 interface StartCodexDialogProps {
   projectId: string;
+  todoTasks?: TodoTask[];
   workspaceId: string;
   userId?: string;
 }
@@ -15,10 +18,12 @@ const conversationTypes = [
 
 export function StartCodexDialog({
   projectId,
+  todoTasks = [],
   workspaceId,
   userId = "user_demo"
 }: StartCodexDialogProps) {
   const projectPath = `/projects/${projectId}`;
+  const todoListId = `start-codex-todos-${projectId}`;
 
   return createElement(
     Fragment,
@@ -82,13 +87,21 @@ export function StartCodexDialog({
           createElement(
             "label",
             null,
-            "Task title",
+            "To-Do",
             createElement("input", {
               autoFocus: true,
-              name: "prompt",
-              placeholder: "Name this task",
+              list: todoListId,
+              name: "todoTitle",
+              placeholder: "Choose or type a to-do",
               required: true
-            })
+            }),
+            createElement(
+              "datalist",
+              { id: todoListId },
+              todoTasks.map((task) =>
+                createElement("option", { key: task.id, value: task.title }, task.title)
+              )
+            )
           ),
           createElement(
             "label",

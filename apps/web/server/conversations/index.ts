@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import type { ConversationStatus, ConversationType, Runtime } from "@abitat/shared";
 
 import { prisma } from "../db/client";
+import { todoStore } from "../todos";
 import {
   createConversationQueueService,
   createResilientConversationQueueService,
@@ -12,8 +13,8 @@ import {
 } from "./conversation-queue-service";
 
 export const conversationQueueService = createResilientConversationQueueService(
-  createConversationQueueService(createPrismaConversationDb(prisma)),
-  createConversationQueueService(createDemoConversationDb())
+  createConversationQueueService(createPrismaConversationDb(prisma), { todoStore }),
+  createConversationQueueService(createDemoConversationDb(), { todoStore })
 );
 
 function createPrismaConversationDb(db: PrismaClient) {

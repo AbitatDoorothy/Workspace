@@ -5,11 +5,13 @@ import { z } from "zod";
 import { createPublicRedirectUrl } from "../../../server/auth/session";
 import { conversationQueueService } from "../../../server/conversations";
 import { runEventService } from "../../../server/run-events";
+import { todoStore } from "../../../server/todos";
 
 const conversationRequestSchema = conversationCreateRequestSchema.extend({
   workspaceId: z.string().min(1).default("workspace_demo"),
   createdByUserId: z.string().min(1).default("user_demo"),
   prompt: z.string().trim().default(""),
+  todoTitle: z.string().trim().optional(),
   redirectTo: z.string().min(1).optional()
 });
 
@@ -17,9 +19,19 @@ export async function POST(request: Request) {
   try {
     const body = await parseRequest(request);
     const input = conversationRequestSchema.parse(body);
-    const conversation = await conversationQueueService.createConversation(input);
+    const todoTask = input.todoTitle ? todoStore.startCodexTask(input.todoTitle) : null;
+    const conversationInput = {
+      ...input,
+      prompt: todoTask?.title ?? input.prompt
+    };
+    const conversation = await conversationQueueService.createConversation(conversationInput);
+
+    if (todoTask) {
+      todoStore.linkConversation(todoTask.id, conversation.id);
+    }
+
     await runEventService.appendAuditEvent(conversation.id, {
-      content: input.prompt,
+      content: conversationInput.prompt,
       metadata: { action: "start", role: "user", userId: conversation.createdByUserId }
     });
 

@@ -3,8 +3,11 @@ import { dirname, join } from "node:path";
 
 import {
   addTodoTask,
+  completeTodoTaskForConversation,
+  linkTodoTaskToConversation,
   moveTodoTask,
   parseStoredTodoTasks,
+  startCodexTodoTask,
   type TodoStatus,
   type TodoTask
 } from "../../app/todo/todo-board-model";
@@ -45,8 +48,26 @@ export function createTodoStore({ filePath, initialTasks = [] }: TodoStoreOption
       writeTasks(tasks);
       return tasks;
     },
+    completeConversationTask(conversationId: string) {
+      const tasks = completeTodoTaskForConversation(readTasks(), conversationId);
+      writeTasks(tasks);
+      return tasks;
+    },
+    linkConversation(taskId: string, conversationId: string) {
+      const tasks = linkTodoTaskToConversation(readTasks(), taskId, conversationId);
+      writeTasks(tasks);
+      return tasks.find((task) => task.id === taskId) ?? null;
+    },
     list() {
       return readTasks();
+    },
+    listByStatus(status: TodoStatus) {
+      return readTasks().filter((task) => task.status === status);
+    },
+    startCodexTask(title: string, id = createTaskId()) {
+      const result = startCodexTodoTask(readTasks(), title, id);
+      writeTasks(result.tasks);
+      return result.task;
     },
     updateStatus(taskId: string, status: TodoStatus) {
       const tasks = moveTodoTask(readTasks(), taskId, status);
@@ -55,6 +76,8 @@ export function createTodoStore({ filePath, initialTasks = [] }: TodoStoreOption
     }
   };
 }
+
+export type TodoStore = ReturnType<typeof createTodoStore>;
 
 export const todoStore = createTodoStore({
   filePath: join(process.cwd(), ".data", "todo-tasks.json")

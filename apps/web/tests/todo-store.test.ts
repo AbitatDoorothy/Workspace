@@ -32,6 +32,56 @@ describe("todo store", () => {
     ]);
   });
 
+  it("starts an existing not started task for Codex", () => {
+    const store = createTodoStore();
+    store.create("Write dashboard notes", "task_demo");
+
+    expect(store.startCodexTask("Write dashboard notes", "task_unused")).toEqual({
+      id: "task_demo",
+      status: "in_process",
+      title: "Write dashboard notes"
+    });
+    expect(store.list()).toEqual([
+      {
+        id: "task_demo",
+        status: "in_process",
+        title: "Write dashboard notes"
+      }
+    ]);
+  });
+
+  it("creates a typed Codex task directly in process", () => {
+    const store = createTodoStore();
+
+    expect(store.startCodexTask("Write dashboard notes", "task_demo")).toEqual({
+      id: "task_demo",
+      status: "in_process",
+      title: "Write dashboard notes"
+    });
+    expect(store.listByStatus("in_process")).toEqual([
+      {
+        id: "task_demo",
+        status: "in_process",
+        title: "Write dashboard notes"
+      }
+    ]);
+  });
+
+  it("completes a linked task from its conversation", () => {
+    const store = createTodoStore();
+    store.startCodexTask("Write dashboard notes", "task_demo");
+    store.linkConversation("task_demo", "conversation_demo");
+
+    expect(store.completeConversationTask("conversation_demo")).toEqual([
+      {
+        conversationId: "conversation_demo",
+        id: "task_demo",
+        status: "complete",
+        title: "Write dashboard notes"
+      }
+    ]);
+  });
+
   it("persists tasks across store instances when backed by a file", () => {
     const filePath = join(mkdtempSync(join(tmpdir(), "abitat-todo-")), "tasks.json");
     const firstStore = createTodoStore({ filePath });

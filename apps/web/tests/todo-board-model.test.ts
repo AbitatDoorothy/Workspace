@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   addTodoTask,
   addSubmittedTodoTask,
+  completeTodoTaskForConversation,
+  linkTodoTaskToConversation,
   moveTodoTask,
   submittedTodoTaskTitle,
+  startCodexTodoTask,
   todoColumns,
   todoTasksByStatus,
   todoStatusGridTemplateColumns,
@@ -34,6 +37,41 @@ describe("todo board model", () => {
     ]);
     expect(moveTodoTask(tasks, "task_demo", "complete")).toEqual([
       { id: "task_demo", status: "complete", title: "Draft launch checklist" }
+    ]);
+  });
+
+  it("starts an existing not started to-do for Codex", () => {
+    const tasks: TodoTask[] = [
+      { id: "task_demo", status: "not_started", title: "Draft launch checklist" }
+    ];
+
+    expect(startCodexTodoTask(tasks, "Draft launch checklist", "task_unused")).toEqual({
+      task: { id: "task_demo", status: "in_process", title: "Draft launch checklist" },
+      tasks: [{ id: "task_demo", status: "in_process", title: "Draft launch checklist" }]
+    });
+  });
+
+  it("creates a typed Codex to-do directly in process", () => {
+    expect(startCodexTodoTask([], "  Write release notes  ", "task_new")).toEqual({
+      task: { id: "task_new", status: "in_process", title: "Write release notes" },
+      tasks: [{ id: "task_new", status: "in_process", title: "Write release notes" }]
+    });
+  });
+
+  it("links a to-do to a conversation and completes it from the conversation label", () => {
+    const linkedTasks = linkTodoTaskToConversation(
+      [{ id: "task_demo", status: "in_process", title: "Draft launch checklist" }],
+      "task_demo",
+      "conversation_demo"
+    );
+
+    expect(completeTodoTaskForConversation(linkedTasks, "conversation_demo")).toEqual([
+      {
+        conversationId: "conversation_demo",
+        id: "task_demo",
+        status: "complete",
+        title: "Draft launch checklist"
+      }
     ]);
   });
 

@@ -1,6 +1,7 @@
 export type TodoStatus = "not_started" | "in_process" | "complete";
 
 export interface TodoTask {
+  conversationId?: string;
   id: string;
   status: TodoStatus;
   title: string;
@@ -24,8 +25,47 @@ export function addTodoTask(tasks: TodoTask[], title: string, id: string) {
   return [...tasks, { id, status: "not_started" as const, title: normalizedTitle }];
 }
 
+export function startCodexTodoTask(tasks: TodoTask[], title: string, id: string) {
+  const normalizedTitle = title.trim();
+
+  if (normalizedTitle.length === 0) {
+    return { task: null, tasks };
+  }
+
+  const existingTask = tasks.find(
+    (task) => task.status === "not_started" && task.title === normalizedTitle
+  );
+
+  if (!existingTask) {
+    const task = { id, status: "in_process" as const, title: normalizedTitle };
+
+    return { task, tasks: [...tasks, task] };
+  }
+
+  const task = { ...existingTask, status: "in_process" as const };
+
+  return {
+    task,
+    tasks: tasks.map((currentTask) => (currentTask.id === existingTask.id ? task : currentTask))
+  };
+}
+
 export function moveTodoTask(tasks: TodoTask[], taskId: string, status: TodoStatus) {
   return tasks.map((task) => (task.id === taskId ? { ...task, status } : task));
+}
+
+export function linkTodoTaskToConversation(
+  tasks: TodoTask[],
+  taskId: string,
+  conversationId: string
+) {
+  return tasks.map((task) => (task.id === taskId ? { ...task, conversationId } : task));
+}
+
+export function completeTodoTaskForConversation(tasks: TodoTask[], conversationId: string) {
+  return tasks.map((task) =>
+    task.conversationId === conversationId ? { ...task, status: "complete" as const } : task
+  );
 }
 
 export function todoTasksByStatus(tasks: TodoTask[]) {
@@ -65,7 +105,10 @@ function isTodoTask(value: unknown): value is TodoTask {
   }
 
   return (
-    typeof value.id === "string" && typeof value.title === "string" && isTodoStatus(value.status)
+    typeof value.id === "string" &&
+    typeof value.title === "string" &&
+    isTodoStatus(value.status) &&
+    (value.conversationId === undefined || typeof value.conversationId === "string")
   );
 }
 

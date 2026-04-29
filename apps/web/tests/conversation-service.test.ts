@@ -45,6 +45,20 @@ interface TestConversation {
   runtimeSessionId?: string | null;
 }
 
+function createTodoStoreSpy() {
+  const completedConversationIds: string[] = [];
+
+  return {
+    completedConversationIds,
+    store: {
+      completeConversationTask: (conversationId: string) => {
+        completedConversationIds.push(conversationId);
+        return [];
+      }
+    }
+  };
+}
+
 interface TestDaemonJob {
   id: string;
   workspaceId: string;
@@ -556,6 +570,27 @@ describe("conversation queue service", () => {
         userId: "user_demo"
       })
     ).resolves.toMatchObject({ status: "running" });
+  });
+
+  it("marks the linked to-do complete when a conversation is labeled complete", async () => {
+    const db = createConversationDb();
+    const todoStoreSpy = createTodoStoreSpy();
+    const service = createConversationQueueService(db, { todoStore: todoStoreSpy.store });
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Launch checklist"
+    });
+
+    await service.setConversationLabel(conversation.id, {
+      label: "complete",
+      userId: "user_demo"
+    });
+
+    expect(todoStoreSpy.completedConversationIds).toEqual([conversation.id]);
   });
 
   it("deletes a conversation after checking workspace membership", async () => {
