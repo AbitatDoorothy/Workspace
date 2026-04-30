@@ -322,6 +322,8 @@ describe("CLI runtime adapter", () => {
           const script = await readFile(scriptPath, "utf8");
 
           expect(script).toContain("'/usr/bin/codex' 'exec'");
+          expect(script).toContain("script -q -a");
+          expect(script).toContain("| tee -a");
           expect(script).toContain(tmp);
 
           await appendFile(logPath, "Created terminal-output.md.\n", "utf8");
@@ -368,6 +370,9 @@ describe("CLI runtime adapter", () => {
           expect(script).not.toContain("'--skip-git-repo-check'");
           expect(script).not.toContain("$(cat ");
           expect(script).not.toContain("< ");
+          expect(script).not.toContain("script -q -a");
+          expect(script).not.toContain("| tee -a");
+          expect(script).toContain("\nclear\n");
           expect(script).toContain("'--model' 'gpt-5.4'");
 
           await appendFile(logPath, "session id: 019dc90a-2e03-7f91-828b-71bc3081edce\n", "utf8");
@@ -429,6 +434,7 @@ describe("CLI runtime adapter", () => {
           expect(script).not.toContain("'exec'");
           expect(script).not.toContain("'--model'");
           expect(script).not.toContain("$(cat ");
+          expect(script).not.toContain("script -q -a");
 
           await appendFile(logPath, "session id: default-codex-session\n", "utf8");
           await appendFile(logPath, `${exitMarker}:0\n`, "utf8");
@@ -606,6 +612,7 @@ describe("CLI runtime adapter", () => {
           expect(script).toContain(sessionId);
           expect(script).not.toContain("'exec'");
           expect(script).not.toContain("$(cat ");
+          expect(script).not.toContain("script -q -a");
 
           await appendFile(logPath, `${exitMarker}:0\n`, "utf8");
         }

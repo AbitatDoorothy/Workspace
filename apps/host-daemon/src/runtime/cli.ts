@@ -298,23 +298,25 @@ function terminalScript(input: {
     input.promptPath
   );
   const holdOpen = process.env.ABITAT_TERMINAL_HOLD_OPEN !== "0";
+  const capturesOutput = capturesTerminalOutput(input.commandName, input.args);
   const lines = [
     "#!/bin/bash",
     "set +e",
     `cd ${shellQuote(input.cwd)}`,
     `echo "${terminalShellPidMarker}:$$" >> ${shellQuote(input.logPath)}`,
-    `echo "Abitat Workspace terminal runtime" | tee -a ${shellQuote(input.logPath)}`,
-    `echo "cwd: ${escapeDoubleQuoted(input.cwd)}" | tee -a ${shellQuote(input.logPath)}`,
-    `echo "command: ${escapeDoubleQuoted(command)}" | tee -a ${shellQuote(input.logPath)}`,
-    `echo ""`,
+    terminalLogLine("Abitat Workspace terminal runtime", input.logPath, capturesOutput),
+    terminalLogLine(`cwd: ${input.cwd}`, input.logPath, capturesOutput),
+    terminalLogLine(`command: ${command}`, input.logPath, capturesOutput),
+    capturesOutput ? `echo ""` : "clear",
     ...(usesPrompt
       ? [`echo "--- Task ---"`, `cat ${shellQuote(input.promptPath)}`, `echo ""`]
       : []),
-    `echo "--- Starting Codex CLI ---"`,
-    `echo ""`,
-    // Use `script` to give the CLI a real pseudo-terminal while capturing
-    // all output to the log file for the daemon to stream to the web UI.
-    `script -q -a ${shellQuote(input.logPath)} /bin/bash -lc ${shellQuote(command)}`,
+    ...(capturesOutput ? [`echo "--- Starting Codex CLI ---"`, `echo ""`] : []),
+    capturesOutput
+      ? // Use `script` to give noninteractive CLI runs a real pseudo-terminal
+        // while capturing output for the daemon to stream to the web UI.
+        `script -q -a ${shellQuote(input.logPath)} /bin/bash -lc ${shellQuote(command)}`
+      : command,
     "status=$?",
     `echo "${input.exitMarker}:$status" >> ${shellQuote(input.logPath)}`,
     'echo ""',
@@ -325,6 +327,13 @@ function terminalScript(input: {
   ];
 
   return lines.join("\n");
+}
+
+function terminalLogLine(line: string, logPath: string, echoToTerminal: boolean) {
+  const escaped = escapeDoubleQuoted(line);
+  const log = shellQuote(logPath);
+
+  return echoToTerminal ? `echo "${escaped}" | tee -a ${log}` : `echo "${escaped}" >> ${log}`;
 }
 
 function terminalCommand(
@@ -350,6 +359,10 @@ function terminalCommand(
 }
 
 function usesPromptFile(commandName: string, args: string[]) {
+  return commandName !== "codex" || args[0] === "exec";
+}
+
+function capturesTerminalOutput(commandName: string, args: string[]) {
   return commandName !== "codex" || args[0] === "exec";
 }
 
