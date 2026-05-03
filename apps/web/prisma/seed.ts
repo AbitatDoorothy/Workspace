@@ -45,15 +45,23 @@ async function main() {
   await prisma.machine.upsert({
     where: { id: "machine_demo" },
     update: {
-      status: "pending"
+      status: "pending",
+      ownerUserId: "user_demo",
+      platform: "darwin",
+      deviceKind: "host",
+      capabilitiesJson: ["codex", "claude", "screen_capture", "input_control"]
     },
     create: {
       id: "machine_demo",
       workspaceId: "workspace_demo",
+      ownerUserId: "user_demo",
       name: "Demo Host",
       type: "host",
       status: "pending",
+      platform: "darwin",
+      deviceKind: "host",
       pairingTokenHash: "demo-pairing-token-hash",
+      capabilitiesJson: ["codex", "claude", "screen_capture", "input_control"],
       installedToolsJson: []
     }
   });

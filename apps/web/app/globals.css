@@ -830,6 +830,45 @@ a.muted,
   gap: 20px;
 }
 
+.phone-pair-card {
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+}
+
+.phone-pair-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.phone-pair-code {
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.phone-pair-code span,
+.phone-pair-code small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.phone-pair-code strong {
+  color: #ffffff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 1.1rem;
+  letter-spacing: 0;
+}
+
+.phone-pair-code code {
+  color: var(--primary-text);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
 .progress-row {
   display: grid;
   gap: 8px;

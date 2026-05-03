@@ -21,6 +21,8 @@ export interface ConversationCreateInput {
   createdByUserId: string;
   type?: ConversationType;
   prompt?: string;
+  presentation?: "terminal" | "inline" | "remote_chat";
+  targetMachineId?: string;
 }
 
 export interface ConversationRecord {
@@ -144,11 +146,15 @@ interface ConversationQueueServiceOptions {
 }
 
 const createConversationInputSchema = conversationCreateRequestSchema.extend({
-  createdByUserId: z.string().min(1)
+  createdByUserId: z.string().min(1),
+  presentation: z.enum(["terminal", "inline", "remote_chat"]).default("terminal"),
+  targetMachineId: z.string().min(1).optional()
 });
 const continueConversationInputSchema = z.object({
   prompt: z.string().trim().default(""),
-  userId: z.string().min(1)
+  userId: z.string().min(1),
+  presentation: z.enum(["terminal", "inline", "remote_chat"]).default("terminal"),
+  targetMachineId: z.string().min(1).optional()
 });
 const conversationLabelSchema = z.enum(["in_process", "complete"]);
 const internalDefaultAgentRole = "internal_default_runtime";
@@ -205,19 +211,24 @@ export function createConversationQueueService(
         data: {
           id: `job_${randomBytes(8).toString("hex")}`,
           workspaceId: parsed.workspaceId,
-          machineId: null,
+          machineId: parsed.targetMachineId ?? null,
           projectId: parsed.projectId,
           conversationId: created.id,
           type: "start_conversation",
           status: "queued",
-          payloadJson: startConversationPayload(project, agent, created)
+          payloadJson: startConversationPayload(project, agent, created, {
+            presentation: parsed.presentation
+          })
         }
       });
 
       return created;
     },
 
-    async continueConversation(conversationId: string, input: { prompt: string; userId: string }) {
+    async continueConversation(
+      conversationId: string,
+      input: z.input<typeof continueConversationInputSchema>
+    ) {
       const parsed = continueConversationInputSchema.parse(input);
       const conversation = await db.conversation.findUnique({ where: { id: conversationId } });
 
@@ -264,13 +275,14 @@ export function createConversationQueueService(
         data: {
           id: `job_${randomBytes(8).toString("hex")}`,
           workspaceId: updated.workspaceId,
-          machineId: null,
+          machineId: parsed.targetMachineId ?? null,
           projectId: updated.projectId,
           conversationId: updated.id,
           type: "start_conversation",
           status: "queued",
           payloadJson: startConversationPayload(project, agent, updated, {
             branchName: updated.branchName ?? undefined,
+            presentation: parsed.presentation,
             resumeSessionId: updated.runtimeSessionId ?? undefined,
             worktreePath: updated.worktreePath ?? undefined
           })
@@ -397,12 +409,16 @@ export function createConversationQueueService(
     },
 
     async pollNextJob(machineId: string): Promise<DaemonJob | null> {
-      const job = await db.daemonJob.findFirst({
-        where: {
-          type: { in: ["start_conversation", "commit_and_push", "summarize_conversation"] },
-          status: { in: ["queued"] }
-        }
-      });
+      const job =
+        (
+          await db.daemonJob.findMany({
+            where: {
+              type: { in: ["start_conversation", "commit_and_push", "summarize_conversation"] },
+              status: { in: ["queued"] }
+            }
+          })
+        ).find((candidate) => candidate.machineId === null || candidate.machineId === machineId) ??
+        null;
 
       if (!job) {
         return null;
@@ -743,7 +759,7 @@ function startConversationPayload(
   conversation: ConversationRecord,
   continuation: {
     branchName?: string;
-    presentation?: "terminal" | "inline";
+    presentation?: "terminal" | "inline" | "remote_chat";
     prompt?: string;
     resumeSessionId?: string;
     worktreePath?: string;

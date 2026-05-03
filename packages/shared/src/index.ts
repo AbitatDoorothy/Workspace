@@ -12,6 +12,7 @@ const repoUrlSchema = z.string().min(1);
 
 export const machineTypeSchema = z.enum(["host", "client"]);
 export const machineStatusSchema = z.enum(["pending", "online", "offline", "error"]);
+export const deviceKindSchema = z.enum(["host", "phone", "browser", "tablet"]);
 export const runtimeSchema = z.enum(["codex", "claude", "mock"]);
 export const conversationTypeSchema = z.enum(["feature", "bugfix", "investigation", "refactor"]);
 export const conversationStatusSchema = z.enum([
@@ -167,7 +168,7 @@ const conversationRuntimeJobPayloadSchema = z.object({
   worktreePath: z.string().min(1).optional(),
   branchName: z.string().min(1).optional(),
   hostLocalPath: z.string().min(1).optional(),
-  presentation: z.enum(["terminal", "inline"]).default("terminal"),
+  presentation: z.enum(["terminal", "inline", "remote_chat"]).default("terminal"),
   taskTitle: z.string().optional()
 });
 
@@ -231,14 +232,168 @@ export const daemonJobPollResponseSchema = z.object({
   job: daemonJobSchema.nullable()
 });
 
+export const phonePairingStartRequestSchema = z.object({
+  workspaceId: idSchema,
+  hostMachineId: idSchema
+});
+
+export const phonePairingStartResponseSchema = z.object({
+  pairingId: idSchema,
+  code: z.string().min(1),
+  expiresAt: z.string().datetime(),
+  qrPayload: z.string().min(1)
+});
+
+export const phonePairingCompleteRequestSchema = z.object({
+  code: z.string().min(1),
+  deviceName: z.string().min(1),
+  platform: z.literal("ios"),
+  appVersion: z.string().min(1),
+  publicKey: z.string().min(1).optional()
+});
+
+export const phonePairingCompleteResponseSchema = z.object({
+  machineId: idSchema,
+  workspaceId: idSchema,
+  hostMachineId: idSchema,
+  clientToken: z.string().min(1)
+});
+
+export const mobileDeviceSummarySchema = z.object({
+  id: idSchema,
+  name: z.string().min(1),
+  status: machineStatusSchema
+});
+
+export const mobileWorkspaceSummarySchema = z.object({
+  id: idSchema,
+  name: z.string().min(1)
+});
+
+export const mobileBootstrapResponseSchema = z.object({
+  workspace: mobileWorkspaceSummarySchema,
+  phone: mobileDeviceSummarySchema,
+  host: mobileDeviceSummarySchema.nullable()
+});
+
+export const conversationMessageRoleSchema = z.enum(["user", "assistant", "system", "runtime"]);
+
+export const conversationMessageCreateRequestSchema = z.object({
+  content: z.string().min(1),
+  role: conversationMessageRoleSchema.default("user"),
+  sourceDeviceId: idSchema.optional(),
+  clientMessageId: z.string().min(1).optional(),
+  metadata: metadataSchema.default({})
+});
+
+export const conversationMessageSchema = z.object({
+  id: idSchema,
+  conversationId: idSchema,
+  sequence: z.number().int().positive(),
+  role: conversationMessageRoleSchema,
+  sourceDeviceId: idSchema.nullable().optional(),
+  content: z.string(),
+  metadata: metadataSchema.default({}),
+  createdAt: z.string().datetime()
+});
+
+export const remoteControlStatusSchema = z.enum([
+  "requested",
+  "connecting",
+  "active",
+  "ended",
+  "failed"
+]);
+
+export const remoteControlSessionCreateRequestSchema = z.object({
+  hostMachineId: idSchema,
+  screenEnabled: z.boolean().default(true),
+  inputEnabled: z.boolean().default(true)
+});
+
+export const remoteControlSessionResponseSchema = z.object({
+  id: idSchema,
+  status: remoteControlStatusSchema,
+  hostMachineId: idSchema,
+  clientMachineId: idSchema,
+  screenEnabled: z.boolean(),
+  inputEnabled: z.boolean(),
+  errorMessage: z.string().nullable().optional()
+});
+
+export const remoteControlSignalTypeSchema = z.enum([
+  "offer",
+  "answer",
+  "ice_candidate",
+  "frame",
+  "input",
+  "status"
+]);
+
+export const remoteControlSignalSchema = z.object({
+  sessionId: idSchema,
+  senderMachineId: idSchema,
+  recipientMachineId: idSchema.optional(),
+  type: remoteControlSignalTypeSchema,
+  payload: metadataSchema
+});
+
+const remoteInputModifierSchema = z.enum(["cmd", "ctrl", "alt", "shift"]);
+
+export const remotePointerInputEventSchema = z.object({
+  type: z.literal("pointer"),
+  phase: z.enum(["down", "move", "up", "scroll"]),
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  buttons: z.number().int().nonnegative().optional(),
+  dx: z.number().optional(),
+  dy: z.number().optional()
+});
+
+export const remoteTextInputEventSchema = z.object({
+  type: z.literal("text"),
+  value: z.string()
+});
+
+export const remoteKeyInputEventSchema = z.object({
+  type: z.literal("key"),
+  key: z.string().min(1),
+  code: z.string().min(1).optional(),
+  modifiers: z.array(remoteInputModifierSchema).default([])
+});
+
+export const remoteInputEventSchema = z.discriminatedUnion("type", [
+  remotePointerInputEventSchema,
+  remoteTextInputEventSchema,
+  remoteKeyInputEventSchema
+]);
+
 export type MachineType = z.infer<typeof machineTypeSchema>;
 export type MachineStatus = z.infer<typeof machineStatusSchema>;
+export type DeviceKind = z.infer<typeof deviceKindSchema>;
 export type Runtime = z.infer<typeof runtimeSchema>;
 export type ConversationType = z.infer<typeof conversationTypeSchema>;
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
 export type RunEventType = z.infer<typeof runEventTypeSchema>;
 export type DaemonJobType = z.infer<typeof daemonJobTypeSchema>;
 export type ToolName = z.infer<typeof toolNameSchema>;
+export type PhonePairingStartRequest = z.infer<typeof phonePairingStartRequestSchema>;
+export type PhonePairingStartResponse = z.infer<typeof phonePairingStartResponseSchema>;
+export type PhonePairingCompleteRequest = z.infer<typeof phonePairingCompleteRequestSchema>;
+export type PhonePairingCompleteResponse = z.infer<typeof phonePairingCompleteResponseSchema>;
+export type MobileBootstrapResponse = z.infer<typeof mobileBootstrapResponseSchema>;
+export type ConversationMessageRole = z.infer<typeof conversationMessageRoleSchema>;
+export type ConversationMessageCreateRequest = z.infer<
+  typeof conversationMessageCreateRequestSchema
+>;
+export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
+export type RemoteControlStatus = z.infer<typeof remoteControlStatusSchema>;
+export type RemoteControlSessionCreateRequest = z.infer<
+  typeof remoteControlSessionCreateRequestSchema
+>;
+export type RemoteControlSessionResponse = z.infer<typeof remoteControlSessionResponseSchema>;
+export type RemoteControlSignal = z.infer<typeof remoteControlSignalSchema>;
+export type RemoteInputEvent = z.infer<typeof remoteInputEventSchema>;
 export type HostPairingRequest = z.infer<typeof hostPairingRequestSchema>;
 export type HostPairingResponse = z.infer<typeof hostPairingResponseSchema>;
 export type HostHeartbeatRequest = z.infer<typeof hostHeartbeatRequestSchema>;

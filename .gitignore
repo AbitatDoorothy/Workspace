@@ -3,6 +3,7 @@
 .env.local
 .next
 apps/web/.data
+apps/mac-remote-helper/.build
 dist
 *.tsbuildinfo
 node_modules

@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Abitat",
+    "slug": "abitat-ios",
+    "scheme": "abitat",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "platforms": ["ios"],
+    "ios": {
+      "bundleIdentifier": "io.abitat.workspace",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Abitat scans the pairing QR code shown on your Mac."
+      }
+    },
+    "plugins": ["expo-secure-store", "expo-camera"],
+    "extra": {
+      "defaultApiUrl": "https://workspace.abitat.io"
+    }
+  }
+}

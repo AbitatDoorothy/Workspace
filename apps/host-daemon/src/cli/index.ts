@@ -9,6 +9,7 @@ import { collectChangeset } from "../git/changeset.js";
 import { branchNameForConversation, resolveRepoPath } from "../git/paths.js";
 import { commitAndPushWorktree, tryCreatePullRequest } from "../git/publish.js";
 import { cleanupConversationWorktree, setupConversationWorktree } from "../git/worktree.js";
+import { createRemoteControlManager } from "../remote-control/manager.js";
 import { createRuntimeAdapter } from "../runtime/index.js";
 import { HostApiClient } from "../transport/api-client.js";
 import { createToolScanner } from "../tools/scanner.js";
@@ -108,6 +109,14 @@ async function startDaemon(args: string[]) {
   const toolScanUpload = createRetryableTask(async () => {
     await uploadToolScan(client, connection.machineId);
   });
+  const remoteControlManager =
+    process.env.ABITAT_ENABLE_REMOTE_CONTROL === "1"
+      ? createRemoteControlManager(client, {
+          apiUrl: connection.apiUrl,
+          helperPath: process.env.ABITAT_REMOTE_CONTROL_HELPER_PATH,
+          hostToken: connection.hostToken
+        })
+      : null;
 
   const beat = async () => {
     const timestamp = new Date().toISOString();
@@ -135,6 +144,10 @@ async function startDaemon(args: string[]) {
       connection.apiUrl,
       connection.hostToken
     );
+
+    if (connection.paired && remoteControlManager) {
+      await remoteControlManager.tick(connection.machineId);
+    }
   };
 
   await runHeartbeatWithRecovery(beat);
@@ -147,6 +160,7 @@ async function startDaemon(args: string[]) {
 
   process.on("SIGINT", () => {
     clearInterval(heartbeat);
+    remoteControlManager?.stopAll();
     void stopDaemon(client, connection);
   });
 }

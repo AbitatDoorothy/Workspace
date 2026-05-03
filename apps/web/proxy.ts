@@ -7,7 +7,12 @@ import {
   verifySessionToken
 } from "./server/auth/session";
 
-const PUBLIC_PATHS = new Set(["/login", "/api/login", "/api/logout"]);
+const PUBLIC_PATHS = new Set([
+  "/login",
+  "/api/login",
+  "/api/logout",
+  "/api/mobile/pairing/complete"
+]);
 const HOST_API_PATHS = new Set([
   "/api/hosts/pair",
   "/api/hosts/heartbeat",
@@ -51,7 +56,9 @@ function isPublicRequest(request: NextRequest) {
       /^\/api\/conversations\/[^/]+\/(?:events|changeset)$/u.test(pathname)) ||
     (request.method === "POST" &&
       hasBearerToken &&
-      /^\/api\/daemon\/jobs\/[^/]+\/ack$/u.test(pathname))
+      /^\/api\/daemon\/jobs\/[^/]+\/ack$/u.test(pathname)) ||
+    (hasBearerToken &&
+      (pathname.startsWith("/api/mobile/") || pathname.startsWith("/api/remote-control/")))
   );
 }
 

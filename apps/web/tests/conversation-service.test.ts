@@ -234,6 +234,31 @@ describe("conversation queue service", () => {
     });
   });
 
+  it("targets phone-started conversations to the paired Mac host without changing default jobs", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Run from the phone.",
+      targetMachineId: "machine_demo",
+      presentation: "remote_chat"
+    });
+    const jobs = await db.daemonJob.findMany();
+
+    expect(jobs.at(-1)).toMatchObject({
+      conversationId: conversation.id,
+      machineId: "machine_demo",
+      payloadJson: {
+        presentation: "remote_chat"
+      }
+    });
+  });
+
   it("queues a conversation without an initial web prompt", async () => {
     const db = createConversationDb();
     const service = createConversationQueueService(db);
@@ -543,6 +568,83 @@ describe("conversation queue service", () => {
     });
   });
 
+  it("does not let a daemon claim a phone job targeted to a different host", async () => {
+    const db = createConversationDb({
+      id: "job_other_host",
+      workspaceId: "workspace_demo",
+      machineId: "machine_other",
+      conversationId: "conversation_other",
+      projectId: "project_demo",
+      type: "start_conversation",
+      status: "queued",
+      payloadJson: {
+        repoUrl: "/Users/reece/Desktop/Test",
+        conversationType: "feature",
+        agentRuntime: "mock",
+        instructions: "Use mock runtime.",
+        prompt: "Run on another host.",
+        presentation: "remote_chat"
+      }
+    });
+    const service = createConversationQueueService(db);
+    await db.conversation.create({
+      data: {
+        id: "conversation_other",
+        workspaceId: "workspace_demo",
+        projectId: "project_demo",
+        agentId: "agent_demo",
+        createdByUserId: "user_demo",
+        type: "feature",
+        status: "queued",
+        prompt: "Run on another host."
+      }
+    });
+    await db.daemonJob.create({
+      data: {
+        id: "job_unassigned",
+        workspaceId: "workspace_demo",
+        machineId: null,
+        conversationId: "conversation_unassigned",
+        projectId: "project_demo",
+        type: "start_conversation",
+        status: "queued",
+        payloadJson: {
+          repoUrl: "/Users/reece/Desktop/Test",
+          conversationType: "feature",
+          agentRuntime: "mock",
+          instructions: "Use mock runtime.",
+          prompt: "Run anywhere.",
+          presentation: "terminal"
+        }
+      }
+    });
+    await db.conversation.create({
+      data: {
+        id: "conversation_unassigned",
+        workspaceId: "workspace_demo",
+        projectId: "project_demo",
+        agentId: "agent_demo",
+        createdByUserId: "user_demo",
+        type: "feature",
+        status: "queued",
+        prompt: "Run anywhere."
+      }
+    });
+
+    const job = await service.pollNextJob("machine_demo");
+
+    expect(job).toMatchObject({
+      id: "job_unassigned",
+      conversationId: "conversation_unassigned"
+    });
+    expect(
+      (await db.daemonJob.findMany()).find((candidate) => candidate.id === "job_other_host")
+    ).toMatchObject({
+      machineId: "machine_other",
+      status: "queued"
+    });
+  });
+
   it("changes a conversation label between in process and complete", async () => {
     const db = createConversationDb();
     const service = createConversationQueueService(db);
@@ -678,6 +780,53 @@ describe("conversation queue service", () => {
         worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo",
         branchName: "abitat/feature/abcdef12-create-the-first-file",
         prompt: "Continue by creating the second file."
+      }
+    });
+  });
+
+  it("continues a phone conversation on the paired host with remote chat presentation", async () => {
+    const db = createConversationDb();
+    const service = createConversationQueueService(db);
+    const conversation = await service.createConversation({
+      workspaceId: "workspace_demo",
+      projectId: "project_demo",
+      agentId: "agent_demo",
+      createdByUserId: "user_demo",
+      type: "feature",
+      prompt: "Create the first file.",
+      presentation: "remote_chat",
+      targetMachineId: "machine_demo"
+    });
+    await db.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        status: "awaiting_approval",
+        branchName: "abitat/feature/abcdef12-create-the-first-file",
+        worktreePath: "/tmp/AbitatWorkspace/worktrees/conversation_demo",
+        runtimeSessionId: "session_demo"
+      }
+    });
+    await db.daemonJob.update({
+      where: { id: (await db.daemonJob.findMany())[0]?.id ?? "" },
+      data: { status: "completed" }
+    });
+
+    const continued = await service.continueConversation(conversation.id, {
+      prompt: "Continue from iPhone.",
+      userId: "user_demo",
+      targetMachineId: "machine_demo",
+      presentation: "remote_chat"
+    });
+    const jobs = await db.daemonJob.findMany();
+
+    expect(continued.status).toBe("queued");
+    expect(jobs.at(-1)).toMatchObject({
+      machineId: "machine_demo",
+      type: "start_conversation",
+      payloadJson: {
+        presentation: "remote_chat",
+        prompt: "Continue from iPhone.",
+        resumeSessionId: "session_demo"
       }
     });
   });

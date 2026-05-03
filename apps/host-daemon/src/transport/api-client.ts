@@ -5,9 +5,30 @@ import type {
   HostPairingRequest,
   HostPairingResponse,
   HostTool,
+  RemoteControlStatus,
   RunEventIngestRequest,
   ToolScanUploadRequest
 } from "@abitat/shared";
+
+interface RemoteControlSessionSummary {
+  id: string;
+  status: RemoteControlStatus;
+  hostMachineId: string;
+  clientMachineId: string;
+  screenEnabled: boolean;
+  inputEnabled: boolean;
+  errorMessage?: string | null;
+}
+
+interface RemoteControlSignalSummary {
+  id: string;
+  sessionId: string;
+  senderMachineId: string;
+  recipientMachineId?: string | null;
+  type: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
 
 export class HostApiClient {
   constructor(
@@ -55,6 +76,69 @@ export class HostApiClient {
     input: { filesChanged: string[]; diffText: string; summary: string }
   ) {
     return this.post<{ ok: true }>(`/api/conversations/${conversationId}/changeset`, input);
+  }
+
+  pollRemoteControlSessions(machineId: string) {
+    const path = `/api/remote-control/host/sessions?machineId=${encodeURIComponent(machineId)}`;
+    return this.get<{ sessions: RemoteControlSessionSummary[] }>(path);
+  }
+
+  updateRemoteControlSession(
+    sessionId: string,
+    input: { status: RemoteControlStatus; errorMessage?: string }
+  ) {
+    return this.patch<{ session: RemoteControlSessionSummary }>(
+      `/api/remote-control/host/sessions/${sessionId}`,
+      input
+    );
+  }
+
+  listRemoteControlSignals(sessionId: string) {
+    return this.get<{ signals: RemoteControlSignalSummary[] }>(
+      `/api/remote-control/host/sessions/${sessionId}/signals`
+    );
+  }
+
+  sendRemoteControlSignal(
+    sessionId: string,
+    input: { type: string; payload: Record<string, unknown>; recipientMachineId?: string }
+  ) {
+    return this.post<{ signal: RemoteControlSignalSummary }>(
+      `/api/remote-control/host/sessions/${sessionId}/signals`,
+      input
+    );
+  }
+
+  private async get<TResponse>(path: string) {
+    const response = await fetch(new URL(path, this.apiUrl), {
+      method: "GET",
+      headers: {
+        ...(this.hostToken ? { authorization: `Bearer ${this.hostToken}` } : {})
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`${response.status} ${await response.text()}`);
+    }
+
+    return (await response.json()) as TResponse;
+  }
+
+  private async patch<TResponse>(path: string, body: unknown) {
+    const response = await fetch(new URL(path, this.apiUrl), {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        ...(this.hostToken ? { authorization: `Bearer ${this.hostToken}` } : {})
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      throw new Error(`${response.status} ${await response.text()}`);
+    }
+
+    return (await response.json()) as TResponse;
   }
 
   private async post<TResponse>(path: string, body: unknown) {

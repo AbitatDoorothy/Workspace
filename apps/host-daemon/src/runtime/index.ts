@@ -12,9 +12,20 @@ import { createPtyRuntimeAdapter } from "./pty.js";
 
 export function createRuntimeAdapter(
   runtime: Runtime,
-  options?: { presentation?: "terminal" | "inline"; pty?: { apiUrl: string; hostToken?: string } }
+  options?: {
+    presentation?: "terminal" | "inline" | "remote_chat";
+    pty?: { apiUrl: string; hostToken?: string };
+  }
 ): RuntimeAdapter {
-  if (options?.presentation === "inline") {
+  if (
+    options?.presentation === "remote_chat" &&
+    options.pty &&
+    (runtime === "codex" || runtime === "claude")
+  ) {
+    return createPtyRuntimeAdapter(runtime, options.pty.apiUrl, options.pty.hostToken);
+  }
+
+  if (options?.presentation === "inline" || options?.presentation === "remote_chat") {
     if (runtime === "codex") {
       return createCliRuntimeAdapter({
         name: "codex",

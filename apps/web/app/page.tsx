@@ -1,6 +1,7 @@
 import type { HostTool } from "@abitat/shared";
 
 import { AppShell, Icon } from "./components/app-shell";
+import { PairIphonePanel } from "./components/pair-iphone-panel";
 import { appInfo } from "../lib/app-info";
 import { getHostPairingCode } from "../server/hosts/host-service";
 import { hostService } from "../server/hosts";
@@ -78,6 +79,10 @@ export default async function Home() {
           </section>
 
           <aside className="dashboard-side">
+            {host ? (
+              <PairIphonePanel hostMachineId={host.id} workspaceId={host.workspaceId} />
+            ) : null}
+
             <section className="glass-card health-card">
               <h2>System Health</h2>
               <div className="progress-row">

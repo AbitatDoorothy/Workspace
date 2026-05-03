@@ -4,11 +4,22 @@ import {
   cloneRepoJobSchema,
   commitAndPushJobSchema,
   conversationCreateRequestSchema,
+  conversationMessageCreateRequestSchema,
+  conversationMessageRoleSchema,
   conversationTypeSchema,
   daemonJobSchema,
   daemonJobPollRequestSchema,
   daemonJobAckRequestSchema,
   daemonJobPollResponseSchema,
+  mobileBootstrapResponseSchema,
+  phonePairingCompleteRequestSchema,
+  phonePairingCompleteResponseSchema,
+  phonePairingStartRequestSchema,
+  phonePairingStartResponseSchema,
+  remoteControlSessionCreateRequestSchema,
+  remoteControlSessionResponseSchema,
+  remoteControlSignalSchema,
+  remoteInputEventSchema,
   startConversationJobSchema,
   runtimeSchema,
   toolScanUploadRequestSchema
@@ -302,6 +313,147 @@ describe("shared schema validation", () => {
       commitSha: "abc123",
       prUrl: "https://github.com/example/app/pull/1",
       errorMessage: "gh is not authenticated"
+    });
+  });
+
+  it("accepts phone pairing payloads and mobile bootstrap data", () => {
+    expect(
+      phonePairingStartRequestSchema.parse({
+        workspaceId: "workspace_demo",
+        hostMachineId: "machine_demo"
+      })
+    ).toEqual({
+      workspaceId: "workspace_demo",
+      hostMachineId: "machine_demo"
+    });
+
+    expect(
+      phonePairingStartResponseSchema.parse({
+        pairingId: "pairing_123",
+        code: "ABITAT-123456",
+        expiresAt: "2026-05-03T12:00:00.000Z",
+        qrPayload: "abitat://pair?code=ABITAT-123456"
+      })
+    ).toMatchObject({
+      code: "ABITAT-123456"
+    });
+
+    expect(
+      phonePairingCompleteRequestSchema.parse({
+        code: "ABITAT-123456",
+        deviceName: "Reece iPhone",
+        platform: "ios",
+        appVersion: "1.0.0",
+        publicKey: "phone-public-key"
+      })
+    ).toMatchObject({
+      platform: "ios"
+    });
+
+    expect(
+      phonePairingCompleteResponseSchema.parse({
+        machineId: "machine_phone",
+        workspaceId: "workspace_demo",
+        hostMachineId: "machine_demo",
+        clientToken: "client_secret"
+      })
+    ).toMatchObject({
+      machineId: "machine_phone",
+      hostMachineId: "machine_demo"
+    });
+
+    expect(
+      mobileBootstrapResponseSchema.parse({
+        workspace: { id: "workspace_demo", name: "Demo Workspace" },
+        phone: { id: "machine_phone", name: "Reece iPhone", status: "online" },
+        host: { id: "machine_demo", name: "Demo Host", status: "online" }
+      })
+    ).toMatchObject({
+      workspace: { id: "workspace_demo" }
+    });
+  });
+
+  it("accepts synced conversation messages", () => {
+    expect(conversationMessageRoleSchema.safeParse("assistant").success).toBe(true);
+    expect(conversationMessageRoleSchema.safeParse("operator").success).toBe(false);
+
+    expect(
+      conversationMessageCreateRequestSchema.parse({
+        content: "Continue the Codex task.",
+        role: "user",
+        sourceDeviceId: "machine_phone",
+        clientMessageId: "local-message-1"
+      })
+    ).toEqual({
+      content: "Continue the Codex task.",
+      role: "user",
+      sourceDeviceId: "machine_phone",
+      clientMessageId: "local-message-1",
+      metadata: {}
+    });
+  });
+
+  it("accepts remote control session, signaling, and input payloads", () => {
+    expect(
+      remoteControlSessionCreateRequestSchema.parse({
+        hostMachineId: "machine_demo",
+        screenEnabled: true,
+        inputEnabled: true
+      })
+    ).toEqual({
+      hostMachineId: "machine_demo",
+      screenEnabled: true,
+      inputEnabled: true
+    });
+
+    expect(
+      remoteControlSessionResponseSchema.parse({
+        id: "remote_123",
+        status: "requested",
+        hostMachineId: "machine_demo",
+        clientMachineId: "machine_phone",
+        screenEnabled: true,
+        inputEnabled: true
+      })
+    ).toMatchObject({
+      status: "requested"
+    });
+
+    expect(
+      remoteControlSignalSchema.parse({
+        sessionId: "remote_123",
+        senderMachineId: "machine_phone",
+        recipientMachineId: "machine_demo",
+        type: "offer",
+        payload: { sdp: "v=0" }
+      })
+    ).toMatchObject({
+      type: "offer"
+    });
+
+    expect(
+      remoteInputEventSchema.parse({
+        type: "pointer",
+        phase: "move",
+        x: 0.45,
+        y: 0.25,
+        dx: 12,
+        dy: -6
+      })
+    ).toMatchObject({
+      type: "pointer",
+      phase: "move"
+    });
+
+    expect(
+      remoteInputEventSchema.parse({
+        type: "key",
+        key: "Enter",
+        modifiers: ["cmd"]
+      })
+    ).toMatchObject({
+      type: "key",
+      modifiers: ["cmd"]
     });
   });
 });
