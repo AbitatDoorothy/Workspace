@@ -9,6 +9,7 @@ const CODEX_PROJECT_PREFIX = "codex_project_";
 const CODEX_THREAD_PREFIX = "codex_thread_";
 const DEFAULT_WORKSPACE_ID = "workspace_demo";
 const DEFAULT_USER_ID = "user_demo";
+const MAX_CODEX_MESSAGE_CONTENT_LENGTH = 12_000;
 
 export type CodexAppThreadStatus =
   | { type: "active"; activeFlags?: unknown[] }
@@ -160,6 +161,20 @@ export interface CodexAppMessage {
   createdAt: string;
 }
 
+export interface CodexCompletionState {
+  conversationId: string;
+  failed: boolean;
+  isComplete: boolean;
+  latestTurnCompletedAt: string | null;
+  latestTurnId: string | null;
+  projectId: string;
+  prompt: string;
+  source: "codex_app";
+  status: ConversationStatus;
+  updatedAt: string;
+  workspaceId: string;
+}
+
 interface CodexAppServiceOptions {
   workspaceId?: string;
   userId?: string;
@@ -261,6 +276,22 @@ export function createCodexAppService(
     },
 
     listProjects,
+
+    async listCompletionStates(): Promise<CodexCompletionState[]> {
+      const threads = await Promise.all(
+        (await listAllThreads()).map(async (thread) => {
+          try {
+            return await client.readThread(thread.id, true);
+          } catch {
+            return thread;
+          }
+        })
+      );
+
+      return threads
+        .sort((left, right) => right.updatedAt - left.updatedAt)
+        .map((thread) => codexThreadToCompletionState(thread, workspaceId));
+    },
 
     listProjectConversations,
 
@@ -406,7 +437,7 @@ export function flattenThreadMessages(
         content: flattened.content,
         conversationId,
         createdAt: itemCreatedAt(thread, turn, sequence),
-        id: `${conversationId}_${item.id ?? sequence}`,
+        id: `${conversationId}_${sequence}_${item.id ?? "item"}`,
         metadata: {
           codexItemId: item.id ?? null,
           codexItemType: item.type,
@@ -422,6 +453,35 @@ export function flattenThreadMessages(
   }
 
   return messages;
+}
+
+function codexThreadToCompletionState(
+  thread: CodexAppThread,
+  workspaceId = DEFAULT_WORKSPACE_ID
+): CodexCompletionState {
+  const latestTurn = thread.turns.at(-1) ?? null;
+  const status = codexThreadStatusToConversationStatus(thread.status);
+  const failed = thread.status.type === "systemError" || Boolean(latestTurn?.error);
+  const latestTurnCompletedAt =
+    typeof latestTurn?.completedAt === "number" && Number.isFinite(latestTurn.completedAt)
+      ? secondsToIso(latestTurn.completedAt)
+      : null;
+
+  return {
+    conversationId: externalCodexConversationId(thread.id),
+    failed,
+    isComplete: Boolean(
+      latestTurn?.id && (latestTurnCompletedAt || failed) && status !== "running"
+    ),
+    latestTurnCompletedAt,
+    latestTurnId: latestTurn?.id ?? null,
+    projectId: externalCodexProjectId(thread.cwd),
+    prompt: codexThreadTitle(thread),
+    source: "codex_app",
+    status,
+    updatedAt: secondsToIso(safeSeconds(thread.updatedAt, thread.createdAt)),
+    workspaceId
+  };
 }
 
 function codexThreadStatusToConversationStatus(status: CodexAppThreadStatus): ConversationStatus {
@@ -448,28 +508,34 @@ function threadItemToMessageContent(
   item: CodexAppThreadItem
 ): { role: CodexAppMessage["role"]; content: string } | null {
   if (item.type === "userMessage") {
-    const content = item.content.map(userInputToText).filter(Boolean).join("\n").trim();
-    return content ? { content, role: "user" } : null;
+    const content = safeString(
+      Array.isArray(item.content)
+        ? item.content.map(userInputToText).filter(Boolean).join("\n")
+        : ""
+    ).trim();
+    return content ? { content: truncateMessageContent(content), role: "user" } : null;
   }
 
   if (item.type === "agentMessage") {
-    const content = item.text.trim();
-    return content ? { content, role: "assistant" } : null;
+    const content = safeString(item.text).trim();
+    return content ? { content: truncateMessageContent(content), role: "assistant" } : null;
   }
 
   if (item.type === "plan") {
-    const content = item.text.trim();
-    return content ? { content, role: "assistant" } : null;
+    const content = safeString(item.text).trim();
+    return content ? { content: truncateMessageContent(content), role: "assistant" } : null;
   }
 
   if (item.type === "commandExecution") {
-    const content = (item.aggregatedOutput ?? item.command).trim();
+    const output = safeString(item.aggregatedOutput ?? item.command).trim();
+    const content = truncateMessageContent(output, "Command output");
     return content ? { content, role: "runtime" } : null;
   }
 
   if (item.type === "fileChange") {
+    const changes = Array.isArray(item.changes) ? item.changes.length : 0;
     return {
-      content: `Updated ${item.changes.length} file${item.changes.length === 1 ? "" : "s"}.`,
+      content: `Updated ${changes} file${changes === 1 ? "" : "s"}.`,
       role: "runtime"
     };
   }
@@ -480,7 +546,7 @@ function threadItemToMessageContent(
 function userInputToText(input: CodexAppUserInput) {
   switch (input.type) {
     case "text":
-      return input.text;
+      return safeString(input.text);
     case "image":
       return `[Image: ${input.url}]`;
     case "localImage":
@@ -516,7 +582,7 @@ function isThreadNotFoundError(error: unknown, threadId: string) {
 }
 
 function secondsToDate(seconds: number) {
-  return new Date(seconds * 1000);
+  return new Date(safeSeconds(seconds) * 1000);
 }
 
 function secondsToIso(seconds: number) {
@@ -524,6 +590,28 @@ function secondsToIso(seconds: number) {
 }
 
 function itemCreatedAt(thread: CodexAppThread, turn: CodexAppTurn, sequence: number) {
-  const seconds = turn.startedAt ?? turn.completedAt ?? thread.updatedAt ?? thread.createdAt;
+  const seconds = safeSeconds(
+    turn.startedAt,
+    turn.completedAt,
+    thread.updatedAt,
+    thread.createdAt,
+    Date.now() / 1000
+  );
   return new Date(seconds * 1000 + sequence).toISOString();
+}
+
+function safeSeconds(...candidates: Array<number | null | undefined>) {
+  return candidates.find((candidate): candidate is number => Number.isFinite(candidate)) ?? 0;
+}
+
+function safeString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function truncateMessageContent(content: string, label = "Message") {
+  if (content.length <= MAX_CODEX_MESSAGE_CONTENT_LENGTH) {
+    return content;
+  }
+
+  return `${content.slice(0, MAX_CODEX_MESSAGE_CONTENT_LENGTH)}\n\n[${label} output truncated from ${content.length.toLocaleString()} characters for iPhone stability.]`;
 }

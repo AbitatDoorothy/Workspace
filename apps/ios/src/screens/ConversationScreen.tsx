@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import {
+  FlatList,
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   Text,
   TextInput,
   View
@@ -32,7 +32,8 @@ export function ConversationScreen({ api, conversation }: ConversationScreenProp
     shouldWaitForMacRunningThread(conversation)
   );
   const [showScrollToLatestButton, setShowScrollToLatestButton] = useState(false);
-  const scrollViewRef = useRef<ScrollView | null>(null);
+  const listRef = useRef<FlatList<ConversationMessage> | null>(null);
+  const newestFirstMessages = useMemo(() => [...messages].reverse(), [messages]);
   const lastSequence = useMemo(
     () => messages.reduce((max, message) => Math.max(max, message.sequence), 0),
     [messages]
@@ -41,9 +42,10 @@ export function ConversationScreen({ api, conversation }: ConversationScreenProp
   const pendingAutoScrollRef = useRef(true);
 
   function scrollToLatest(animated = true) {
-    scrollViewRef.current?.scrollToEnd({ animated });
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToOffset({ animated, offset: 0 });
+    });
     pendingAutoScrollRef.current = false;
-    setShowScrollToLatestButton(false);
   }
 
   function handleMessagesContentSizeChange() {
@@ -54,8 +56,8 @@ export function ConversationScreen({ api, conversation }: ConversationScreenProp
 
   function handleMessagesScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const distanceFromEnd = contentSize.height - (contentOffset.y + layoutMeasurement.height);
-    setShowScrollToLatestButton(distanceFromEnd > 96);
+    const distanceFromLatest = contentOffset.y;
+    setShowScrollToLatestButton(distanceFromLatest > 96);
   }
 
   useEffect(() => {
@@ -108,9 +110,7 @@ export function ConversationScreen({ api, conversation }: ConversationScreenProp
 
   useEffect(() => {
     pendingAutoScrollRef.current = true;
-    const timer = setTimeout(() => {
-      scrollToLatest(true);
-    }, 50);
+    const timer = setTimeout(() => scrollToLatest(true), 50);
 
     return () => {
       clearTimeout(timer);
@@ -162,17 +162,17 @@ export function ConversationScreen({ api, conversation }: ConversationScreenProp
           </View>
         ) : (
           <View style={{ flex: 1 }}>
-            <ScrollView
+            <FlatList
               contentContainerStyle={{ gap: 10, paddingBottom: 12 }}
+              data={newestFirstMessages}
+              inverted
+              keyExtractor={(message) => message.id}
+              maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
               onContentSizeChange={handleMessagesContentSizeChange}
               onScroll={handleMessagesScroll}
-              ref={scrollViewRef}
-              scrollEventThrottle={16}
-              style={{ flex: 1 }}
-            >
-              {messages.map((message) => (
+              ref={listRef}
+              renderItem={({ item: message }) => (
                 <View
-                  key={message.id}
                   style={[
                     sharedStyles.card,
                     {
@@ -185,11 +185,14 @@ export function ConversationScreen({ api, conversation }: ConversationScreenProp
                 >
                   <Text style={sharedStyles.label}>{message.role}</Text>
                   <Text style={{ color: colors.text, fontSize: 15, lineHeight: 21, marginTop: 6 }}>
-                    {message.content}
+                    {safeMessageContent(message.content)}
                   </Text>
                 </View>
-              ))}
-            </ScrollView>
+              )}
+              scrollEventThrottle={16}
+              style={{ flex: 1 }}
+              windowSize={9}
+            />
             {showScrollToLatestButton ? (
               <Pressable
                 onPress={() => scrollToLatest(true)}
@@ -265,4 +268,14 @@ export function mergeConversationMessages(
 
     return left.createdAt.localeCompare(right.createdAt);
   });
+}
+
+export function safeMessageContent(content: string) {
+  const maxLength = 8_000;
+
+  if (content.length <= maxLength) {
+    return content;
+  }
+
+  return `${content.slice(0, maxLength)}\n\n[Message truncated for iPhone stability.]`;
 }

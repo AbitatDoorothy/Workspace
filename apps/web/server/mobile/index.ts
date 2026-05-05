@@ -18,6 +18,11 @@ function createPrismaMobileDb(db: PrismaClient): MobileDb {
           where: args.where as Prisma.MachineWhereInput
         });
       },
+      findMany(args) {
+        return db.machine.findMany({
+          where: args.where as Prisma.MachineWhereInput
+        });
+      },
       findUnique(args) {
         return db.machine.findUnique(args);
       },

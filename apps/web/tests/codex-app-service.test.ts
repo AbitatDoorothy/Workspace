@@ -265,6 +265,135 @@ describe("Codex app service", () => {
     ]);
   });
 
+  it("reports Codex completion state only after the latest turn is finished", async () => {
+    const cwd = "/Users/reece/Desktop/Abitat_Workspace";
+    const client = createFakeClient([
+      createThread({
+        cwd,
+        id: "thread_running",
+        preview: "Running with partial answer",
+        status: { type: "active", activeFlags: [] },
+        turns: [
+          {
+            completedAt: null,
+            durationMs: null,
+            error: null,
+            id: "turn_running",
+            items: [
+              {
+                id: "item_agent",
+                memoryCitation: null,
+                phase: null,
+                text: "Partial response while still coding.",
+                type: "agentMessage"
+              }
+            ],
+            startedAt: 1_775_000_020,
+            status: { type: "inProgress" }
+          }
+        ]
+      }),
+      createThread({
+        cwd,
+        id: "thread_done",
+        preview: "Finished",
+        status: { type: "idle" },
+        turns: [
+          {
+            completedAt: 1_775_000_050,
+            durationMs: 1000,
+            error: null,
+            id: "turn_done",
+            items: [
+              {
+                id: "item_agent",
+                memoryCitation: null,
+                phase: null,
+                text: "Finished.",
+                type: "agentMessage"
+              }
+            ],
+            startedAt: 1_775_000_040,
+            status: { type: "completed" }
+          }
+        ],
+        updatedAt: 1_775_000_050
+      })
+    ]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    const states = await service.listCompletionStates();
+
+    expect(states).toEqual([
+      expect.objectContaining({
+        conversationId: externalCodexConversationId("thread_done"),
+        isComplete: true,
+        latestTurnCompletedAt: "2026-03-31T23:34:10.000Z",
+        latestTurnId: "turn_done",
+        status: "approved"
+      }),
+      expect.objectContaining({
+        conversationId: externalCodexConversationId("thread_running"),
+        isComplete: false,
+        latestTurnCompletedAt: null,
+        latestTurnId: "turn_running",
+        status: "running"
+      })
+    ]);
+  });
+
+  it("bounds pathological Codex message content and keeps duplicate item ids unique", async () => {
+    const client = createFakeClient([
+      createThread({
+        createdAt: Number.NaN,
+        cwd: "/Users/reece/Desktop/Abitat_Workspace",
+        id: "thread_large",
+        turns: [
+          {
+            completedAt: Number.NaN,
+            durationMs: 1000,
+            error: null,
+            id: "turn_large",
+            items: [
+              {
+                aggregatedOutput: "x".repeat(30_000),
+                command: "pnpm test",
+                commandActions: [],
+                cwd: "/Users/reece/Desktop/Abitat_Workspace",
+                durationMs: 10,
+                exitCode: 0,
+                id: "duplicate",
+                processId: null,
+                source: "localShell",
+                status: "completed",
+                type: "commandExecution"
+              },
+              {
+                id: "duplicate",
+                memoryCitation: null,
+                phase: null,
+                text: "second item",
+                type: "agentMessage"
+              }
+            ],
+            startedAt: Number.NaN,
+            status: { type: "completed" }
+          }
+        ],
+        updatedAt: Number.NaN
+      })
+    ]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    const messages = await service.listMessages(externalCodexConversationId("thread_large"));
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.id).not.toBe(messages[1]?.id);
+    expect(messages[0]?.content.length).toBeLessThan(12_500);
+    expect(messages[0]?.content).toContain("output truncated");
+    expect(Date.parse(messages[0]?.createdAt ?? "")).not.toBeNaN();
+  });
+
   it("starts and continues Codex app turns through the app-server protocol", async () => {
     const cwd = "/Users/reece/Desktop/Abitat_Workspace";
     const client = createFakeClient([createThread({ cwd, id: "thread_a", preview: "Existing" })]);

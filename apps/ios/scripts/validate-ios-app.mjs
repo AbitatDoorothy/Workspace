@@ -26,6 +26,9 @@ if (packageJson.main !== "index.ts") {
 if (!packageJson.dependencies?.["expo-notifications"]) {
   throw new Error("Expected abitat-ios to depend on expo-notifications");
 }
+if (!packageJson.dependencies?.["expo-constants"]) {
+  throw new Error("Expected abitat-ios to depend on expo-constants for push registration");
+}
 
 const indexFile = await readFile(join(process.cwd(), "index.ts"), "utf8");
 if (!indexFile.includes("registerRootComponent(App)")) {
@@ -36,6 +39,10 @@ const appJson = JSON.parse(await readFile(join(process.cwd(), "app.json"), "utf8
 if (!appJson.expo?.plugins?.includes("expo-notifications")) {
   throw new Error("Expected app.json to include the expo-notifications config plugin");
 }
+const entitlements = await readFile(join(process.cwd(), "ios/Abitat/Abitat.entitlements"), "utf8");
+if (!entitlements.includes("aps-environment")) {
+  throw new Error("Expected the native iOS app to enable remote push notifications");
+}
 
 const conversationScreen = await readFile(
   join(process.cwd(), "src/screens/ConversationScreen.tsx"),
@@ -44,11 +51,32 @@ const conversationScreen = await readFile(
 if (!conversationScreen.includes("mergeConversationMessages")) {
   throw new Error("Expected ConversationScreen to merge refreshed messages without duplicates");
 }
-if (!conversationScreen.includes("scrollToEnd")) {
-  throw new Error("Expected ConversationScreen to scroll to new assistant replies");
+if (!conversationScreen.includes("scrollToOffset({ animated, offset: 0 })")) {
+  throw new Error(
+    "Expected ConversationScreen to scroll inverted chat lists to the latest message"
+  );
 }
 if (!conversationScreen.includes("KeyboardAvoidingView")) {
   throw new Error("Expected ConversationScreen to keep the composer above the iOS keyboard");
+}
+if (!conversationScreen.includes("FlatList")) {
+  throw new Error("Expected ConversationScreen to virtualize long Codex threads");
+}
+if (!conversationScreen.includes("inverted")) {
+  throw new Error(
+    "Expected ConversationScreen to use an inverted chat list for reliable latest scroll"
+  );
+}
+if (!conversationScreen.includes("newestFirstMessages")) {
+  throw new Error("Expected ConversationScreen to render newest messages at the latest edge");
+}
+if (!conversationScreen.includes("safeMessageContent")) {
+  throw new Error("Expected ConversationScreen to cap pathological message bodies");
+}
+if (conversationScreen.includes("scrollToEnd")) {
+  throw new Error(
+    "Expected ConversationScreen to avoid unreliable scrollToEnd on long Codex threads"
+  );
 }
 if (conversationScreen.includes("onContentSizeChange={() => scrollViewRef.current?.scrollToEnd")) {
   throw new Error(
@@ -82,18 +110,16 @@ const notificationWatcher = await readFile(
 );
 for (const expected of [
   "Notifications.setNotificationHandler",
+  "Notifications.getExpoPushTokenAsync",
   "Notifications.requestPermissionsAsync",
   "Notifications.scheduleNotificationAsync",
+  "registerForPushNotifications",
+  "pollCompletionsForForegroundFallback",
+  "shouldNotifyForCompletedTurn",
   "rememberRunningConversation",
   "useThreadCompletionNotifications",
-  "conversationSnapshotsRef",
-  "hasConversationAdvanced",
-  "latestNotificationMessage",
-  "snapshotNotificationConversation",
-  "shouldNotifyForCompletedCodexTurn",
-  "shouldNotifyForNewCompletedCodexConversation",
-  "listProjects",
-  "listConversations"
+  "registerPushToken",
+  "listCompletionStates"
 ]) {
   if (!notificationWatcher.includes(expected)) {
     throw new Error(`Expected notification watcher to include ${expected}`);
@@ -101,6 +127,9 @@ for (const expected of [
 }
 if (notificationWatcher.includes("wasMessageCreatedAfterSnapshot")) {
   throw new Error("Expected Mac-started Codex completion detection to avoid stale timestamp gates");
+}
+if (notificationWatcher.includes("isNotificationMessageFromCompletedTurn")) {
+  throw new Error("Expected notifications to be based on turn completion, not assistant messages");
 }
 
 console.log(`validated ${requiredFiles.length} iPhone app files`);

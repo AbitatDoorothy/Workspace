@@ -1,4 +1,5 @@
 import type {
+  CodexCompletionSummary,
   ConversationMessage,
   ConversationSummary,
   MobileBootstrap,
@@ -26,9 +27,11 @@ export interface ApiClient {
   createRemoteSession(hostMachineId: string): Promise<RemoteControlSession>;
   endRemoteSession(sessionId: string): Promise<RemoteControlSession>;
   listConversations(projectId: string): Promise<ConversationSummary[]>;
+  listCompletionStates(): Promise<CodexCompletionSummary[]>;
   listMessages(conversationId: string, afterSequence?: number): Promise<ConversationMessage[]>;
   listProjects(): Promise<ProjectSummary[]>;
   listRemoteSignals(sessionId: string): Promise<RemoteControlSignal[]>;
+  registerPushToken(input: { platform: "ios"; provider: "expo"; token: string }): Promise<void>;
   sendRemoteSignal(
     sessionId: string,
     input: { type: string; payload: Record<string, unknown>; recipientMachineId?: string }
@@ -76,6 +79,10 @@ export function createApiClient(pairing: PairingState): ApiClient {
       get(pairing, `/api/mobile/projects/${projectId}/conversations`).then(
         (body) => body.conversations as ConversationSummary[]
       ),
+    listCompletionStates: () =>
+      get(pairing, "/api/mobile/codex/completions").then(
+        (body) => body.completions as CodexCompletionSummary[]
+      ),
     listMessages: (conversationId, afterSequence) =>
       get(
         pairing,
@@ -89,6 +96,8 @@ export function createApiClient(pairing: PairingState): ApiClient {
       get(pairing, `/api/remote-control/sessions/${sessionId}/signals`).then(
         (body) => body.signals as RemoteControlSignal[]
       ),
+    registerPushToken: (input) =>
+      post(pairing, "/api/mobile/notifications/register", input).then(() => undefined),
     sendRemoteSignal: (sessionId, input) =>
       post(pairing, `/api/remote-control/sessions/${sessionId}/signals`, input).then(
         () => undefined

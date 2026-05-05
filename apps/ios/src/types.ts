@@ -69,6 +69,20 @@ export interface ConversationMessage {
   createdAt: string;
 }
 
+export interface CodexCompletionSummary {
+  conversationId: string;
+  failed: boolean;
+  isComplete: boolean;
+  latestTurnCompletedAt: string | null;
+  latestTurnId: string | null;
+  projectId: string;
+  prompt: string;
+  source: "codex_app";
+  status: string;
+  updatedAt: string;
+  workspaceId: string;
+}
+
 export interface RemoteControlSession {
   id: string;
   status: "requested" | "connecting" | "active" | "ended" | "failed";

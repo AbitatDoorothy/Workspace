@@ -13,5 +13,6 @@ export {
   type CodexAppConversationSummary,
   type CodexAppMessage,
   type CodexAppProjectSummary,
-  type CodexAppThread
+  type CodexAppThread,
+  type CodexCompletionState
 } from "./codex-app-service";

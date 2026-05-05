@@ -24,6 +24,25 @@ interface MachineRecord {
   lastSeenAt?: Date | null;
 }
 
+export interface MobilePushSubscription {
+  machineId: string;
+  platform: "ios";
+  provider: "expo";
+  token: string;
+}
+
+interface StoredMobilePushSubscription {
+  platform: "ios";
+  provider: "expo";
+  registeredAt: string;
+  token: string;
+}
+
+interface MachineCapabilities {
+  features: string[];
+  pushSubscriptions: StoredMobilePushSubscription[];
+}
+
 interface DevicePairingRecord {
   id: string;
   workspaceId: string;
@@ -54,6 +73,7 @@ export interface MobileDb {
   machine: {
     create(args: { data: MachineRecord }): Promise<MachineRecord>;
     findFirst(args: { where: Partial<MachineRecord> }): Promise<MachineRecord | null>;
+    findMany(args: { where: Partial<MachineRecord> }): Promise<MachineRecord[]>;
     findUnique(args: { where: { id: string } }): Promise<MachineRecord | null>;
     update(args: { where: { id: string }; data: Partial<MachineRecord> }): Promise<MachineRecord>;
   };
@@ -85,6 +105,17 @@ interface CreatePhonePairingInput {
   hostMachineId: string;
   createdByUserId: string;
   ttlMs?: number;
+}
+
+interface RegisterPushTokenInput {
+  platform: "ios";
+  provider: "expo";
+  token: string;
+}
+
+interface ListPushSubscriptionsInput {
+  hostMachineId: string;
+  workspaceId: string;
 }
 
 interface MobileServiceOptions {
@@ -182,7 +213,10 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
           deviceKind: "phone",
           publicKey: input.publicKey ?? null,
           pairedHostMachineId: pairing.hostMachineId,
-          capabilitiesJson: ["mobile_chat", "remote_control"],
+          capabilitiesJson: {
+            features: ["mobile_chat", "remote_control"],
+            pushSubscriptions: []
+          },
           lastSeenAt: pairedAt
         }
       });
@@ -260,6 +294,72 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
 
     listProjects(actor: MobileActor) {
       return db.project.findMany({ where: { workspaceId: actor.workspaceId } });
+    },
+
+    async registerPushToken(actor: MobileActor, input: RegisterPushTokenInput) {
+      if (input.provider !== "expo" || !isExpoPushToken(input.token)) {
+        throw new Error("Invalid Expo push token");
+      }
+
+      const phone = await db.machine.findUnique({ where: { id: actor.machineId } });
+      if (!phone || phone.workspaceId !== actor.workspaceId || phone.type !== "client") {
+        throw new Error("Mobile device not found");
+      }
+
+      const capabilities = normalizeMachineCapabilities(phone.capabilitiesJson);
+      const registeredAt = now().toISOString();
+      const nextSubscriptions = [
+        ...capabilities.pushSubscriptions.filter(
+          (subscription) =>
+            subscription.provider !== input.provider || subscription.token !== input.token
+        ),
+        {
+          platform: input.platform,
+          provider: input.provider,
+          registeredAt,
+          token: input.token
+        }
+      ];
+
+      await db.machine.update({
+        where: { id: phone.id },
+        data: {
+          capabilitiesJson: {
+            features: capabilities.features,
+            pushSubscriptions: nextSubscriptions
+          }
+        }
+      });
+
+      return {
+        platform: input.platform,
+        provider: input.provider,
+        token: input.token
+      };
+    },
+
+    async listPushSubscriptionsForHost(
+      input: ListPushSubscriptionsInput
+    ): Promise<MobilePushSubscription[]> {
+      const phones = await db.machine.findMany({
+        where: {
+          deviceKind: "phone",
+          pairedHostMachineId: input.hostMachineId,
+          type: "client",
+          workspaceId: input.workspaceId
+        }
+      });
+
+      return phones.flatMap((phone) =>
+        normalizeMachineCapabilities(phone.capabilitiesJson).pushSubscriptions.map(
+          (subscription) => ({
+            machineId: phone.id,
+            platform: subscription.platform,
+            provider: subscription.provider,
+            token: subscription.token
+          })
+        )
+      );
     }
   };
 }
@@ -283,4 +383,50 @@ function mobileDeviceSummary(machine: MachineRecord) {
 
 function normalizeStatus(status: string): MachineStatus {
   return status === "online" || status === "offline" || status === "error" ? status : "pending";
+}
+
+function normalizeMachineCapabilities(value: unknown): MachineCapabilities {
+  if (Array.isArray(value)) {
+    return {
+      features: value.filter((feature): feature is string => typeof feature === "string"),
+      pushSubscriptions: []
+    };
+  }
+
+  if (!value || typeof value !== "object") {
+    return { features: [], pushSubscriptions: [] };
+  }
+
+  const candidate = value as {
+    features?: unknown;
+    pushSubscriptions?: unknown;
+  };
+
+  return {
+    features: Array.isArray(candidate.features)
+      ? candidate.features.filter((feature): feature is string => typeof feature === "string")
+      : [],
+    pushSubscriptions: Array.isArray(candidate.pushSubscriptions)
+      ? candidate.pushSubscriptions.filter(isStoredMobilePushSubscription)
+      : []
+  };
+}
+
+function isStoredMobilePushSubscription(value: unknown): value is StoredMobilePushSubscription {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<StoredMobilePushSubscription>;
+  return (
+    candidate.platform === "ios" &&
+    candidate.provider === "expo" &&
+    typeof candidate.token === "string" &&
+    isExpoPushToken(candidate.token) &&
+    typeof candidate.registeredAt === "string"
+  );
+}
+
+function isExpoPushToken(token: string) {
+  return /^(Expo|Exponent)PushToken\[[^\]]+\]$/u.test(token);
 }

@@ -73,6 +73,10 @@ function createMobileDb() {
         [...machines.values()].find((machine) =>
           Object.entries(where).every(([key, value]) => machine[key as keyof TestMachine] === value)
         ) ?? null,
+      findMany: async ({ where }: { where: Partial<TestMachine> }) =>
+        [...machines.values()].filter((machine) =>
+          Object.entries(where).every(([key, value]) => machine[key as keyof TestMachine] === value)
+        ),
       findUnique: async ({ where }: { where: { id: string } }) => machines.get(where.id) ?? null,
       update: async ({ where, data }: { where: { id: string }; data: Partial<TestMachine> }) => {
         const current = machines.get(where.id);
@@ -217,5 +221,90 @@ describe("mobile service", () => {
         hostLocalPath: "/Users/reece/Desktop/Test"
       })
     ]);
+  });
+
+  it("registers Expo push tokens on the paired phone and lists them for the paired host", async () => {
+    const db = createMobileDb();
+    db.state.machines.set("machine_phone", {
+      id: "machine_phone",
+      workspaceId: "workspace_demo",
+      name: "Reece iPhone",
+      type: "client",
+      status: "online",
+      tokenHash: hashMobileToken("client_secret"),
+      pairedHostMachineId: "machine_demo",
+      deviceKind: "phone",
+      platform: "ios",
+      capabilitiesJson: ["mobile_chat", "remote_control"]
+    });
+    const service = createMobileService(db, {
+      now: () => new Date("2026-05-05T10:30:00.000Z")
+    });
+    const actor = await service.requireMobileActor("client_secret");
+
+    await expect(
+      service.registerPushToken(actor, {
+        platform: "ios",
+        provider: "expo",
+        token: "ExpoPushToken[test-token]"
+      })
+    ).resolves.toEqual({
+      platform: "ios",
+      provider: "expo",
+      token: "ExpoPushToken[test-token]"
+    });
+
+    await service.registerPushToken(actor, {
+      platform: "ios",
+      provider: "expo",
+      token: "ExpoPushToken[test-token]"
+    });
+
+    await expect(
+      service.listPushSubscriptionsForHost({
+        hostMachineId: "machine_demo",
+        workspaceId: "workspace_demo"
+      })
+    ).resolves.toEqual([
+      {
+        machineId: "machine_phone",
+        platform: "ios",
+        provider: "expo",
+        token: "ExpoPushToken[test-token]"
+      }
+    ]);
+    expect(db.state.machines.get("machine_phone")?.capabilitiesJson).toMatchObject({
+      features: ["mobile_chat", "remote_control"],
+      pushSubscriptions: [
+        expect.objectContaining({
+          token: "ExpoPushToken[test-token]"
+        })
+      ]
+    });
+  });
+
+  it("rejects unsupported mobile push tokens", async () => {
+    const db = createMobileDb();
+    db.state.machines.set("machine_phone", {
+      id: "machine_phone",
+      workspaceId: "workspace_demo",
+      name: "Reece iPhone",
+      type: "client",
+      status: "online",
+      tokenHash: hashMobileToken("client_secret"),
+      pairedHostMachineId: "machine_demo",
+      deviceKind: "phone",
+      platform: "ios"
+    });
+    const service = createMobileService(db);
+    const actor = await service.requireMobileActor("client_secret");
+
+    await expect(
+      service.registerPushToken(actor, {
+        platform: "ios",
+        provider: "expo",
+        token: "not-a-push-token"
+      })
+    ).rejects.toThrow("Invalid Expo push token");
   });
 });
