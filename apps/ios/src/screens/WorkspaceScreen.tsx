@@ -55,9 +55,6 @@ export function WorkspaceScreen({ api, onNavigate }: WorkspaceScreenProps) {
       {error ? <Text style={{ color: "#ef4444" }}>{error}</Text> : null}
 
       <Button onPress={() => onNavigate("projects")}>Open Projects</Button>
-      <Button onPress={() => onNavigate("remote")} variant="secondary">
-        Remote Control
-      </Button>
     </Screen>
   );
 }

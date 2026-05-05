@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { conversationMessageService } from "../../../../../../server/conversation-messages";
 import { conversationQueueService } from "../../../../../../server/conversations";
+import { codexAppService, isCodexConversationId } from "../../../../../../server/codex-app";
 import { requireMobileActor } from "../../../../../../server/mobile/request-auth";
 import { runEventService } from "../../../../../../server/run-events";
 
@@ -14,6 +15,16 @@ const querySchema = z.object({
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const [{ id }, actor] = await Promise.all([context.params, requireMobileActor(request)]);
+
+    if (isCodexConversationId(id)) {
+      const query = querySchema.parse(Object.fromEntries(new URL(request.url).searchParams));
+      const messages = await codexAppService.listMessages(id, {
+        afterSequence: query.afterSequence
+      });
+
+      return NextResponse.json({ messages });
+    }
+
     await assertMobileConversation(actor.workspaceId, id);
     const query = querySchema.parse(Object.fromEntries(new URL(request.url).searchParams));
     let messages = await conversationMessageService.listMessages(id, {
@@ -78,6 +89,26 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       requireMobileActor(request),
       conversationMessageCreateRequestSchema.parseAsync(await request.json())
     ]);
+
+    if (isCodexConversationId(id)) {
+      const continued = await codexAppService.continueConversation(id, {
+        prompt: input.content
+      });
+      const messages = await codexAppService.listMessages(id);
+      const message = messages.at(-1) ?? {
+        content: input.content,
+        conversationId: continued.conversationId,
+        createdAt: new Date().toISOString(),
+        id: `${continued.conversationId}_${Date.now()}`,
+        metadata: { client: "ios", action: "continue" },
+        role: "user" as const,
+        sequence: messages.length + 1,
+        sourceDeviceId: actor.machineId
+      };
+
+      return NextResponse.json({ message }, { status: 201 });
+    }
+
     await assertMobileConversation(actor.workspaceId, id);
     const message = await conversationMessageService.appendMessage(id, {
       ...input,

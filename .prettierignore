@@ -2,6 +2,7 @@
 AGENTS.md
 dist
 docs
+apps/ios/ios
 node_modules
 pnpm-lock.yaml
 stitch_abitat_workspace_redesign

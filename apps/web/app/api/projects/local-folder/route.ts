@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createPublicRedirectUrl, isSecureRequest } from "../../../../server/auth/session";
+import { createBrowserRedirectUrl, isSecureRequest } from "../../../../server/auth/session";
 import {
   PROJECT_DRAFT_COOKIE_MAX_AGE_SECONDS,
   PROJECT_DRAFT_COOKIE_NAME,
@@ -44,7 +44,7 @@ function redirectToProjectsDraft(
   draft: { error?: string; hostLocalPath?: string; name?: string }
 ) {
   const projectDraft = createProjectDraft(draft);
-  const url = createPublicRedirectUrl(request, "/projects");
+  const url = createBrowserRedirectUrl(request, "/projects");
   url.searchParams.set("projectDraftId", projectDraft.id);
   url.hash = "create-project-dialog";
   const response = NextResponse.redirect(url, 303);

@@ -16,8 +16,10 @@
     "db:validate": "pnpm --filter web db:validate",
     "dev": "pnpm --parallel --filter web --filter host-daemon run dev",
     "dev:daemon": "pnpm --filter host-daemon dev",
+    "dev:iphone": "node scripts/dev-iphone.mjs",
     "dev:web": "pnpm --filter web dev",
     "format": "prettier --check .",
+    "iphone": "node scripts/dev-iphone.mjs",
     "lint": "pnpm -r lint",
     "test": "pnpm --filter @abitat/shared build && pnpm -r test",
     "typecheck": "pnpm --filter @abitat/shared build && pnpm db:generate && pnpm -r typecheck"

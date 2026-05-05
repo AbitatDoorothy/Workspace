@@ -9,7 +9,9 @@ export interface ConversationBoardConversation {
   status: ConversationStatus;
   prompt: string;
   branchName?: string | null;
+  codexDeepLink?: string | null;
   runtimeSessionId?: string | null;
+  source?: "abitat" | "codex_app";
   worktreePath?: string | null;
 }
 
@@ -55,6 +57,24 @@ export function canStartConversationCardDrag(tagName: string) {
   return !new Set(["A", "BUTTON", "INPUT", "LABEL", "SELECT", "TEXTAREA"]).has(
     tagName.toUpperCase()
   );
+}
+
+export function canManageConversationCard(
+  conversation: Pick<ConversationBoardConversation, "source">
+) {
+  return conversation.source !== "codex_app";
+}
+
+export function conversationCodexAppHref(
+  conversation: Pick<ConversationBoardConversation, "codexDeepLink" | "runtimeSessionId">
+) {
+  if (conversation.codexDeepLink) {
+    return conversation.codexDeepLink;
+  }
+
+  return conversation.runtimeSessionId
+    ? `codex://threads/${encodeURIComponent(conversation.runtimeSessionId)}`
+    : null;
 }
 
 export function createConversationDragPayload(payload: ConversationDragPayload) {

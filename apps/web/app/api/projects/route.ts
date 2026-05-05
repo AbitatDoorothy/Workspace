@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { createPublicRedirectUrl, isSecureRequest } from "../../../server/auth/session";
+import { createBrowserRedirectUrl, isSecureRequest } from "../../../server/auth/session";
 import { projectService } from "../../../server/projects";
 import {
   PROJECT_DRAFT_COOKIE_MAX_AGE_SECONDS,
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     const project = await projectService.createProject(projectRequestSchema.parse(body));
 
     if (isFormRequest) {
-      return NextResponse.redirect(createPublicRedirectUrl(request, "/projects"), 303);
+      return NextResponse.redirect(createBrowserRedirectUrl(request, "/projects"), 303);
     }
 
     return NextResponse.json(project, { status: 201 });
@@ -60,7 +60,7 @@ function redirectToProjectDraft(request: Request, body: unknown, error: unknown)
     hostLocalPath: stringValue(form.hostLocalPath),
     name: stringValue(form.name)
   });
-  const url = createPublicRedirectUrl(request, "/projects");
+  const url = createBrowserRedirectUrl(request, "/projects");
   url.searchParams.set("projectDraftId", draft.id);
   url.hash = "create-project-dialog";
   const response = NextResponse.redirect(url, 303);

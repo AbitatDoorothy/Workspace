@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { conversationMessageService } from "../../../../../../server/conversation-messages";
 import { conversationQueueService } from "../../../../../../server/conversations";
+import { codexAppService, isCodexProjectId } from "../../../../../../server/codex-app";
 import { requireMobileActor } from "../../../../../../server/mobile/request-auth";
 import { runEventService } from "../../../../../../server/run-events";
 
@@ -21,6 +22,12 @@ const createRequestSchema = conversationCreateRequestSchema
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
     const [{ projectId }, actor] = await Promise.all([context.params, requireMobileActor(request)]);
+
+    if (isCodexProjectId(projectId)) {
+      const conversations = await codexAppService.listProjectConversations(projectId);
+      return NextResponse.json({ conversations });
+    }
+
     const conversations = (await conversationQueueService.listConversations(actor.workspaceId))
       .filter((conversation) => conversation.projectId === projectId)
       .sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0));
@@ -44,6 +51,14 @@ export async function POST(request: Request, context: { params: Promise<{ projec
 
     if (!actor.hostMachineId) {
       throw new Error("Phone is not paired to a Mac host");
+    }
+
+    if (isCodexProjectId(projectId)) {
+      const conversation = await codexAppService.startConversation(projectId, {
+        prompt: input.prompt
+      });
+
+      return NextResponse.json(conversation, { status: 201 });
     }
 
     const userId = actor.userId ?? "user_demo";

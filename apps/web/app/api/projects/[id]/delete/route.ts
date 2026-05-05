@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createPublicRedirectUrl } from "../../../../../server/auth/session";
+import { createBrowserRedirectUrl } from "../../../../../server/auth/session";
 import { projectService } from "../../../../../server/projects";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -9,7 +9,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     await projectService.deleteProject(id);
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
-      return NextResponse.redirect(createPublicRedirectUrl(request, "/projects"), 303);
+      return NextResponse.redirect(createBrowserRedirectUrl(request, "/projects"), 303);
     }
 
     return NextResponse.json({ ok: true });

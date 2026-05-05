@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createPublicRedirectUrl } from "../../../../server/auth/session";
+import { createBrowserRedirectUrl } from "../../../../server/auth/session";
 import { todoStore } from "../../../../server/todos";
 import { submittedTodoTaskTitle, type TodoStatus } from "../../../todo/todo-board-model";
 
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.redirect(createPublicRedirectUrl(request, "/todo"), 303);
+  return NextResponse.redirect(createBrowserRedirectUrl(request, "/todo"), 303);
 }
 
 function todoStatusFromFormData(formData: FormData): TodoStatus | null {

@@ -2,7 +2,7 @@ import { conversationCreateRequestSchema } from "@abitat/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { createPublicRedirectUrl } from "../../../server/auth/session";
+import { createBrowserRedirectUrl } from "../../../server/auth/session";
 import { conversationQueueService } from "../../../server/conversations";
 import { runEventService } from "../../../server/run-events";
 import { todoStore } from "../../../server/todos";
@@ -37,7 +37,10 @@ export async function POST(request: Request) {
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
       return NextResponse.redirect(
-        createPublicRedirectUrl(request, input.redirectTo ?? `/projects/${conversation.projectId}`),
+        createBrowserRedirectUrl(
+          request,
+          input.redirectTo ?? `/projects/${conversation.projectId}`
+        ),
         303
       );
     }

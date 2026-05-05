@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { createPublicRedirectUrl } from "../../../../../server/auth/session";
+import { createBrowserRedirectUrl } from "../../../../../server/auth/session";
 import { conversationQueueService } from "../../../../../server/conversations";
 
 const labelRequestSchema = z.object({
@@ -20,7 +20,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
       return NextResponse.redirect(
-        createPublicRedirectUrl(request, input.redirectTo ?? `/projects/${conversation.projectId}`),
+        createBrowserRedirectUrl(
+          request,
+          input.redirectTo ?? `/projects/${conversation.projectId}`
+        ),
         303
       );
     }

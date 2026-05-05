@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { ApiClient } from "../api/client";
-import { Header, StatusPill } from "../components/Controls";
+import { Header } from "../components/Controls";
 import { Screen } from "../components/Screen";
 import { colors, sharedStyles } from "../theme";
 import type { ProjectSummary } from "../types";
@@ -29,25 +29,36 @@ export function ProjectsScreen({ api, onProject }: ProjectsScreenProps) {
     <Screen>
       <Header
         eyebrow="Projects"
-        title="Mac Projects"
-        subtitle="Projects created in Abitat Workspace are available here."
+        title="Codex Projects"
+        subtitle="Folders are synced from the Codex desktop app on your Mac."
       />
 
-      {projects.map((project) => (
-        <Pressable key={project.id} onPress={() => onProject(project)} style={sharedStyles.card}>
-          <View style={[sharedStyles.row, { justifyContent: "space-between" }]}>
-            <Text style={sharedStyles.value}>{project.name}</Text>
-            <StatusPill status={project.repoSyncStatus} />
-          </View>
-          <Text style={[sharedStyles.subtitle, { color: colors.muted }]} numberOfLines={2}>
-            {project.hostLocalPath ?? project.repoUrl}
-          </Text>
-        </Pressable>
-      ))}
+      <View style={styles.folderGrid}>
+        {projects.map((project) => (
+          <Pressable
+            key={project.id}
+            onPress={() => onProject(project)}
+            style={({ pressed }) => [styles.folderTile, pressed && styles.folderTilePressed]}
+          >
+            <View style={styles.folderIcon} accessibilityLabel={`${project.name} folder`}>
+              <View style={styles.folderTab} />
+              <View style={styles.folderBody}>
+                <View style={styles.folderShine} />
+              </View>
+            </View>
+            <Text numberOfLines={2} style={styles.folderName}>
+              {project.name}
+            </Text>
+            <Text numberOfLines={1} style={styles.folderMeta}>
+              {project.conversationCount ?? 0} conversations
+            </Text>
+          </Pressable>
+        ))}
+      </View>
 
       {projects.length === 0 && !error ? (
         <View style={sharedStyles.card}>
-          <Text style={sharedStyles.subtitle}>No Mac projects are available yet.</Text>
+          <Text style={sharedStyles.subtitle}>No Codex projects are available yet.</Text>
         </View>
       ) : null}
 
@@ -55,3 +66,65 @@ export function ProjectsScreen({ api, onProject }: ProjectsScreenProps) {
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  folderBody: {
+    backgroundColor: "#e6ad3f",
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    borderTopRightRadius: 8,
+    height: 64,
+    overflow: "hidden",
+    width: 96
+  },
+  folderGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 18,
+    justifyContent: "space-between"
+  },
+  folderIcon: {
+    height: 82,
+    justifyContent: "flex-end",
+    width: 104
+  },
+  folderMeta: {
+    color: colors.muted,
+    fontSize: 12,
+    marginTop: 4,
+    textAlign: "center"
+  },
+  folderName: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "800",
+    lineHeight: 18,
+    marginTop: 10,
+    minHeight: 36,
+    textAlign: "center"
+  },
+  folderShine: {
+    backgroundColor: "rgba(255,255,255,0.22)",
+    height: 18,
+    width: "100%"
+  },
+  folderTab: {
+    backgroundColor: "#f4c45f",
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    height: 20,
+    left: 0,
+    position: "absolute",
+    top: 0,
+    width: 48
+  },
+  folderTile: {
+    alignItems: "center",
+    minHeight: 150,
+    width: "47%"
+  },
+  folderTilePressed: {
+    opacity: 0.72,
+    transform: [{ scale: 0.98 }]
+  }
+});

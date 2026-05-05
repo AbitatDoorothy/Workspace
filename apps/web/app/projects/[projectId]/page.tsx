@@ -1,5 +1,6 @@
 import { AppShell, Icon } from "../../components/app-shell";
 import { conversationQueueService } from "../../../server/conversations";
+import { codexAppService, isCodexProjectId } from "../../../server/codex-app";
 import { projectService } from "../../../server/projects";
 import { todoStore } from "../../../server/todos";
 import { ConversationBoard } from "./conversation-board";
@@ -36,11 +37,14 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
   }
 
   const projectPath = project.hostLocalPath;
+  const isCodexAppProject = project.source === "codex_app";
   const boardConversations: ConversationBoardConversation[] = conversations.map((conversation) => ({
     branchName: conversation.branchName,
+    codexDeepLink: conversation.codexDeepLink,
     id: conversation.id,
     prompt: conversation.prompt,
     runtimeSessionId: conversation.runtimeSessionId,
+    source: conversation.source,
     status: conversation.status,
     type: conversation.type,
     worktreePath: conversation.worktreePath
@@ -67,11 +71,13 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
             </p>
           </div>
           <div className="nav-actions">
-            <StartCodexDialog
-              projectId={project.id}
-              todoTasks={notStartedTodos}
-              workspaceId={project.workspaceId}
-            />
+            {isCodexAppProject ? null : (
+              <StartCodexDialog
+                projectId={project.id}
+                todoTasks={notStartedTodos}
+                workspaceId={project.workspaceId}
+              />
+            )}
           </div>
         </header>
 
@@ -91,7 +97,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
             </span>
             <div>
               <p>Last Sync Status</p>
-              <h2>{project.repoSyncStatus}</h2>
+              <h2>{isCodexAppProject ? "codex app" : project.repoSyncStatus}</h2>
             </div>
           </article>
         </section>
@@ -104,8 +110,13 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
 
 async function getProject(projectId: string) {
   try {
+    if (isCodexProjectId(projectId)) {
+      return await codexAppService.getProject(projectId);
+    }
+
     const projects = await projectService.listProjects("workspace_demo");
-    return projects.find((project) => project.id === projectId) ?? null;
+    const project = projects.find((candidate) => candidate.id === projectId);
+    return project ? { ...project, source: "abitat" as const } : null;
   } catch {
     return null;
   }
@@ -113,8 +124,18 @@ async function getProject(projectId: string) {
 
 async function getProjectConversations(projectId: string) {
   try {
+    if (isCodexProjectId(projectId)) {
+      return await codexAppService.listProjectConversations(projectId);
+    }
+
     const conversations = await conversationQueueService.listConversations("workspace_demo");
-    return conversations.filter((conversation) => conversation.projectId === projectId);
+    return conversations
+      .filter((conversation) => conversation.projectId === projectId)
+      .map((conversation) => ({
+        ...conversation,
+        codexDeepLink: null,
+        source: "abitat" as const
+      }));
   } catch {
     return [];
   }

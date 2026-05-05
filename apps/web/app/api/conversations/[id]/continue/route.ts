@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { createPublicRedirectUrl } from "../../../../../server/auth/session";
+import { createBrowserRedirectUrl } from "../../../../../server/auth/session";
 import { conversationQueueService } from "../../../../../server/conversations";
+import {
+  codexAppDeepLink,
+  codexAppService,
+  isCodexConversationId,
+  toCodexThreadId
+} from "../../../../../server/codex-app";
 import { runEventService } from "../../../../../server/run-events";
 
 const continueRequestSchema = z.object({
@@ -17,6 +23,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       context.params,
       continueRequestSchema.parseAsync(await parseRequest(request))
     ]);
+
+    if (isCodexConversationId(id)) {
+      if (input.prompt) {
+        await codexAppService.continueConversation(id, {
+          prompt: input.prompt
+        });
+      }
+
+      if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
+        return NextResponse.redirect(codexAppDeepLink(toCodexThreadId(id)), 303);
+      }
+
+      return NextResponse.json({
+        conversationId: id,
+        status: input.prompt ? "running" : "approved"
+      });
+    }
+
     const conversation = await conversationQueueService.continueConversation(id, input);
     await runEventService.appendAuditEvent(id, {
       content: input.prompt,
@@ -25,7 +49,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
       return NextResponse.redirect(
-        createPublicRedirectUrl(
+        createBrowserRedirectUrl(
           request,
           input.redirectTo ?? `/projects/${conversation.projectId}/conversations/${id}`
         ),

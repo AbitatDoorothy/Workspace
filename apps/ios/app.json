@@ -13,7 +13,7 @@
         "NSCameraUsageDescription": "Abitat scans the pairing QR code shown on your Mac."
       }
     },
-    "plugins": ["expo-secure-store", "expo-camera"],
+    "plugins": ["expo-secure-store", "expo-camera", "expo-notifications"],
     "extra": {
       "defaultApiUrl": "https://workspace.abitat.io"
     }

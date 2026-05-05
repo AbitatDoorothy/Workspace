@@ -6,7 +6,16 @@ import { appInfo } from "../lib/app-info";
 import { getHostPairingCode } from "../server/hosts/host-service";
 import { hostService } from "../server/hosts";
 
-export default async function Home() {
+export default async function Home({
+  searchParams
+}: {
+  searchParams: Promise<{
+    iphonePairingCode?: string;
+    iphonePairingExpiresAt?: string;
+    iphonePairingQrPayload?: string;
+  }>;
+}) {
+  const pairing = getPhonePairingFromSearchParams(await searchParams);
   const host = await getHost();
   const tools = Array.isArray(host?.installedToolsJson)
     ? (host.installedToolsJson as HostTool[])
@@ -80,7 +89,11 @@ export default async function Home() {
 
           <aside className="dashboard-side">
             {host ? (
-              <PairIphonePanel hostMachineId={host.id} workspaceId={host.workspaceId} />
+              <PairIphonePanel
+                hostMachineId={host.id}
+                initialPairing={pairing}
+                workspaceId={host.workspaceId}
+              />
             ) : null}
 
             <section className="glass-card health-card">
@@ -137,6 +150,26 @@ export default async function Home() {
       </section>
     </AppShell>
   );
+}
+
+function getPhonePairingFromSearchParams(searchParams: {
+  iphonePairingCode?: string;
+  iphonePairingExpiresAt?: string;
+  iphonePairingQrPayload?: string;
+}) {
+  if (
+    !searchParams.iphonePairingCode ||
+    !searchParams.iphonePairingExpiresAt ||
+    !searchParams.iphonePairingQrPayload
+  ) {
+    return null;
+  }
+
+  return {
+    code: searchParams.iphonePairingCode,
+    expiresAt: searchParams.iphonePairingExpiresAt,
+    qrPayload: searchParams.iphonePairingQrPayload
+  };
 }
 
 async function getHost() {

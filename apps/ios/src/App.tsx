@@ -6,8 +6,8 @@ import { WorkspaceScreen } from "./screens/WorkspaceScreen";
 import { ProjectsScreen } from "./screens/ProjectsScreen";
 import { ProjectDetailScreen } from "./screens/ProjectDetailScreen";
 import { ConversationScreen } from "./screens/ConversationScreen";
-import { RemoteControlScreen } from "./screens/RemoteControlScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
+import { useThreadCompletionNotifications } from "./notifications/thread-completion-notifications";
 import { useMobileStore } from "./state/mobile-store";
 import { colors } from "./theme";
 import type { ConversationSummary, ProjectSummary, RouteName } from "./types";
@@ -17,6 +17,7 @@ export default function App() {
   const [route, setRoute] = useState<RouteName>("workspace");
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
+  useThreadCompletionNotifications(store.api, store.isPaired);
 
   if (store.isRestoring) {
     return (
@@ -72,9 +73,6 @@ export default function App() {
       {route === "conversation" && conversation ? (
         <ConversationScreen api={store.api} conversation={conversation} />
       ) : null}
-      {route === "remote" && store.pairing ? (
-        <RemoteControlScreen api={store.api} hostMachineId={store.pairing.hostMachineId} />
-      ) : null}
       {route === "settings" ? (
         <SettingsScreen
           onSignOut={() => {
@@ -95,7 +93,7 @@ export default function App() {
           paddingTop: 8
         }}
       >
-        {(["workspace", "projects", "remote", "settings"] as RouteName[]).map((item) => (
+        {(["workspace", "projects", "settings"] as RouteName[]).map((item) => (
           <Pressable
             key={item}
             onPress={() => setRoute(item)}

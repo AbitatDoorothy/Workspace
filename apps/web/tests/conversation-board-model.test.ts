@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   canStartConversationCardDrag,
   canOpenConversationSummary,
+  canManageConversationCard,
+  conversationCodexAppHref,
   createConversationDeleteRequest,
   createConversationDragPayload,
   conversationDropTarget,
@@ -56,6 +58,19 @@ describe("conversation board model", () => {
     expect(canStartConversationCardDrag("BUTTON")).toBe(false);
     expect(canStartConversationCardDrag("A")).toBe(false);
     expect(canStartConversationCardDrag("SELECT")).toBe(false);
+  });
+
+  it("opens Codex app cards through the desktop app and keeps queue actions disabled", () => {
+    expect(
+      conversationCodexAppHref({
+        runtimeSessionId: "thread_demo"
+      })
+    ).toBe("codex://threads/thread_demo");
+    expect(
+      canManageConversationCard({
+        source: "codex_app"
+      })
+    ).toBe(false);
   });
 
   it("builds the delete request used by the card delete button", () => {

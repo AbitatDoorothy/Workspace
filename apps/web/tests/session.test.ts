@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createBrowserRedirectUrl,
   createSessionToken,
   createPublicRedirectUrl,
+  isSecureRequest,
   sanitizeRedirectPath,
   verifyLoginPassword,
   verifySessionToken
@@ -48,6 +50,34 @@ describe("auth session", () => {
         ABITAT_PUBLIC_URL: "https://workspace.abitat.io"
       }).toString()
     ).toBe("https://workspace.abitat.io/login");
+  });
+
+  it("keeps browser redirects on the current origin even when a public phone URL is configured", () => {
+    const request = new Request("http://127.0.0.1:3901/api/mobile/pairing/start");
+
+    expect(
+      createBrowserRedirectUrl(request, "/?iphonePairingCode=ABITAT-202479#pair-iphone").toString()
+    ).toBe("http://127.0.0.1:3901/?iphonePairingCode=ABITAT-202479#pair-iphone");
+  });
+
+  it("does not mark local http browser sessions secure just because a remote phone URL is configured", () => {
+    const request = new Request("http://127.0.0.1:3000/api/login");
+
+    expect(
+      isSecureRequest(request, {
+        ABITAT_PUBLIC_URL: "https://workspace.abitat.io"
+      })
+    ).toBe(false);
+  });
+
+  it("marks tunnel-forwarded browser sessions secure", () => {
+    const request = new Request("http://127.0.0.1:3000/api/login", {
+      headers: {
+        "x-forwarded-proto": "https"
+      }
+    });
+
+    expect(isSecureRequest(request)).toBe(true);
   });
 
   it("keeps only local redirect paths for post-login next destinations", () => {

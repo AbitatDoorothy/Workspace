@@ -1,10 +1,12 @@
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const requiredFiles = [
   "app.json",
+  "index.ts",
   "src/App.tsx",
   "src/api/client.ts",
+  "src/notifications/thread-completion-notifications.ts",
   "src/state/mobile-store.ts",
   "src/screens/PairingScreen.tsx",
   "src/screens/WorkspaceScreen.tsx",
@@ -16,4 +18,89 @@ const requiredFiles = [
 ];
 
 await Promise.all(requiredFiles.map((file) => access(join(process.cwd(), file))));
+
+const packageJson = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
+if (packageJson.main !== "index.ts") {
+  throw new Error(`Expected package.json main to be "index.ts", received ${packageJson.main}`);
+}
+if (!packageJson.dependencies?.["expo-notifications"]) {
+  throw new Error("Expected abitat-ios to depend on expo-notifications");
+}
+
+const indexFile = await readFile(join(process.cwd(), "index.ts"), "utf8");
+if (!indexFile.includes("registerRootComponent(App)")) {
+  throw new Error("Expected index.ts to register the root App component");
+}
+
+const appJson = JSON.parse(await readFile(join(process.cwd(), "app.json"), "utf8"));
+if (!appJson.expo?.plugins?.includes("expo-notifications")) {
+  throw new Error("Expected app.json to include the expo-notifications config plugin");
+}
+
+const conversationScreen = await readFile(
+  join(process.cwd(), "src/screens/ConversationScreen.tsx"),
+  "utf8"
+);
+if (!conversationScreen.includes("mergeConversationMessages")) {
+  throw new Error("Expected ConversationScreen to merge refreshed messages without duplicates");
+}
+if (!conversationScreen.includes("scrollToEnd")) {
+  throw new Error("Expected ConversationScreen to scroll to new assistant replies");
+}
+if (!conversationScreen.includes("KeyboardAvoidingView")) {
+  throw new Error("Expected ConversationScreen to keep the composer above the iOS keyboard");
+}
+if (conversationScreen.includes("onContentSizeChange={() => scrollViewRef.current?.scrollToEnd")) {
+  throw new Error(
+    "Expected ConversationScreen to preserve scroll position when the user scrolls up"
+  );
+}
+if (!conversationScreen.includes("handleMessagesContentSizeChange")) {
+  throw new Error("Expected ConversationScreen to scroll after message layout changes");
+}
+if (!conversationScreen.includes("handleMessagesScroll")) {
+  throw new Error("Expected ConversationScreen to detect when the user scrolls away from latest");
+}
+if (!conversationScreen.includes("showScrollToLatestButton")) {
+  throw new Error("Expected ConversationScreen to show a scroll-to-latest affordance");
+}
+if (!conversationScreen.includes("shouldWaitForMacRunningThread")) {
+  throw new Error("Expected ConversationScreen to guard Mac-running Codex app threads");
+}
+if (!conversationScreen.includes("This thread is running on your Mac. Please wait.")) {
+  throw new Error("Expected ConversationScreen to show a Mac-running wait message");
+}
+
+const appScreen = await readFile(join(process.cwd(), "src/App.tsx"), "utf8");
+if (!appScreen.includes("useThreadCompletionNotifications")) {
+  throw new Error("Expected App to start the thread completion notification watcher");
+}
+
+const notificationWatcher = await readFile(
+  join(process.cwd(), "src/notifications/thread-completion-notifications.ts"),
+  "utf8"
+);
+for (const expected of [
+  "Notifications.setNotificationHandler",
+  "Notifications.requestPermissionsAsync",
+  "Notifications.scheduleNotificationAsync",
+  "rememberRunningConversation",
+  "useThreadCompletionNotifications",
+  "conversationSnapshotsRef",
+  "hasConversationAdvanced",
+  "latestNotificationMessage",
+  "snapshotNotificationConversation",
+  "shouldNotifyForCompletedCodexTurn",
+  "shouldNotifyForNewCompletedCodexConversation",
+  "listProjects",
+  "listConversations"
+]) {
+  if (!notificationWatcher.includes(expected)) {
+    throw new Error(`Expected notification watcher to include ${expected}`);
+  }
+}
+if (notificationWatcher.includes("wasMessageCreatedAfterSnapshot")) {
+  throw new Error("Expected Mac-started Codex completion detection to avoid stale timestamp gates");
+}
+
 console.log(`validated ${requiredFiles.length} iPhone app files`);

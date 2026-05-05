@@ -1,11 +1,8 @@
-"use client";
-
-import { useState } from "react";
-
 import { Icon } from "./app-shell";
 
 interface PairIphonePanelProps {
   hostMachineId: string;
+  initialPairing?: PairingResponse | null;
   workspaceId: string;
 }
 
@@ -15,44 +12,13 @@ interface PairingResponse {
   qrPayload: string;
 }
 
-export function PairIphonePanel({ hostMachineId, workspaceId }: PairIphonePanelProps) {
-  const [pairing, setPairing] = useState<PairingResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-
-  async function startPairing() {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch("/api/mobile/pairing/start", {
-        body: JSON.stringify({
-          hostMachineId,
-          workspaceId
-        }),
-        headers: {
-          "content-type": "application/json"
-        },
-        method: "POST"
-      });
-      const payload = (await response.json()) as PairingResponse | { error?: string };
-
-      if (!response.ok) {
-        throw new Error(
-          "error" in payload && payload.error ? payload.error : "Unable to pair iPhone"
-        );
-      }
-
-      setPairing(payload as PairingResponse);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to pair iPhone");
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
+export function PairIphonePanel({
+  hostMachineId,
+  initialPairing,
+  workspaceId
+}: PairIphonePanelProps) {
   return (
-    <section className="glass-card phone-pair-card">
+    <section className="glass-card phone-pair-card" id="pair-iphone">
       <div className="card-topline">
         <span className="icon-tile">
           <Icon>smartphone</Icon>
@@ -65,21 +31,24 @@ export function PairIphonePanel({ hostMachineId, workspaceId }: PairIphonePanelP
         <p>Connect a phone to this Mac for project access, synced chat, and remote control.</p>
       </div>
 
-      {pairing ? (
+      {initialPairing ? (
         <div className="phone-pair-code" aria-live="polite">
           <span>Manual code</span>
-          <strong>{pairing.code}</strong>
-          <small>Expires {new Date(pairing.expiresAt).toLocaleTimeString()}</small>
-          <code>{pairing.qrPayload}</code>
+          <strong>{initialPairing.code}</strong>
+          <small>Expires {new Date(initialPairing.expiresAt).toLocaleTimeString()}</small>
+          <code>{initialPairing.qrPayload}</code>
         </div>
       ) : null}
 
-      {error ? <p className="form-error">{error}</p> : null}
-
-      <button className="primary-button" disabled={isLoading} onClick={startPairing} type="button">
-        <Icon>{isLoading ? "sync" : "qr_code_2"}</Icon>
-        {isLoading ? "Creating code" : "Create pairing code"}
-      </button>
+      <form action="/api/mobile/pairing/start" method="post">
+        <input name="hostMachineId" type="hidden" value={hostMachineId} />
+        <input name="workspaceId" type="hidden" value={workspaceId} />
+        <input name="redirectTo" type="hidden" value="/#pair-iphone" />
+        <button className="primary-button" type="submit">
+          <Icon>qr_code_2</Icon>
+          Create pairing code
+        </button>
+      </form>
     </section>
   );
 }

@@ -1,5 +1,6 @@
 import { conversationMessageService } from "../../../../../../../server/conversation-messages";
 import { conversationQueueService } from "../../../../../../../server/conversations";
+import { codexAppService, isCodexConversationId } from "../../../../../../../server/codex-app";
 import { requireMobileActor } from "../../../../../../../server/mobile/request-auth";
 
 const encoder = new TextEncoder();
@@ -7,6 +8,55 @@ const encoder = new TextEncoder();
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const [{ id }, actor] = await Promise.all([context.params, requireMobileActor(request)]);
+
+    if (isCodexConversationId(id)) {
+      const after = Number(new URL(request.url).searchParams.get("afterSequence") ?? "0");
+      let lastSequence = Number.isFinite(after) ? after : 0;
+
+      const stream = new ReadableStream({
+        async start(controller) {
+          const sendMessages = async () => {
+            const messages = await codexAppService.listMessages(id, {
+              afterSequence: lastSequence
+            });
+
+            for (const message of messages) {
+              lastSequence = message.sequence;
+              controller.enqueue(
+                encoder.encode(`event: message\ndata: ${JSON.stringify(message)}\n\n`)
+              );
+            }
+          };
+
+          await sendMessages();
+          const interval = setInterval(() => {
+            sendMessages().catch((error) => {
+              controller.enqueue(
+                encoder.encode(
+                  `event: error\ndata: ${JSON.stringify({
+                    error: error instanceof Error ? error.message : "Unable to stream messages"
+                  })}\n\n`
+                )
+              );
+            });
+          }, 1500);
+
+          request.signal.addEventListener("abort", () => {
+            clearInterval(interval);
+            controller.close();
+          });
+        }
+      });
+
+      return new Response(stream, {
+        headers: {
+          "cache-control": "no-cache, no-transform",
+          connection: "keep-alive",
+          "content-type": "text/event-stream"
+        }
+      });
+    }
+
     await assertMobileConversation(actor.workspaceId, id);
     const after = Number(new URL(request.url).searchParams.get("afterSequence") ?? "0");
     let lastSequence = Number.isFinite(after) ? after : 0;

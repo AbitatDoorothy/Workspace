@@ -4,7 +4,6 @@ export type RouteName =
   | "projects"
   | "project"
   | "conversation"
-  | "remote"
   | "settings";
 
 export interface PairingState {
@@ -39,6 +38,8 @@ export interface ProjectSummary {
   repoUrl: string;
   hostLocalPath?: string | null;
   repoSyncStatus: string;
+  conversationCount?: number;
+  source?: "abitat" | "codex_app";
 }
 
 export interface ConversationSummary {
@@ -48,7 +49,13 @@ export interface ConversationSummary {
   prompt: string;
   status: string;
   type: string;
+  codexDeepLink?: string;
   createdAt?: string;
+  runtimeSessionId?: string | null;
+  mobileOpenState?: "mac_running" | "phone_active" | "ready";
+  source?: "abitat" | "codex_app";
+  updatedAt?: string;
+  worktreePath?: string | null;
 }
 
 export interface ConversationMessage {

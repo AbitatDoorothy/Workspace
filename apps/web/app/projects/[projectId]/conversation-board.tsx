@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 import { Icon } from "../../components/app-shell";
 import {
   canStartConversationCardDrag,
+  canManageConversationCard,
   canOpenConversationSummary,
+  conversationCodexAppHref,
   conversationDragMimeType,
   conversationDropTarget,
   conversationLabelFromStatus,
@@ -68,7 +70,11 @@ export function ConversationBoard({
     event: ReactDragEvent<HTMLElement>,
     conversation: ConversationBoardConversation
   ) {
-    if (!canStartDragFromTarget(event.target) || pendingId === conversation.id) {
+    if (
+      !canManageConversationCard(conversation) ||
+      !canStartDragFromTarget(event.target) ||
+      pendingId === conversation.id
+    ) {
       event.preventDefault();
       return;
     }
@@ -126,7 +132,7 @@ export function ConversationBoard({
     const nextLabel = conversationDropTarget(payload.sourceLabel, targetLabel);
     const conversation = items.find((item) => item.id === payload.conversationId);
 
-    if (!conversation || nextLabel === null) {
+    if (!conversation || !canManageConversationCard(conversation) || nextLabel === null) {
       return;
     }
 
@@ -230,108 +236,123 @@ export function ConversationBoard({
           </div>
           <div className="conversation-card-list">
             {column.conversations.length > 0 ? (
-              column.conversations.map((conversation) => (
-                <article
-                  aria-busy={pendingId === conversation.id}
-                  aria-grabbed={draggingId === conversation.id}
-                  className={`conversation-card ${
-                    draggingId === conversation.id ? "conversation-card-dragging" : ""
-                  } ${pendingId === conversation.id ? "conversation-card-pending" : ""}`}
-                  draggable={pendingId !== conversation.id}
-                  key={conversation.id}
-                  onDragEnd={handleDragEnd}
-                  onDragStart={(event) => handleDragStart(event, conversation)}
-                >
-                  <div className="conversation-card-head">
-                    <span className="avatar-disc">
-                      <Icon filled>smart_toy</Icon>
-                    </span>
-                    <div>
-                      <h3>{conversationTitle(conversation.prompt)}</h3>
-                      <div className="conversation-card-meta">
-                        <span>{conversation.type}</span>
-                        <span>{conversationLabelText(conversation.status)}</span>
-                      </div>
-                    </div>
-                    <span
-                      className="drag-handle"
-                      draggable={pendingId !== conversation.id}
-                      title="Drag to move conversation"
-                    >
-                      <Icon>drag_indicator</Icon>
-                    </span>
-                  </div>
+              column.conversations.map((conversation) => {
+                const canManage = canManageConversationCard(conversation);
+                const codexHref = conversationCodexAppHref(conversation);
 
-                  <div className="conversation-card-actions">
-                    <form action={`/api/conversations/${conversation.id}/continue`} method="post">
-                      <input type="hidden" name="userId" value={userId} />
-                      <input type="hidden" name="redirectTo" value={`/projects/${projectId}`} />
-                      <button
-                        className="ghost-button"
-                        disabled={!canOpenCodexThread(conversation)}
-                        type="submit"
-                      >
-                        <Icon>terminal</Icon>
-                        Open CLI
-                      </button>
-                    </form>
-                    {canOpenConversationSummary(conversation.status) ? (
-                      <a
-                        className="ghost-button"
-                        href={`/projects/${projectId}/conversations/${conversation.id}`}
-                      >
-                        <Icon>article</Icon>
-                        Summary
-                      </a>
-                    ) : (
-                      <button className="ghost-button" disabled type="button">
-                        <Icon>article</Icon>
-                        Summary
-                      </button>
-                    )}
-                    <form
-                      action={`/api/conversations/${conversation.id}/delete`}
-                      method="post"
-                      onSubmit={() => {
-                        setPendingId(conversation.id);
-                        setError(null);
-                      }}
-                    >
-                      <input type="hidden" name="userId" value={userId} />
-                      <input type="hidden" name="redirectTo" value={`/projects/${projectId}`} />
-                      <button
-                        className="danger-button"
-                        disabled={pendingId === conversation.id}
-                        type="submit"
-                      >
-                        <Icon>delete</Icon>
-                        Delete
-                      </button>
-                    </form>
-                  </div>
-
-                  <form
-                    action={`/api/conversations/${conversation.id}/label`}
-                    className="conversation-label-form"
-                    key={conversation.status}
-                    method="post"
+                return (
+                  <article
+                    aria-busy={pendingId === conversation.id}
+                    aria-grabbed={draggingId === conversation.id}
+                    className={`conversation-card ${
+                      draggingId === conversation.id ? "conversation-card-dragging" : ""
+                    } ${pendingId === conversation.id ? "conversation-card-pending" : ""}`}
+                    draggable={canManage && pendingId !== conversation.id}
+                    key={conversation.id}
+                    onDragEnd={handleDragEnd}
+                    onDragStart={(event) => handleDragStart(event, conversation)}
                   >
-                    <input type="hidden" name="userId" value={userId} />
-                    <input type="hidden" name="redirectTo" value={`/projects/${projectId}`} />
-                    <label>
-                      Label
-                      <select
-                        name="label"
-                        defaultValue={conversationLabelFromStatus(conversation.status)}
+                    <div className="conversation-card-head">
+                      <span className="avatar-disc">
+                        <Icon filled>smart_toy</Icon>
+                      </span>
+                      <div>
+                        <h3>{conversationTitle(conversation.prompt)}</h3>
+                        <div className="conversation-card-meta">
+                          <span>{conversation.type}</span>
+                          <span>
+                            {conversation.source === "codex_app"
+                              ? "Synced from Codex app"
+                              : conversationLabelText(conversation.status)}
+                          </span>
+                        </div>
+                      </div>
+                      {canManage ? (
+                        <span
+                          className="drag-handle"
+                          draggable={pendingId !== conversation.id}
+                          title="Drag to move conversation"
+                        >
+                          <Icon>drag_indicator</Icon>
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="conversation-card-actions">
+                      {codexHref ? (
+                        <a className="ghost-button" href={codexHref}>
+                          <Icon>open_in_new</Icon>
+                          Open Codex
+                        </a>
+                      ) : (
+                        <button className="ghost-button" disabled type="button">
+                          <Icon>open_in_new</Icon>
+                          Open Codex
+                        </button>
+                      )}
+                      {canOpenConversationSummary(conversation.status) ||
+                      conversation.source === "codex_app" ? (
+                        <a
+                          className="ghost-button"
+                          href={`/projects/${projectId}/conversations/${conversation.id}`}
+                        >
+                          <Icon>article</Icon>
+                          {conversation.source === "codex_app" ? "History" : "Summary"}
+                        </a>
+                      ) : (
+                        <button className="ghost-button" disabled type="button">
+                          <Icon>article</Icon>
+                          Summary
+                        </button>
+                      )}
+                      {canManage ? (
+                        <form
+                          action={`/api/conversations/${conversation.id}/delete`}
+                          method="post"
+                          onSubmit={() => {
+                            setPendingId(conversation.id);
+                            setError(null);
+                          }}
+                        >
+                          <input type="hidden" name="userId" value={userId} />
+                          <input type="hidden" name="redirectTo" value={`/projects/${projectId}`} />
+                          <button
+                            className="danger-button"
+                            disabled={pendingId === conversation.id}
+                            type="submit"
+                          >
+                            <Icon>delete</Icon>
+                            Delete
+                          </button>
+                        </form>
+                      ) : null}
+                    </div>
+
+                    {canManage ? (
+                      <form
+                        action={`/api/conversations/${conversation.id}/label`}
+                        className="conversation-label-form"
+                        key={conversation.status}
+                        method="post"
                       >
-                        <option value="in_process">In process</option>
-                        <option value="complete">Complete</option>
-                      </select>
-                    </label>
-                    <button type="submit">Update</button>
-                  </form>
-                </article>
-              ))
+                        <input type="hidden" name="userId" value={userId} />
+                        <input type="hidden" name="redirectTo" value={`/projects/${projectId}`} />
+                        <label>
+                          Label
+                          <select
+                            name="label"
+                            defaultValue={conversationLabelFromStatus(conversation.status)}
+                          >
+                            <option value="in_process">In process</option>
+                            <option value="complete">Complete</option>
+                          </select>
+                        </label>
+                        <button type="submit">Update</button>
+                      </form>
+                    ) : null}
+                  </article>
+                );
+              })
             ) : (
               <article className="conversation-empty-card">
                 <Icon>add_comment</Icon>
@@ -350,15 +371,5 @@ function canStartDragFromTarget(target: EventTarget) {
     target instanceof HTMLElement &&
     canStartConversationCardDrag(target.tagName) &&
     target.closest("a,button,input,label,select,textarea") === null
-  );
-}
-
-function canOpenCodexThread(conversation: {
-  branchName?: string | null;
-  runtimeSessionId?: string | null;
-  worktreePath?: string | null;
-}) {
-  return Boolean(
-    conversation.branchName && conversation.worktreePath && conversation.runtimeSessionId
   );
 }

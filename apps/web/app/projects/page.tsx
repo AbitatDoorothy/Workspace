@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 
 import { AppShell, Icon } from "../components/app-shell";
+import { codexAppService } from "../../server/codex-app";
 import { projectService } from "../../server/projects";
 import { PROJECT_DRAFT_COOKIE_NAME, getProjectDraft } from "../../server/projects/project-drafts";
 import { CreateProjectDialog } from "./create-project-dialog";
@@ -41,7 +42,9 @@ export default async function ProjectsPage({
                 <span className="icon-tile">
                   <Icon>folder</Icon>
                 </span>
-                <span className="status-pill">local</span>
+                <span className="status-pill">
+                  {project.source === "codex_app" ? "Codex app" : "local"}
+                </span>
               </div>
               <div>
                 <h2>{project.name}</h2>
@@ -53,12 +56,14 @@ export default async function ProjectsPage({
                   <Icon>folder_open</Icon>
                   Open
                 </a>
-                <form action={`/api/projects/${project.id}/delete`} method="post">
-                  <button className="danger-button" type="submit">
-                    <Icon>delete</Icon>
-                    Delete
-                  </button>
-                </form>
+                {project.source === "codex_app" ? null : (
+                  <form action={`/api/projects/${project.id}/delete`} method="post">
+                    <button className="danger-button" type="submit">
+                      <Icon>delete</Icon>
+                      Delete
+                    </button>
+                  </form>
+                )}
               </div>
             </article>
           ))}
@@ -69,9 +74,15 @@ export default async function ProjectsPage({
 }
 
 async function getProjects() {
-  try {
-    return await projectService.listProjects("workspace_demo");
-  } catch {
-    return [];
-  }
+  const [localProjects, codexProjects] = await Promise.allSettled([
+    projectService.listProjects("workspace_demo"),
+    codexAppService.listProjects()
+  ]);
+
+  return [
+    ...(codexProjects.status === "fulfilled" ? codexProjects.value : []),
+    ...(localProjects.status === "fulfilled"
+      ? localProjects.value.map((project) => ({ ...project, source: "abitat" as const }))
+      : [])
+  ];
 }

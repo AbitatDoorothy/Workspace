@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { conversationMessageService } from "../../../../../../server/conversation-messages";
 import { conversationQueueService } from "../../../../../../server/conversations";
+import { codexAppService, isCodexConversationId } from "../../../../../../server/codex-app";
 import { requireMobileActor } from "../../../../../../server/mobile/request-auth";
 import { runEventService } from "../../../../../../server/run-events";
 
@@ -32,6 +33,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     if (!actor.hostMachineId) {
       throw new Error("Phone is not paired to a Mac host");
+    }
+
+    if (isCodexConversationId(id)) {
+      const conversation = await codexAppService.continueConversation(id, {
+        prompt: input.prompt
+      });
+
+      return NextResponse.json({
+        conversationId: conversation.conversationId,
+        message: {
+          id: input.clientMessageId ?? `${conversation.conversationId}-${Date.now()}`,
+          sequence: 0
+        },
+        status: conversation.status
+      });
     }
 
     await assertMobileConversation(actor.workspaceId, id);

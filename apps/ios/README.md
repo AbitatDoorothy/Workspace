@@ -23,5 +23,5 @@ tunnel. The default API base is `https://workspace.abitat.io`.
 - Remote control: WebRTC session state, trackpad/direct-touch modes, and keyboard toolbar.
 - Settings: API endpoint, paired device identity, and sign out.
 
-Remote video uses `react-native-webrtc` in the app shell. The media implementation expects the
-Mac helper to exchange offer/answer/ICE payloads through `/api/remote-control/*`.
+Remote control uses the Abitat signaling endpoints for status, input, and first-pass screen frame
+relay. Native WebRTC media can be added later without changing the pairing or chat flow.

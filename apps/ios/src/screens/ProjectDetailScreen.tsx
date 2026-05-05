@@ -3,6 +3,7 @@ import { Pressable, Text, TextInput, View } from "react-native";
 
 import type { ApiClient } from "../api/client";
 import { Button, Header, StatusPill } from "../components/Controls";
+import { rememberRunningConversation } from "../notifications/thread-completion-notifications";
 import { Screen } from "../components/Screen";
 import { colors, sharedStyles } from "../theme";
 import type { ConversationSummary, ProjectSummary } from "../types";
@@ -37,10 +38,13 @@ export function ProjectDetailScreen({ api, onConversation, project }: ProjectDet
         clientMessageId: `ios-${Date.now()}`,
         prompt
       });
+      rememberRunningConversation(started.conversationId);
       onConversation({
         id: started.conversationId,
         projectId: project.id,
         prompt,
+        mobileOpenState: "phone_active",
+        source: project.source,
         status: started.status,
         type: "feature",
         workspaceId: project.workspaceId
@@ -93,6 +97,14 @@ export function ProjectDetailScreen({ api, onConversation, project }: ProjectDet
           <Text style={sharedStyles.subtitle}>{conversation.type}</Text>
         </Pressable>
       ))}
+
+      {conversations.length === 0 && !error ? (
+        <View style={sharedStyles.card}>
+          <Text style={sharedStyles.subtitle}>
+            No conversations have synced for this project yet.
+          </Text>
+        </View>
+      ) : null}
 
       {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
     </Screen>

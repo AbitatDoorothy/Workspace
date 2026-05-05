@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import {
   SESSION_COOKIE_NAME,
-  createPublicRedirectUrl,
+  createBrowserRedirectUrl,
   getSessionSecret,
   verifySessionToken
 } from "./server/auth/session";
@@ -36,7 +36,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.json({ error: "Authentication required" }, { status: 401 });
   }
 
-  const loginUrl = createPublicRedirectUrl(request, "/login");
+  const loginUrl = createBrowserRedirectUrl(request, "/login");
   loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
   return NextResponse.redirect(loginUrl);
 }

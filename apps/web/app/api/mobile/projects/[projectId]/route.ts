@@ -1,11 +1,23 @@
 import { NextResponse } from "next/server";
 
+import { codexAppService, isCodexProjectId } from "../../../../../server/codex-app";
 import { mobileService } from "../../../../../server/mobile";
 import { requireMobileActor } from "../../../../../server/mobile/request-auth";
 
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
     const [{ projectId }, actor] = await Promise.all([context.params, requireMobileActor(request)]);
+
+    if (isCodexProjectId(projectId)) {
+      const project = await codexAppService.getProject(projectId);
+
+      if (!project) {
+        return NextResponse.json({ error: "Project not found" }, { status: 404 });
+      }
+
+      return NextResponse.json({ project });
+    }
+
     const projects = await mobileService.listProjects(actor);
     const project = projects.find((candidate) => candidate.id === projectId);
 

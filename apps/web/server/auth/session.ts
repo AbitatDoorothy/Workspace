@@ -34,6 +34,16 @@ export function createPublicRedirectUrl(
   return new URL(path, origin);
 }
 
+export function createBrowserRedirectUrl(request: Request, path: string) {
+  const requestUrl = new URL(request.url);
+  const forwardedHost = firstHeaderValue(request.headers.get("x-forwarded-host"));
+  const forwardedProto = firstHeaderValue(request.headers.get("x-forwarded-proto"));
+  const host = forwardedHost ?? request.headers.get("host") ?? requestUrl.host;
+  const origin = `${forwardedProto ?? requestUrl.protocol.replace(/:$/u, "")}://${host}`;
+
+  return new URL(path, origin);
+}
+
 export function sanitizeRedirectPath(path: FormDataEntryValue | string | null | undefined) {
   if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//")) {
     return "/";
@@ -56,7 +66,6 @@ export function isSecureRequest(
   return (
     forwardedProto === "https" ||
     new URL(request.url).protocol === "https:" ||
-    env.ABITAT_PUBLIC_URL?.startsWith("https://") === true ||
     env.NODE_ENV === "production"
   );
 }
