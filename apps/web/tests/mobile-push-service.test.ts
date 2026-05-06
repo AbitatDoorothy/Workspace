@@ -5,6 +5,7 @@ import {
   type CodexCompletionState
 } from "../server/mobile/codex-completion-notifier";
 import {
+  createExpoPushTransport,
   createMobilePushService,
   type MobilePushTransport
 } from "../server/mobile/mobile-push-service";
@@ -60,6 +61,43 @@ describe("mobile push service", () => {
         })
       ]
     ]);
+  });
+
+  it("rejects Expo push ticket errors returned in successful HTTP responses", async () => {
+    const transport = createExpoPushTransport(async () => {
+      return new Response(
+        JSON.stringify({
+          data: [
+            {
+              details: { error: "InvalidCredentials" },
+              message: "The Apple push notification credentials are invalid.",
+              status: "error"
+            }
+          ]
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: 200
+        }
+      );
+    });
+
+    await expect(
+      transport.send([
+        {
+          body: "Fix notifications",
+          data: {
+            conversationId: "codex_thread_thread_1",
+            projectId: "codex_project_project_1",
+            source: "codex_app",
+            turnId: "turn_1"
+          },
+          sound: "default",
+          title: "Codex thread done",
+          to: "ExpoPushToken[test-token]"
+        }
+      ])
+    ).rejects.toThrow("InvalidCredentials");
   });
 
   it("notifies only when a Codex turn finishes and dedupes repeated polls", async () => {

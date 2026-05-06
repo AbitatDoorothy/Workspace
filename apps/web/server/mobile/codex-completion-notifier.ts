@@ -31,10 +31,15 @@ interface CodexCompletionNotifierPushService {
   }): Promise<number>;
 }
 
+interface CodexCompletionNotifierLogger {
+  warn(message: string): void;
+}
+
 interface CodexCompletionNotifierOptions {
   codexAppService: CodexCompletionNotifierCodexService;
   hostMachineId: string;
   intervalMs?: number;
+  logger?: CodexCompletionNotifierLogger;
   mobilePushService: CodexCompletionNotifierPushService;
   now?: () => Date;
 }
@@ -125,12 +130,16 @@ export function createCodexCompletionNotifier(options: CodexCompletionNotifierOp
   }
 
   function start() {
-    void pollOnce().catch(() => {
-      // Completion notifications are best-effort; the next poll will retry.
+    void pollOnce().catch((error) => {
+      options.logger?.warn(
+        `[mobile-push] Codex completion notification poll failed: ${errorMessage(error)}`
+      );
     });
     const interval = setInterval(() => {
-      void pollOnce().catch(() => {
-        // Completion notifications are best-effort; the next poll will retry.
+      void pollOnce().catch((error) => {
+        options.logger?.warn(
+          `[mobile-push] Codex completion notification poll failed: ${errorMessage(error)}`
+        );
       });
     }, options.intervalMs ?? DEFAULT_COMPLETION_POLL_INTERVAL_MS);
     interval.unref?.();
@@ -186,4 +195,8 @@ function completionKey(state: CodexCompletionState) {
     state.latestTurnId ?? "unknown",
     state.latestTurnCompletedAt ?? state.updatedAt
   ].join(":");
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }

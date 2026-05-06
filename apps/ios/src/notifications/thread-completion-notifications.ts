@@ -6,6 +6,7 @@ import type { ApiClient } from "../api/client";
 import type { CodexCompletionSummary } from "../types";
 
 const FOREGROUND_COMPLETION_POLL_INTERVAL_MS = 5000;
+const PUSH_REGISTRATION_RETRY_INTERVAL_MS = 30000;
 
 let notificationPermissionPromise: Promise<boolean> | null = null;
 
@@ -35,6 +36,9 @@ export function useThreadCompletionNotifications(api: ApiClient, isEnabled: bool
   const notifiedCompletionKeysRef = useRef(new Set<string>());
   const hasBootstrappedCompletionPollRef = useRef(false);
   const isPollingCompletionsRef = useRef(false);
+  const isRegisteringPushRef = useRef(false);
+  const lastPushRegistrationAttemptAtRef = useRef(0);
+  const lastPushRegistrationWarningRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isEnabled) {
@@ -48,12 +52,39 @@ export function useThreadCompletionNotifications(api: ApiClient, isEnabled: bool
     let cancelled = false;
 
     async function registerForPushNotifications() {
+      if (cancelled || registeredTokenRef.current || isRegisteringPushRef.current) {
+        return;
+      }
+
+      const now = Date.now();
+      if (
+        lastPushRegistrationAttemptAtRef.current > 0 &&
+        now - lastPushRegistrationAttemptAtRef.current < PUSH_REGISTRATION_RETRY_INTERVAL_MS
+      ) {
+        return;
+      }
+
+      lastPushRegistrationAttemptAtRef.current = now;
+      isRegisteringPushRef.current = true;
       try {
         if (!(await ensureNotificationPermission())) {
+          warnPushRegistration(
+            lastPushRegistrationWarningRef,
+            "Remote push notifications are disabled because notification permission was not granted."
+          );
           return;
         }
 
-        const token = await Notifications.getExpoPushTokenAsync(pushTokenOptions());
+        const options = pushTokenOptions();
+        if (!options) {
+          warnPushRegistration(
+            lastPushRegistrationWarningRef,
+            "Remote push notifications are disabled because app.json is missing expo.extra.eas.projectId."
+          );
+          return;
+        }
+
+        const token = await Notifications.getExpoPushTokenAsync(options);
         if (cancelled || registeredTokenRef.current === token.data) {
           return;
         }
@@ -64,8 +95,13 @@ export function useThreadCompletionNotifications(api: ApiClient, isEnabled: bool
           token: token.data
         });
         registeredTokenRef.current = token.data;
-      } catch {
-        // Push registration is best-effort; foreground polling below is a backup.
+      } catch (error) {
+        warnPushRegistration(
+          lastPushRegistrationWarningRef,
+          `Remote push notification registration failed: ${errorMessage(error)}`
+        );
+      } finally {
+        isRegisteringPushRef.current = false;
       }
     }
 
@@ -120,6 +156,7 @@ export function useThreadCompletionNotifications(api: ApiClient, isEnabled: bool
     void registerForPushNotifications();
     void pollCompletionsForForegroundFallback();
     const interval = setInterval(() => {
+      void registerForPushNotifications();
       void pollCompletionsForForegroundFallback();
     }, FOREGROUND_COMPLETION_POLL_INTERVAL_MS);
 
@@ -141,6 +178,15 @@ function pushTokenOptions() {
       : undefined);
 
   return projectId ? { projectId } : undefined;
+}
+
+function warnPushRegistration(ref: { current: string | null }, message: string) {
+  if (ref.current === message) {
+    return;
+  }
+
+  ref.current = message;
+  console.warn(`[notifications] ${message}`);
 }
 
 function shouldNotifyForCompletedTurn(
@@ -209,4 +255,8 @@ async function ensureNotificationPermission() {
     notificationPermissionPromise = null;
     return false;
   }
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }

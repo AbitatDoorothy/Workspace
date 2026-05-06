@@ -39,6 +39,9 @@ const appJson = JSON.parse(await readFile(join(process.cwd(), "app.json"), "utf8
 if (!appJson.expo?.plugins?.includes("expo-notifications")) {
   throw new Error("Expected app.json to include the expo-notifications config plugin");
 }
+if (typeof appJson.expo?.extra?.eas?.projectId !== "string" || !appJson.expo.extra.eas.projectId) {
+  throw new Error("Expected app.json to define expo.extra.eas.projectId for remote push tokens");
+}
 const entitlements = await readFile(join(process.cwd(), "ios/Abitat/Abitat.entitlements"), "utf8");
 if (!entitlements.includes("aps-environment")) {
   throw new Error("Expected the native iOS app to enable remote push notifications");
@@ -118,6 +121,7 @@ for (const expected of [
   "shouldNotifyForCompletedTurn",
   "rememberRunningConversation",
   "useThreadCompletionNotifications",
+  "console.warn",
   "registerPushToken",
   "listCompletionStates"
 ]) {

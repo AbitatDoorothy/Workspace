@@ -20,7 +20,8 @@ void app.prepare().then(() => {
   const stopCodexCompletionNotifier = createCodexCompletionNotifier({
     codexAppService,
     hostMachineId: process.env.ABITAT_MACHINE_ID ?? "machine_demo",
-    mobilePushService: createMobilePushService(mobileService)
+    logger: console,
+    mobilePushService: createMobilePushService(mobileService, { logger: console })
   }).start();
   const server = createServer((req, res) => {
     void handle(req, res);

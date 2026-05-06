@@ -17,6 +17,9 @@ export async function POST(request: Request) {
       registerPushTokenSchema.parseAsync(await request.json())
     ]);
     const subscription = await mobileService.registerPushToken(actor, input);
+    console.info(
+      `[mobile-push] Registered ${subscription.provider} push token for phone ${actor.machineId} paired to host ${actor.hostMachineId ?? "unknown"}.`
+    );
 
     return NextResponse.json({ subscription });
   } catch (error) {
