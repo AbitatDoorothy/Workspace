@@ -5,6 +5,7 @@ import WebSocket from "ws";
 
 import type {
   CodexAppClient,
+  CodexAppStartTurnOptions,
   CodexAppThread,
   CodexAppThreadListParams,
   CodexAppThreadListResponse,
@@ -37,7 +38,9 @@ interface JsonRpcMessage {
 interface CodexAppClientOptions {
   serverUrl?: string;
   codexBinaryPath?: string;
-  desktopRefresh?: false | ((threadId: string) => Promise<void> | void);
+  desktopRefresh?:
+    | false
+    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void);
 }
 
 export function createCodexAppClient(options: CodexAppClientOptions = {}): CodexAppClient {
@@ -89,8 +92,19 @@ export function createCodexAppClient(options: CodexAppClientOptions = {}): Codex
       });
     },
 
-    startTurn(threadId: string, input: CodexAppUserInput[]) {
-      return startTurnWithKeepAlive(serverUrl, codexBinaryPath, threadId, input, desktopRefresh);
+    startTurn(
+      threadId: string,
+      input: CodexAppUserInput[],
+      options: CodexAppStartTurnOptions = {}
+    ) {
+      return startTurnWithKeepAlive(
+        serverUrl,
+        codexBinaryPath,
+        threadId,
+        input,
+        options,
+        desktopRefresh
+      );
     }
   };
 }
@@ -134,17 +148,26 @@ async function startTurnWithKeepAlive(
   codexBinaryPath: string,
   threadId: string,
   input: CodexAppUserInput[],
-  desktopRefresh: ((threadId: string) => Promise<void> | void) | null
+  options: CodexAppStartTurnOptions,
+  desktopRefresh:
+    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
+    | null
 ) {
   try {
-    return await startTurnPreferringDesktopOwnerOnce(serverUrl, threadId, input, desktopRefresh);
+    return await startTurnPreferringDesktopOwnerOnce(
+      serverUrl,
+      threadId,
+      input,
+      options,
+      desktopRefresh
+    );
   } catch (error) {
     if (!isConnectionFailure(error) || !canStartLocalServer(serverUrl)) {
       throw error;
     }
 
     await ensureLocalAppServer(serverUrl, codexBinaryPath);
-    return startTurnPreferringDesktopOwnerOnce(serverUrl, threadId, input, desktopRefresh);
+    return startTurnPreferringDesktopOwnerOnce(serverUrl, threadId, input, options, desktopRefresh);
   }
 }
 
@@ -152,23 +175,27 @@ async function startTurnPreferringDesktopOwnerOnce(
   serverUrl: string,
   threadId: string,
   input: CodexAppUserInput[],
-  desktopRefresh: ((threadId: string) => Promise<void> | void) | null
+  options: CodexAppStartTurnOptions,
+  desktopRefresh:
+    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
+    | null
 ) {
   try {
-    return await startTurnThroughDesktopOwnerOnce(serverUrl, threadId, input);
+    return await startTurnThroughDesktopOwnerOnce(serverUrl, threadId, input, options);
   } catch (error) {
     if (isConnectionFailure(error) || !isDesktopOwnerStartTurnFallbackError(error)) {
       throw error;
     }
 
-    return startTurnWithKeepAliveOnce(serverUrl, threadId, input, desktopRefresh);
+    return startTurnWithKeepAliveOnce(serverUrl, threadId, input, options, desktopRefresh);
   }
 }
 
 async function startTurnThroughDesktopOwnerOnce(
   serverUrl: string,
   threadId: string,
-  input: CodexAppUserInput[]
+  input: CodexAppUserInput[],
+  options: CodexAppStartTurnOptions
 ) {
   const connection = await JsonRpcConnection.connect(serverUrl);
 
@@ -178,10 +205,7 @@ async function startTurnThroughDesktopOwnerOnce(
       "thread-follower-start-turn",
       {
         conversationId: threadId,
-        turnStartParams: {
-          input,
-          threadId
-        }
+        turnStartParams: turnStartParams(threadId, input, options)
       },
       DESKTOP_OWNER_REQUEST_TIMEOUT_MS
     );
@@ -196,21 +220,33 @@ async function startTurnWithKeepAliveOnce(
   serverUrl: string,
   threadId: string,
   input: CodexAppUserInput[],
-  desktopRefresh: ((threadId: string) => Promise<void> | void) | null
+  options: CodexAppStartTurnOptions,
+  desktopRefresh:
+    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
+    | null
 ) {
   const connection = await JsonRpcConnection.connect(serverUrl);
   let keepAliveStarted = false;
 
   try {
     await initializeConnection(connection);
-    const response = await connection.call<{ turn: CodexAppTurn }>("turn/start", {
-      input,
-      threadId
-    });
+    const response = await connection.call<{ turn: CodexAppTurn }>(
+      "turn/start",
+      turnStartParams(threadId, input, options)
+    );
 
-    if (response.turn.status === "inProgress") {
+    if (isTurnInProgress(response.turn)) {
       keepAliveStarted = true;
-      keepTurnConnectionAlive(connection, threadId, response.turn.id, desktopRefresh);
+      keepTurnConnectionAlive(connection, threadId, response.turn.id, options, desktopRefresh);
+    } else if (desktopRefresh) {
+      keepAliveStarted = true;
+      refreshCompletedTurnInBackground(
+        connection,
+        threadId,
+        response.turn.id,
+        options,
+        desktopRefresh
+      );
     }
 
     return response;
@@ -238,7 +274,10 @@ function keepTurnConnectionAlive(
   connection: JsonRpcConnection,
   threadId: string,
   turnId: string,
-  desktopRefresh: ((threadId: string) => Promise<void> | void) | null
+  options: CodexAppStartTurnOptions,
+  desktopRefresh:
+    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
+    | null
 ) {
   let removeNotificationHandler: () => void = () => undefined;
   let removeCloseHandler: () => void = () => undefined;
@@ -258,20 +297,77 @@ function keepTurnConnectionAlive(
     clearTimeout(timer);
     removeNotificationHandler();
     removeCloseHandler();
-    if (desktopRefresh) {
-      try {
-        await waitForTurnBackfill(connection, threadId, turnId);
-        await desktopRefresh(threadId);
-      } catch {
-        // Desktop refresh is best-effort; the phone reply has already been persisted.
-      }
-    }
+    await refreshAfterTurnBackfill(connection, threadId, turnId, options, desktopRefresh);
     connection.close();
     activeTurnKeepAlives.delete(keepAlive);
   });
 
   activeTurnKeepAlives.add(keepAlive);
   void keepAlive;
+}
+
+function refreshCompletedTurnInBackground(
+  connection: JsonRpcConnection,
+  threadId: string,
+  turnId: string,
+  options: CodexAppStartTurnOptions,
+  desktopRefresh: (threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void
+) {
+  const refresh = refreshAfterTurnBackfill(
+    connection,
+    threadId,
+    turnId,
+    options,
+    desktopRefresh
+  ).finally(() => {
+    connection.close();
+    activeTurnKeepAlives.delete(refresh);
+  });
+
+  activeTurnKeepAlives.add(refresh);
+  void refresh;
+}
+
+async function refreshAfterTurnBackfill(
+  connection: JsonRpcConnection,
+  threadId: string,
+  turnId: string,
+  options: CodexAppStartTurnOptions,
+  desktopRefresh:
+    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
+    | null
+) {
+  if (!desktopRefresh) {
+    return;
+  }
+
+  try {
+    await waitForTurnBackfill(connection, threadId, turnId);
+    await desktopRefresh(threadId, options);
+  } catch {
+    // Desktop refresh is best-effort; the phone reply has already been persisted.
+  }
+}
+
+function turnStartParams(
+  threadId: string,
+  input: CodexAppUserInput[],
+  options: CodexAppStartTurnOptions
+) {
+  return {
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    input,
+    threadId
+  };
+}
+
+function isTurnInProgress(turn: CodexAppTurn) {
+  return (
+    turn.status === "inProgress" ||
+    (!!turn.status &&
+      typeof turn.status === "object" &&
+      (turn.status as { type?: unknown }).type === "inProgress")
+  );
 }
 
 function isTurnFinishedNotification(
@@ -598,7 +694,7 @@ async function refreshCodexDesktopThread(threadId: string) {
   await delay(500);
   await openCodexDeepLink("codex://settings");
   await delay(500);
-  await openCodexDeepLink(`codex://threads/${encodeURIComponent(threadId)}`);
+  await openCodexDeepLink(`codex://local/${encodeURIComponent(threadId)}`);
 }
 
 function openCodexDeepLink(url: string) {

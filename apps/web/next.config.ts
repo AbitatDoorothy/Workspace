@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
+import { allowedDevOriginsFromEnv } from "./lib/allowed-dev-origins";
+
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["workspace.abitat.io"],
+  allowedDevOrigins: allowedDevOriginsFromEnv(),
   transpilePackages: ["@abitat/shared"]
 };
 

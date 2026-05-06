@@ -307,4 +307,45 @@ describe("mobile service", () => {
       })
     ).rejects.toThrow("Invalid Expo push token");
   });
+
+  it("records push registration diagnostics on the paired phone", async () => {
+    const db = createMobileDb();
+    db.state.machines.set("machine_phone", {
+      id: "machine_phone",
+      workspaceId: "workspace_demo",
+      name: "Reece iPhone",
+      type: "client",
+      status: "online",
+      tokenHash: hashMobileToken("client_secret"),
+      pairedHostMachineId: "machine_demo",
+      deviceKind: "phone",
+      platform: "ios",
+      capabilitiesJson: ["mobile_chat", "remote_control"]
+    });
+    const service = createMobileService(db, {
+      now: () => new Date("2026-05-05T10:45:00.000Z")
+    });
+    const actor = await service.requireMobileActor("client_secret");
+
+    await expect(
+      service.recordPushRegistrationDiagnostic(actor, {
+        message: "Expo push token request timed out after 10 seconds",
+        stage: "expo-token"
+      })
+    ).resolves.toEqual({
+      message: "Expo push token request timed out after 10 seconds",
+      reportedAt: "2026-05-05T10:45:00.000Z",
+      stage: "expo-token"
+    });
+
+    expect(db.state.machines.get("machine_phone")?.capabilitiesJson).toMatchObject({
+      features: ["mobile_chat", "remote_control"],
+      lastPushRegistrationDiagnostic: {
+        message: "Expo push token request timed out after 10 seconds",
+        reportedAt: "2026-05-05T10:45:00.000Z",
+        stage: "expo-token"
+      },
+      pushSubscriptions: []
+    });
+  });
 });

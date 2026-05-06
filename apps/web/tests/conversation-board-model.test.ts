@@ -65,7 +65,7 @@ describe("conversation board model", () => {
       conversationCodexAppHref({
         runtimeSessionId: "thread_demo"
       })
-    ).toBe("codex://threads/thread_demo");
+    ).toBe("codex://local/thread_demo");
     expect(
       canManageConversationCard({
         source: "codex_app"

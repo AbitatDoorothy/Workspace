@@ -104,6 +104,10 @@ export interface CodexAppThreadListResponse {
   backwardsCursor: string | null;
 }
 
+export interface CodexAppStartTurnOptions {
+  cwd?: string | null;
+}
+
 export interface CodexAppClient {
   listThreads(params?: CodexAppThreadListParams): Promise<CodexAppThreadListResponse>;
   readThread(threadId: string, includeTurns?: boolean): Promise<CodexAppThread>;
@@ -116,7 +120,11 @@ export interface CodexAppClient {
     experimentalRawEvents?: boolean;
     persistExtendedHistory?: boolean;
   }): Promise<{ thread: CodexAppThread }>;
-  startTurn(threadId: string, input: CodexAppUserInput[]): Promise<{ turn: CodexAppTurn }>;
+  startTurn(
+    threadId: string,
+    input: CodexAppUserInput[],
+    options?: CodexAppStartTurnOptions
+  ): Promise<{ turn: CodexAppTurn }>;
 }
 
 export interface CodexAppProjectSummary {
@@ -313,7 +321,7 @@ export function createCodexAppService(
         experimentalRawEvents: false,
         persistExtendedHistory: true
       });
-      await client.startTurn(thread.id, textInput(prompt));
+      await client.startTurn(thread.id, textInput(prompt), { cwd });
 
       return {
         conversationId: externalCodexConversationId(thread.id),
@@ -346,14 +354,14 @@ export function createCodexAppService(
       }
 
       try {
-        await client.startTurn(threadId, textInput(prompt));
+        await client.startTurn(threadId, textInput(prompt), { cwd: thread.cwd });
       } catch (error) {
         if (!isThreadNotFoundError(error, threadId)) {
           throw error;
         }
 
         await resumeThread();
-        await client.startTurn(threadId, textInput(prompt));
+        await client.startTurn(threadId, textInput(prompt), { cwd: thread.cwd });
       }
 
       return {
@@ -391,7 +399,7 @@ export function toCodexThreadId(conversationId: string) {
 }
 
 export function codexAppDeepLink(threadId: string) {
-  return `codex://threads/${encodeURIComponent(threadId)}`;
+  return `codex://local/${encodeURIComponent(threadId)}`;
 }
 
 export function codexThreadToConversation(

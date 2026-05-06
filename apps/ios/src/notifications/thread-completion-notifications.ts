@@ -7,6 +7,7 @@ import type { CodexCompletionSummary } from "../types";
 
 const FOREGROUND_COMPLETION_POLL_INTERVAL_MS = 5000;
 const PUSH_REGISTRATION_RETRY_INTERVAL_MS = 30000;
+const PUSH_TOKEN_TIMEOUT_MS = 10000;
 
 let notificationPermissionPromise: Promise<boolean> | null = null;
 
@@ -68,8 +69,10 @@ export function useThreadCompletionNotifications(api: ApiClient, isEnabled: bool
       isRegisteringPushRef.current = true;
       try {
         if (!(await ensureNotificationPermission())) {
-          warnPushRegistration(
+          await warnAndReportPushRegistration(
             lastPushRegistrationWarningRef,
+            api,
+            "permission",
             "Remote push notifications are disabled because notification permission was not granted."
           );
           return;
@@ -77,27 +80,57 @@ export function useThreadCompletionNotifications(api: ApiClient, isEnabled: bool
 
         const options = pushTokenOptions();
         if (!options) {
-          warnPushRegistration(
+          await warnAndReportPushRegistration(
             lastPushRegistrationWarningRef,
+            api,
+            "project-id",
             "Remote push notifications are disabled because app.json is missing expo.extra.eas.projectId."
           );
           return;
         }
 
-        const token = await Notifications.getExpoPushTokenAsync(options);
+        let token: Notifications.ExpoPushToken;
+        try {
+          token = await withPushRegistrationTimeout(
+            Notifications.getExpoPushTokenAsync(options),
+            PUSH_TOKEN_TIMEOUT_MS
+          );
+        } catch (error) {
+          await warnAndReportPushRegistration(
+            lastPushRegistrationWarningRef,
+            api,
+            "expo-token",
+            `Remote push token request failed: ${errorMessage(error)}`
+          );
+          return;
+        }
+
         if (cancelled || registeredTokenRef.current === token.data) {
           return;
         }
 
-        await api.registerPushToken({
-          platform: "ios",
-          provider: "expo",
-          token: token.data
-        });
+        try {
+          await api.registerPushToken({
+            platform: "ios",
+            provider: "expo",
+            token: token.data
+          });
+        } catch (error) {
+          await warnAndReportPushRegistration(
+            lastPushRegistrationWarningRef,
+            api,
+            "server-register",
+            `Remote push token server registration failed: ${errorMessage(error)}`
+          );
+          return;
+        }
+
         registeredTokenRef.current = token.data;
       } catch (error) {
-        warnPushRegistration(
+        await warnAndReportPushRegistration(
           lastPushRegistrationWarningRef,
+          api,
+          "unexpected",
           `Remote push notification registration failed: ${errorMessage(error)}`
         );
       } finally {
@@ -189,6 +222,21 @@ function warnPushRegistration(ref: { current: string | null }, message: string) 
   console.warn(`[notifications] ${message}`);
 }
 
+async function warnAndReportPushRegistration(
+  ref: { current: string | null },
+  api: ApiClient,
+  stage: string,
+  message: string
+) {
+  warnPushRegistration(ref, message);
+
+  try {
+    await api.reportPushRegistrationIssue({ message, stage });
+  } catch {
+    // Diagnostics should never block foreground polling or the next registration retry.
+  }
+}
+
 function shouldNotifyForCompletedTurn(
   state: CodexCompletionSummary,
   previous: CompletionSnapshot | undefined
@@ -255,6 +303,24 @@ async function ensureNotificationPermission() {
     notificationPermissionPromise = null;
     return false;
   }
+}
+
+function withPushRegistrationTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`Expo push token request timed out after ${timeoutMs / 1000} seconds`));
+    }, timeoutMs);
+  });
+
+  return Promise.race([
+    promise.finally(() => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }),
+    timeoutPromise
+  ]);
 }
 
 function errorMessage(error: unknown) {

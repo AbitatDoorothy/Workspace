@@ -29,11 +29,23 @@ describe("iPhone dev launcher", () => {
     });
 
     expect(env).toMatchObject({
+      ABITAT_MACHINE_ID: "machine_demo",
       ABITAT_PUBLIC_URL: "http://192.168.1.44:3000",
       CODEX_APP_SERVER_URL: "ws://127.0.0.1:47777",
       HOSTNAME: "0.0.0.0",
       PORT: "3000"
     });
+  });
+
+  it("falls back to the demo host when .env.local has a blank machine id", () => {
+    const env = createLauncherEnv({
+      baseEnv: {
+        ABITAT_MACHINE_ID: ""
+      },
+      lanAddress: "192.168.1.44"
+    });
+
+    expect(env.ABITAT_MACHINE_ID).toBe("machine_demo");
   });
 
   it("keeps explicit user overrides for public URL and ports", () => {

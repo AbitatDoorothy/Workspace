@@ -1,5 +1,4 @@
 import { createServer } from "node:http";
-import { parse } from "node:url";
 import next from "next";
 
 import { codexAppService } from "./server/codex-app";
@@ -7,6 +6,7 @@ import { createCodexCompletionNotifier } from "./server/mobile/codex-completion-
 import { mobileService } from "./server/mobile";
 import { createMobilePushService } from "./server/mobile/mobile-push-service";
 import { createTerminalWss, handleTerminalUpgrade } from "./server/terminal/terminal-relay";
+import { isTerminalUpgradePath } from "./server/terminal/upgrade-path";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOSTNAME ?? "127.0.0.1";
@@ -28,9 +28,7 @@ void app.prepare().then(() => {
   });
 
   server.on("upgrade", (request, socket, head) => {
-    const pathname = parse(request.url ?? "").pathname ?? "";
-
-    if (pathname.startsWith("/api/conversations/") && pathname.endsWith("/terminal")) {
+    if (isTerminalUpgradePath(request.url)) {
       void handleTerminalUpgrade(request, socket, head, wss);
       return;
     }

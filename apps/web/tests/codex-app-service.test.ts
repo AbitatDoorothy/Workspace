@@ -34,7 +34,7 @@ function createThread(input: Partial<CodexAppThread> & Pick<CodexAppThread, "id"
 
 interface FakeCodexAppClient extends CodexAppClient {
   resumedThreads: string[];
-  startedTurns: Array<{ threadId: string; input: string }>;
+  startedTurns: Array<{ threadId: string; cwd?: string | null; input: string }>;
   startedThreads: string[];
   resumeThread(params: {
     threadId: string;
@@ -44,10 +44,10 @@ interface FakeCodexAppClient extends CodexAppClient {
 
 function createFakeClient(
   threads: CodexAppThread[],
-  options: { rejectUnloadedTurns?: boolean } = {}
+  clientOptions: { rejectUnloadedTurns?: boolean } = {}
 ): FakeCodexAppClient {
   const resumedThreads: string[] = [];
-  const startedTurns: Array<{ threadId: string; input: string }> = [];
+  const startedTurns: Array<{ threadId: string; cwd?: string | null; input: string }> = [];
   const startedThreads: string[] = [];
 
   return {
@@ -91,9 +91,9 @@ function createFakeClient(
       resumedThreads.push(params.threadId);
       return { thread };
     },
-    async startTurn(threadId, input) {
+    async startTurn(threadId, input, options) {
       const thread = threads.find((candidate) => candidate.id === threadId);
-      if (options.rejectUnloadedTurns && thread?.status.type === "notLoaded") {
+      if (clientOptions.rejectUnloadedTurns && thread?.status.type === "notLoaded") {
         throw new Error(`thread not found: ${threadId}`);
       }
 
@@ -104,7 +104,7 @@ function createFakeClient(
         .map((item) => item.text)
         .join("\n");
 
-      startedTurns.push({ input: text, threadId });
+      startedTurns.push({ cwd: options?.cwd, input: text, threadId });
       return {
         turn: {
           completedAt: null,
@@ -416,8 +416,8 @@ describe("Codex app service", () => {
     });
     expect(client.startedThreads).toEqual([cwd]);
     expect(client.startedTurns).toEqual([
-      { input: "Start from my phone", threadId: "thread_new" },
-      { input: "Keep going from iPhone", threadId: "thread_a" }
+      { cwd, input: "Start from my phone", threadId: "thread_new" },
+      { cwd, input: "Keep going from iPhone", threadId: "thread_a" }
     ]);
   });
 
@@ -446,7 +446,7 @@ describe("Codex app service", () => {
     });
     expect(client.resumedThreads).toEqual(["thread_a"]);
     expect(client.startedTurns).toEqual([
-      { input: "Keep going after loading", threadId: "thread_a" }
+      { cwd, input: "Keep going after loading", threadId: "thread_a" }
     ]);
   });
 
@@ -474,6 +474,6 @@ describe("Codex app service", () => {
     expect(isCodexProjectId(externalCodexProjectId("/tmp/example"))).toBe(true);
     expect(isCodexConversationId(externalCodexConversationId("thread_a"))).toBe(true);
     expect(toCodexThreadId(externalCodexConversationId("thread_a"))).toBe("thread_a");
-    expect(codexAppDeepLink("thread_a")).toBe("codex://threads/thread_a");
+    expect(codexAppDeepLink("thread_a")).toBe("codex://local/thread_a");
   });
 });

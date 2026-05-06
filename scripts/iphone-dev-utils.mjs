@@ -2,6 +2,7 @@ import net from "node:net";
 
 export const DEFAULT_CODEX_APP_SERVER_URL = "ws://127.0.0.1:47777";
 export const DEFAULT_IPHONE_LOGIN_PASSWORD = "abitat-local";
+export const DEFAULT_MACHINE_ID = "machine_demo";
 export const DEFAULT_WEB_HOST = "0.0.0.0";
 export const DEFAULT_WEB_PORT = "3000";
 
@@ -50,6 +51,7 @@ export function createLauncherEnv({ baseEnv, lanAddress }) {
 
   return {
     ...baseEnv,
+    ABITAT_MACHINE_ID: nonEmptyValue(baseEnv.ABITAT_MACHINE_ID) ?? DEFAULT_MACHINE_ID,
     ABITAT_PUBLIC_URL: publicUrl,
     CODEX_APP_SERVER_URL: codexServerUrl,
     HOSTNAME: baseEnv.ABITAT_WEB_HOST ?? DEFAULT_WEB_HOST,
@@ -161,6 +163,10 @@ function isReachableIPv4(address) {
 
 function isIPv4(address) {
   return address.family === "IPv4" || address.family === 4;
+}
+
+function nonEmptyValue(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
 function interfaceRank(name, preferredNames) {

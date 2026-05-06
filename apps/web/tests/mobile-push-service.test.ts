@@ -175,6 +175,34 @@ describe("mobile push service", () => {
 
     expect(pushed).toEqual(["codex_thread_thread_1:turn_1"]);
   });
+
+  it("uses the demo host when the configured notifier host is blank", async () => {
+    const pushedHosts: string[] = [];
+    const notifier = createCodexCompletionNotifier({
+      codexAppService: {
+        listCompletionStates: async () => [
+          completionState({
+            latestTurnCompletedAt: "2026-05-05T12:00:02.000Z",
+            latestTurnId: "turn_1",
+            status: "approved",
+            updatedAt: "2026-05-05T12:00:02.000Z"
+          })
+        ]
+      },
+      hostMachineId: "",
+      mobilePushService: {
+        sendCodexThreadDone: async (input) => {
+          pushedHosts.push(input.hostMachineId);
+          return 1;
+        }
+      },
+      now: () => new Date("2026-05-05T12:00:00.000Z")
+    });
+
+    await notifier.pollOnce();
+
+    expect(pushedHosts).toEqual(["machine_demo"]);
+  });
 });
 
 function completionState(input: Partial<CodexCompletionState> = {}): CodexCompletionState {

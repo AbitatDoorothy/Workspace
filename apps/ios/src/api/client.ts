@@ -32,6 +32,7 @@ export interface ApiClient {
   listProjects(): Promise<ProjectSummary[]>;
   listRemoteSignals(sessionId: string): Promise<RemoteControlSignal[]>;
   registerPushToken(input: { platform: "ios"; provider: "expo"; token: string }): Promise<void>;
+  reportPushRegistrationIssue(input: { message: string; stage: string }): Promise<void>;
   sendRemoteSignal(
     sessionId: string,
     input: { type: string; payload: Record<string, unknown>; recipientMachineId?: string }
@@ -98,6 +99,8 @@ export function createApiClient(pairing: PairingState): ApiClient {
       ),
     registerPushToken: (input) =>
       post(pairing, "/api/mobile/notifications/register", input).then(() => undefined),
+    reportPushRegistrationIssue: (input) =>
+      post(pairing, "/api/mobile/notifications/diagnostics", input).then(() => undefined),
     sendRemoteSignal: (sessionId, input) =>
       post(pairing, `/api/remote-control/sessions/${sessionId}/signals`, input).then(
         () => undefined

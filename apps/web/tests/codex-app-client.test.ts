@@ -159,11 +159,19 @@ describe("Codex app client", () => {
         });
       }
     });
-    const client = createCodexAppClient({ codexBinaryPath: "/unused", serverUrl });
+    const client = createCodexAppClient({
+      codexBinaryPath: "/unused",
+      desktopRefresh: false,
+      serverUrl
+    });
 
-    const response = await client.startTurn("thread_1", [
-      { text: "hello from phone", text_elements: [], type: "text" }
-    ]);
+    const response = await client.startTurn(
+      "thread_1",
+      [{ text: "hello from phone", text_elements: [], type: "text" }],
+      {
+        cwd: "/Users/reece/Desktop/Abitat_Workspace"
+      }
+    );
 
     expect(response.turn.id).toBe("turn_owner");
     expect(methods).toContain("thread-follower-start-turn");
@@ -171,6 +179,7 @@ describe("Codex app client", () => {
     expect(followerParams).toEqual({
       conversationId: "thread_1",
       turnStartParams: {
+        cwd: "/Users/reece/Desktop/Abitat_Workspace",
         input: [{ text: "hello from phone", text_elements: [], type: "text" }],
         threadId: "thread_1"
       }
@@ -179,6 +188,7 @@ describe("Codex app client", () => {
 
   it("falls back to raw app-server turns when there is no desktop owner", async () => {
     const methods: string[] = [];
+    let rawTurnParams: Record<string, unknown> | null = null;
     const { serverUrl } = await startMockCodexAppServer((socket, message) => {
       if (message.method) {
         methods.push(message.method);
@@ -193,6 +203,7 @@ describe("Codex app client", () => {
       }
 
       if (message.method === "turn/start") {
+        rawTurnParams = message.params as Record<string, unknown>;
         sendResult(socket, message.id, {
           turn: {
             completedAt: null,
@@ -206,13 +217,26 @@ describe("Codex app client", () => {
         });
       }
     });
-    const client = createCodexAppClient({ codexBinaryPath: "/unused", serverUrl });
+    const client = createCodexAppClient({
+      codexBinaryPath: "/unused",
+      desktopRefresh: false,
+      serverUrl
+    });
 
-    const response = await client.startTurn("thread_1", [
-      { text: "hello from phone", text_elements: [], type: "text" }
-    ]);
+    const response = await client.startTurn(
+      "thread_1",
+      [{ text: "hello from phone", text_elements: [], type: "text" }],
+      {
+        cwd: "/Users/reece/Desktop/Abitat_Workspace"
+      }
+    );
 
     expect(response.turn.id).toBe("turn_raw");
+    expect(rawTurnParams).toEqual({
+      cwd: "/Users/reece/Desktop/Abitat_Workspace",
+      input: [{ text: "hello from phone", text_elements: [], type: "text" }],
+      threadId: "thread_1"
+    });
     expect(methods).toEqual([
       "initialize",
       "initialized",
@@ -220,6 +244,68 @@ describe("Codex app client", () => {
       "initialize",
       "initialized",
       "turn/start"
+    ]);
+  });
+
+  it("refreshes the Codex desktop thread after an immediately completed raw turn", async () => {
+    const refreshes: Array<{ cwd?: string | null; threadId: string }> = [];
+    let resolveClosed: () => void = () => undefined;
+    const closed = new Promise<void>((resolve) => {
+      resolveClosed = resolve;
+    });
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread-follower-start-turn") {
+        sendError(socket, message.id, "thread-follower-start-turn-timeout");
+      }
+
+      if (message.method === "turn/start") {
+        socket.once("close", resolveClosed);
+        sendResult(socket, message.id, {
+          turn: {
+            completedAt: 1_778_000_005,
+            durationMs: 5000,
+            error: null,
+            id: "turn_completed",
+            items: [{ id: "item_agent", text: "done", type: "agentMessage" }],
+            startedAt: 1_778_000_000,
+            status: "completed"
+          }
+        });
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          thread: {
+            turns: [
+              {
+                id: "turn_completed",
+                items: [{ id: "item_agent", text: "done", type: "agentMessage" }],
+                status: "completed"
+              }
+            ]
+          }
+        });
+      }
+    });
+    const client = createCodexAppClient({
+      codexBinaryPath: "/unused",
+      desktopRefresh: (threadId: string, options?: { cwd?: string | null }) => {
+        refreshes.push({ cwd: options?.cwd, threadId });
+      },
+      serverUrl
+    });
+
+    await client.startTurn("thread_1", [{ text: "hello", text_elements: [], type: "text" }], {
+      cwd: "/Users/reece/Desktop/Abitat_Workspace"
+    });
+    await closed;
+
+    expect(refreshes).toEqual([
+      { cwd: "/Users/reece/Desktop/Abitat_Workspace", threadId: "thread_1" }
     ]);
   });
 
@@ -256,7 +342,11 @@ describe("Codex app client", () => {
         });
       }
     });
-    const client = createCodexAppClient({ codexBinaryPath: "/unused", serverUrl });
+    const client = createCodexAppClient({
+      codexBinaryPath: "/unused",
+      desktopRefresh: false,
+      serverUrl
+    });
 
     const response = await client.startTurn("thread_1", [
       { text: "hello from phone", text_elements: [], type: "text" }
@@ -276,7 +366,7 @@ describe("Codex app client", () => {
   it("refreshes the Codex desktop thread after a started turn completes", async () => {
     let activeSocket: WebSocket | undefined;
     const methods: string[] = [];
-    const refreshes: string[] = [];
+    const refreshes: Array<{ cwd?: string | null; threadId: string }> = [];
     let resolveClosed: () => void = () => undefined;
     const closed = new Promise<void>((resolve) => {
       resolveClosed = resolve;
@@ -326,13 +416,15 @@ describe("Codex app client", () => {
     });
     const client = createCodexAppClient({
       codexBinaryPath: "/unused",
-      desktopRefresh: (threadId) => {
-        refreshes.push(threadId);
+      desktopRefresh: (threadId: string, options?: { cwd?: string | null }) => {
+        refreshes.push({ cwd: options?.cwd, threadId });
       },
       serverUrl
     });
 
-    await client.startTurn("thread_1", [{ text: "hello", text_elements: [], type: "text" }]);
+    await client.startTurn("thread_1", [{ text: "hello", text_elements: [], type: "text" }], {
+      cwd: "/Users/reece/Desktop/Abitat_Workspace"
+    });
     await delay(50);
 
     expect(refreshes).toEqual([]);
@@ -351,7 +443,9 @@ describe("Codex app client", () => {
     );
     await closed;
 
-    expect(refreshes).toEqual(["thread_1"]);
+    expect(refreshes).toEqual([
+      { cwd: "/Users/reece/Desktop/Abitat_Workspace", threadId: "thread_1" }
+    ]);
     expect(methods).toContain("thread/read");
   });
 });

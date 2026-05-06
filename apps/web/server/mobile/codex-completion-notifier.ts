@@ -53,11 +53,13 @@ interface CompletionSnapshot {
 }
 
 const DEFAULT_COMPLETION_POLL_INTERVAL_MS = 5_000;
+const DEFAULT_HOST_MACHINE_ID = "machine_demo";
 
 export function createCodexCompletionNotifier(options: CodexCompletionNotifierOptions) {
   const snapshots = new Map<string, CompletionSnapshot>();
   const notifiedCompletionKeys = new Set<string>();
   const startedAtMs = (options.now ?? (() => new Date()))().getTime();
+  const hostMachineId = normalizeHostMachineId(options.hostMachineId);
   let hasBootstrapped = false;
   let isPolling = false;
 
@@ -78,7 +80,7 @@ export function createCodexCompletionNotifier(options: CodexCompletionNotifierOp
             await options.mobilePushService.sendCodexThreadDone({
               conversationId: state.conversationId,
               failed: state.failed,
-              hostMachineId: options.hostMachineId,
+              hostMachineId,
               projectId: state.projectId,
               prompt: state.prompt,
               source: state.source,
@@ -108,7 +110,7 @@ export function createCodexCompletionNotifier(options: CodexCompletionNotifierOp
           await options.mobilePushService.sendCodexThreadDone({
             conversationId: state.conversationId,
             failed: state.failed,
-            hostMachineId: options.hostMachineId,
+            hostMachineId,
             projectId: state.projectId,
             prompt: state.prompt,
             source: state.source,
@@ -151,6 +153,10 @@ export function createCodexCompletionNotifier(options: CodexCompletionNotifierOp
     pollOnce,
     start
   };
+}
+
+function normalizeHostMachineId(hostMachineId: string) {
+  return hostMachineId.trim() || DEFAULT_HOST_MACHINE_ID;
 }
 
 function shouldNotifyForCompletion(
