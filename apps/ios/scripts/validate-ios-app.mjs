@@ -136,6 +136,8 @@ for (const expected of [
   "registerPushToken",
   "reportPushRegistrationIssue",
   "withPushRegistrationTimeout",
+  "allowSound",
+  "interruptionLevel",
   "listCompletionStates"
 ]) {
   if (!notificationWatcher.includes(expected)) {

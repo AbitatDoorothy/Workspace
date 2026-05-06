@@ -55,6 +55,8 @@ describe("mobile push service", () => {
             source: "codex_app",
             turnId: "turn_1"
           },
+          interruptionLevel: "time-sensitive",
+          priority: "high",
           sound: "default",
           title: "Codex thread done",
           to: "ExpoPushToken[test-token]"
@@ -92,6 +94,8 @@ describe("mobile push service", () => {
             source: "codex_app",
             turnId: "turn_1"
           },
+          interruptionLevel: "time-sensitive",
+          priority: "high",
           sound: "default",
           title: "Codex thread done",
           to: "ExpoPushToken[test-token]"

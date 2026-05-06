@@ -280,6 +280,8 @@ async function sendForegroundThreadDoneNotification(state: CodexCompletionSummar
         source: state.source,
         turnId: state.latestTurnId ?? "unknown"
       },
+      interruptionLevel: "timeSensitive",
+      sound: "default",
       title: `Codex thread ${state.failed ? "failed" : "done"}`
     },
     trigger: null
@@ -293,7 +295,13 @@ async function ensureNotificationPermission() {
       return true;
     }
 
-    const requested = await Notifications.requestPermissionsAsync();
+    const requested = await Notifications.requestPermissionsAsync({
+      ios: {
+        allowAlert: true,
+        allowBadge: false,
+        allowSound: true
+      }
+    });
     return requested.granted;
   })();
 

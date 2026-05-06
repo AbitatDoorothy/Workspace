@@ -10,6 +10,8 @@ interface MobilePushLogger {
 export interface MobilePushMessage {
   body: string;
   data: Record<string, string>;
+  interruptionLevel: "time-sensitive";
+  priority: "high";
   sound: "default";
   title: string;
   to: string;
@@ -60,6 +62,8 @@ export function createMobilePushService(
             source: input.source,
             turnId: input.turnId
           },
+          interruptionLevel: "time-sensitive" as const,
+          priority: "high" as const,
           sound: "default" as const,
           title: `Codex thread ${input.failed ? "failed" : "done"}`,
           to: subscription.token
