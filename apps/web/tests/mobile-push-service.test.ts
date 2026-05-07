@@ -12,6 +12,7 @@ import {
 
 describe("mobile push service", () => {
   it("sends Codex completion pushes through registered Expo tokens", async () => {
+    const activityEvents: Array<{ details?: Record<string, unknown>; event: string }> = [];
     const sent: unknown[][] = [];
     const transport: MobilePushTransport = {
       send: async (messages) => {
@@ -29,7 +30,14 @@ describe("mobile push service", () => {
           }
         ]
       },
-      { transport }
+      {
+        activityLog: {
+          record: (event, details) => {
+            activityEvents.push({ details, event });
+          }
+        },
+        transport
+      }
     );
 
     await expect(
@@ -63,6 +71,71 @@ describe("mobile push service", () => {
         })
       ]
     ]);
+    expect(activityEvents).toEqual(
+      expect.arrayContaining([
+        {
+          details: expect.objectContaining({
+            conversationId: "codex_thread_thread_1",
+            expoSubscriptionCount: 1,
+            hostMachineId: "machine_demo",
+            subscriptionCount: 1,
+            turnId: "turn_1",
+            workspaceId: "workspace_demo"
+          }),
+          event: "mobile_push_subscriptions_loaded"
+        },
+        {
+          details: expect.objectContaining({
+            conversationId: "codex_thread_thread_1",
+            messageCount: 1,
+            turnId: "turn_1"
+          }),
+          event: "mobile_push_notification_sent"
+        }
+      ])
+    );
+  });
+
+  it("records when a Codex completion push has no registered phone subscriptions", async () => {
+    const activityEvents: Array<{ details?: Record<string, unknown>; event: string }> = [];
+    const service = createMobilePushService(
+      {
+        listPushSubscriptionsForHost: async () => []
+      },
+      {
+        activityLog: {
+          record: (event, details) => {
+            activityEvents.push({ details, event });
+          }
+        }
+      }
+    );
+
+    await expect(
+      service.sendCodexThreadDone({
+        conversationId: "codex_thread_thread_1",
+        failed: false,
+        hostMachineId: "machine_demo",
+        projectId: "codex_project_project_1",
+        prompt: "Fix the notifications",
+        source: "codex_app",
+        turnId: "turn_1",
+        workspaceId: "workspace_demo"
+      })
+    ).resolves.toBe(0);
+
+    expect(activityEvents).toEqual(
+      expect.arrayContaining([
+        {
+          details: expect.objectContaining({
+            conversationId: "codex_thread_thread_1",
+            reason: "no_expo_subscriptions",
+            turnId: "turn_1"
+          }),
+          event: "mobile_push_notification_skipped"
+        }
+      ])
+    );
   });
 
   it("rejects Expo push ticket errors returned in successful HTTP responses", async () => {
@@ -242,13 +315,106 @@ describe("mobile push service", () => {
       { attempt: 2, turnId: "turn_1" }
     ]);
   });
+
+  it("does not send a failed push for cancelled turns before a new Mac-started turn finishes", async () => {
+    const activityEvents: Array<{ details?: Record<string, unknown>; event: string }> = [];
+    const pushed: Array<{ failed: boolean; status: string; turnId: string }> = [];
+    let states: CodexCompletionState[] = [
+      completionState({
+        isComplete: false,
+        latestTurnCompletedAt: null,
+        latestTurnId: "turn_cancelled",
+        status: "running",
+        updatedAt: "2026-05-05T12:00:01.000Z"
+      })
+    ];
+    const notifier = createCodexCompletionNotifier({
+      codexAppService: {
+        listCompletionStates: async () => states
+      },
+      hostMachineId: "machine_demo",
+      activityLog: {
+        record: (event, details) => {
+          activityEvents.push({ details, event });
+        }
+      },
+      mobilePushService: {
+        sendCodexThreadDone: async (input) => {
+          const state = states.find((candidate) => candidate.latestTurnId === input.turnId);
+          pushed.push({
+            failed: input.failed,
+            status: state?.status ?? "unknown",
+            turnId: input.turnId
+          });
+          return 1;
+        }
+      },
+      now: () => new Date("2026-05-05T12:00:00.000Z")
+    });
+
+    await notifier.pollOnce();
+    states = [
+      completionState({
+        failed: true,
+        isComplete: true,
+        latestTurnCompletedAt: "2026-05-05T12:00:04.000Z",
+        latestTurnId: "turn_cancelled",
+        status: "cancelled",
+        updatedAt: "2026-05-05T12:00:04.000Z"
+      })
+    ];
+    await notifier.pollOnce();
+    states = [
+      completionState({
+        isComplete: false,
+        latestTurnCompletedAt: null,
+        latestTurnId: "turn_done",
+        status: "running",
+        updatedAt: "2026-05-05T12:00:06.000Z"
+      })
+    ];
+    await notifier.pollOnce();
+    states = [
+      completionState({
+        failed: false,
+        isComplete: true,
+        latestTurnCompletedAt: "2026-05-05T12:00:12.000Z",
+        latestTurnId: "turn_done",
+        status: "approved",
+        updatedAt: "2026-05-05T12:00:12.000Z"
+      })
+    ];
+    await notifier.pollOnce();
+
+    expect(pushed).toEqual([{ failed: false, status: "approved", turnId: "turn_done" }]);
+    expect(activityEvents).toEqual(
+      expect.arrayContaining([
+        {
+          details: expect.objectContaining({
+            conversationId: "codex_thread_thread_1",
+            reason: "cancelled",
+            turnId: "turn_cancelled"
+          }),
+          event: "codex_completion_notification_skipped"
+        },
+        {
+          details: expect.objectContaining({
+            conversationId: "codex_thread_thread_1",
+            sentCount: 1,
+            turnId: "turn_done"
+          }),
+          event: "codex_completion_notification_sent"
+        }
+      ])
+    );
+  });
 });
 
 function completionState(input: Partial<CodexCompletionState> = {}): CodexCompletionState {
   return {
     conversationId: "codex_thread_thread_1",
-    failed: false,
-    isComplete: Boolean(input.latestTurnCompletedAt),
+    failed: input.failed ?? false,
+    isComplete: input.isComplete ?? Boolean(input.latestTurnCompletedAt),
     latestTurnCompletedAt: input.latestTurnCompletedAt ?? null,
     latestTurnId: input.latestTurnId ?? "turn_1",
     projectId: "codex_project_project_1",

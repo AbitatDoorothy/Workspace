@@ -21,12 +21,29 @@ export function ProjectDetailScreen({ api, onConversation, project }: ProjectDet
   const [isStarting, setIsStarting] = useState(false);
 
   useEffect(() => {
-    api
-      .listConversations(project.id)
-      .then(setConversations)
-      .catch((caught) =>
-        setError(caught instanceof Error ? caught.message : "Unable to load conversations")
-      );
+    let cancelled = false;
+
+    async function loadConversations() {
+      try {
+        const nextConversations = await api.listConversations(project.id);
+
+        if (!cancelled) {
+          setConversations(nextConversations);
+          setError(null);
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : "Unable to load conversations");
+        }
+      }
+    }
+
+    void loadConversations();
+    const timer = setInterval(loadConversations, 1800);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [api, project.id]);
 
   async function startConversation() {

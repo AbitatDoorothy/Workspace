@@ -4,6 +4,7 @@ import next from "next";
 import { codexAppService } from "./server/codex-app";
 import { createCodexCompletionNotifier } from "./server/mobile/codex-completion-notifier";
 import { mobileService } from "./server/mobile";
+import { mobileActivityLog } from "./server/mobile/mobile-activity-log";
 import { createMobilePushService } from "./server/mobile/mobile-push-service";
 import { createTerminalWss, handleTerminalUpgrade } from "./server/terminal/terminal-relay";
 import { isTerminalUpgradePath } from "./server/terminal/upgrade-path";
@@ -17,11 +18,16 @@ const handle = app.getRequestHandler();
 
 void app.prepare().then(() => {
   const wss = createTerminalWss();
+  console.log(`[mobile-activity] Writing mobile activity logs to ${mobileActivityLog.filePath}`);
   const stopCodexCompletionNotifier = createCodexCompletionNotifier({
+    activityLog: mobileActivityLog,
     codexAppService,
     hostMachineId: process.env.ABITAT_MACHINE_ID ?? "machine_demo",
     logger: console,
-    mobilePushService: createMobilePushService(mobileService, { logger: console })
+    mobilePushService: createMobilePushService(mobileService, {
+      activityLog: mobileActivityLog,
+      logger: console
+    })
   }).start();
   const server = createServer((req, res) => {
     void handle(req, res);

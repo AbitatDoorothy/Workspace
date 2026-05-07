@@ -77,9 +77,7 @@ if (!conversationScreen.includes("styles.keyboardAvoidingScreen")) {
   throw new Error("Expected ConversationScreen to use an outer keyboard-avoiding screen wrapper");
 }
 if (!conversationScreen.includes("return (\n    <KeyboardAvoidingView")) {
-  throw new Error(
-    "Expected ConversationScreen to wrap the fixed screen in KeyboardAvoidingView"
-  );
+  throw new Error("Expected ConversationScreen to wrap the fixed screen in KeyboardAvoidingView");
 }
 if (conversationScreen.includes("<FixedScreen>\n      <KeyboardAvoidingView")) {
   throw new Error(
@@ -139,13 +137,21 @@ for (const removedGate of [
     );
   }
 }
-if (conversationScreen.includes("api.listConversations(conversation.projectId)")) {
-  throw new Error(
-    "Expected ConversationScreen to load latest messages instead of polling thread gates"
-  );
-}
 if (!conversationScreen.includes("const nextMessages = await api.listMessages(conversation.id);")) {
   throw new Error("Expected ConversationScreen to load messages when opening any conversation");
+}
+if (!conversationScreen.includes("const latestConversation = latestConversations.find")) {
+  throw new Error("Expected ConversationScreen to refresh conversation status while open");
+}
+if (!conversationScreen.includes("setStatus(latestConversation?.status ?? conversation.status);")) {
+  throw new Error("Expected ConversationScreen to sync stale running status from the server");
+}
+const projectDetailScreen = await readFile(
+  join(process.cwd(), "src/screens/ProjectDetailScreen.tsx"),
+  "utf8"
+);
+if (!projectDetailScreen.includes("const timer = setInterval(loadConversations, 1800);")) {
+  throw new Error("Expected ProjectDetailScreen to refresh conversation statuses");
 }
 if (
   !conversationScreen.includes("const [isHeaderExpanded, setIsHeaderExpanded] = useState(false)")
@@ -181,7 +187,7 @@ const appScreen = await readFile(join(process.cwd(), "src/App.tsx"), "utf8");
 if (!appScreen.includes("useThreadCompletionNotifications")) {
   throw new Error("Expected App to start the thread completion notification watcher");
 }
-if (!appScreen.includes("onBack={() => setRoute(project ? \"project\" : \"projects\")")) {
+if (!appScreen.includes('onBack={() => setRoute(project ? "project" : "projects")')) {
   throw new Error("Expected App to route conversation back actions to the project page");
 }
 

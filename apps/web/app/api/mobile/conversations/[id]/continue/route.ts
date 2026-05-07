@@ -4,6 +4,7 @@ import { z } from "zod";
 import { conversationMessageService } from "../../../../../../server/conversation-messages";
 import { conversationQueueService } from "../../../../../../server/conversations";
 import { codexAppService, isCodexConversationId } from "../../../../../../server/codex-app";
+import { mobileActivityLog } from "../../../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../../../server/mobile/request-auth";
 import { runEventService } from "../../../../../../server/run-events";
 
@@ -39,6 +40,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const conversation = await codexAppService.continueConversation(id, {
         prompt: input.prompt
       });
+      mobileActivityLog.record("mobile_codex_conversation_continued", {
+        conversationId: conversation.conversationId,
+        hostMachineId: actor.hostMachineId,
+        machineId: actor.machineId,
+        status: conversation.status,
+        workspaceId: actor.workspaceId
+      });
 
       return NextResponse.json({
         conversationId: conversation.conversationId,
@@ -68,6 +76,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     await runEventService.appendAuditEvent(id, {
       content: input.prompt,
       metadata: { action: "continue", role: "user", sourceDeviceId: actor.machineId, userId }
+    });
+    mobileActivityLog.record("mobile_conversation_continued", {
+      conversationId: conversation.id,
+      hostMachineId: actor.hostMachineId,
+      machineId: actor.machineId,
+      status: conversation.status,
+      workspaceId: actor.workspaceId
     });
 
     return NextResponse.json({

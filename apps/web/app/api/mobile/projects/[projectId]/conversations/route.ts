@@ -5,6 +5,7 @@ import { z } from "zod";
 import { conversationMessageService } from "../../../../../../server/conversation-messages";
 import { conversationQueueService } from "../../../../../../server/conversations";
 import { codexAppService, isCodexProjectId } from "../../../../../../server/codex-app";
+import { mobileActivityLog } from "../../../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../../../server/mobile/request-auth";
 import { runEventService } from "../../../../../../server/run-events";
 
@@ -57,6 +58,14 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       const conversation = await codexAppService.startConversation(projectId, {
         prompt: input.prompt
       });
+      mobileActivityLog.record("mobile_codex_conversation_started", {
+        conversationId: conversation.conversationId,
+        hostMachineId: actor.hostMachineId,
+        machineId: actor.machineId,
+        projectId,
+        status: conversation.status,
+        workspaceId: actor.workspaceId
+      });
 
       return NextResponse.json(conversation, { status: 201 });
     }
@@ -87,6 +96,14 @@ export async function POST(request: Request, context: { params: Promise<{ projec
         metadata: { action: "start", role: "user", sourceDeviceId: actor.machineId, userId }
       });
     }
+    mobileActivityLog.record("mobile_conversation_started", {
+      conversationId: conversation.id,
+      hostMachineId: actor.hostMachineId,
+      machineId: actor.machineId,
+      projectId,
+      status: conversation.status,
+      workspaceId: actor.workspaceId
+    });
 
     return NextResponse.json(
       {

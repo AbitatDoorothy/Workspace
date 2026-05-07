@@ -266,7 +266,7 @@ export function createCodexAppService(
     projectId: string
   ): Promise<CodexAppConversationSummary[]> {
     const cwd = await resolveProjectCwd(projectId);
-    const threads = await listAllThreads({ cwd });
+    const threads = await readThreadsWithTurns(await listAllThreads({ cwd }));
 
     return threads
       .filter((thread) => externalCodexProjectId(thread.cwd) === projectId)
@@ -279,22 +279,14 @@ export function createCodexAppService(
       (await listProjects()).find((project) => project.id === projectId) ?? null,
 
     getConversation: async (conversationId: string) => {
-      const thread = await client.readThread(toCodexThreadId(conversationId), false);
+      const thread = await client.readThread(toCodexThreadId(conversationId), true);
       return codexThreadToConversation(thread, workspaceId, userId);
     },
 
     listProjects,
 
     async listCompletionStates(): Promise<CodexCompletionState[]> {
-      const threads = await Promise.all(
-        (await listAllThreads()).map(async (thread) => {
-          try {
-            return await client.readThread(thread.id, true);
-          } catch {
-            return thread;
-          }
-        })
-      );
+      const threads = await readThreadsWithTurns(await listAllThreads());
 
       return threads
         .sort((left, right) => right.updatedAt - left.updatedAt)
@@ -370,6 +362,18 @@ export function createCodexAppService(
       };
     }
   };
+
+  async function readThreadsWithTurns(threads: CodexAppThread[]) {
+    return Promise.all(
+      threads.map(async (thread) => {
+        try {
+          return await client.readThread(thread.id, true);
+        } catch {
+          return thread;
+        }
+      })
+    );
+  }
 }
 
 export const codexAppService = createCodexAppService(createCodexAppClient());
@@ -418,7 +422,7 @@ export function codexThreadToConversation(
     prompt: codexThreadTitle(thread),
     runtimeSessionId: thread.id,
     source: "codex_app",
-    status: codexThreadStatusToConversationStatus(thread.status),
+    status: codexThreadToConversationStatus(thread),
     type: "investigation",
     updatedAt: secondsToDate(thread.updatedAt),
     workspaceId,
@@ -468,17 +472,20 @@ function codexThreadToCompletionState(
   workspaceId = DEFAULT_WORKSPACE_ID
 ): CodexCompletionState {
   const latestTurn = thread.turns.at(-1) ?? null;
-  const status = codexThreadStatusToConversationStatus(thread.status);
-  const failed = thread.status.type === "systemError" || Boolean(latestTurn?.error);
+  const status = codexThreadToConversationStatus(thread);
+  const failed =
+    thread.status.type === "systemError" ||
+    Boolean(latestTurn?.error) ||
+    Boolean(latestTurn && isTurnInterrupted(latestTurn));
   const latestTurnCompletedAt = latestTurnCompletedAtIso(thread, latestTurn);
-  const latestTurnCompleted = Boolean(latestTurn && isTurnCompleted(latestTurn));
+  const latestTurnFinished = Boolean(latestTurn && isTurnTerminal(latestTurn));
 
   return {
     conversationId: externalCodexConversationId(thread.id),
     failed,
     isComplete: Boolean(
       latestTurn?.id &&
-      (latestTurnCompletedAt || latestTurnCompleted || failed) &&
+      (latestTurnCompletedAt || latestTurnFinished || failed) &&
       status !== "running"
     ),
     latestTurnCompletedAt,
@@ -501,7 +508,7 @@ function latestTurnCompletedAtIso(thread: CodexAppThread, turn: CodexAppTurn | n
     return secondsToIso(turn.completedAt);
   }
 
-  if (isTurnCompleted(turn) && Number.isFinite(thread.updatedAt)) {
+  if (isTurnTerminal(turn) && Number.isFinite(thread.updatedAt)) {
     return secondsToIso(thread.updatedAt);
   }
 
@@ -509,24 +516,69 @@ function latestTurnCompletedAtIso(thread: CodexAppThread, turn: CodexAppTurn | n
 }
 
 function isTurnCompleted(turn: CodexAppTurn) {
-  return (
-    turn.status === "completed" ||
-    (!!turn.status &&
-      typeof turn.status === "object" &&
-      (turn.status as { type?: unknown }).type === "completed")
-  );
+  return turnStatusType(turn) === "completed";
 }
 
-function codexThreadStatusToConversationStatus(status: CodexAppThreadStatus): ConversationStatus {
-  if (status.type === "active") {
-    return "running";
+function isTurnInterrupted(turn: CodexAppTurn) {
+  return turnStatusType(turn) === "interrupted";
+}
+
+function isTurnInProgress(turn: CodexAppTurn) {
+  return turnStatusType(turn) === "inProgress";
+}
+
+function isTurnTerminal(turn: CodexAppTurn) {
+  return isTurnCompleted(turn) || isTurnInterrupted(turn);
+}
+
+function turnStatusType(turn: CodexAppTurn) {
+  if (typeof turn.status === "string") {
+    return turn.status;
   }
 
-  if (status.type === "systemError") {
+  if (turn.status && typeof turn.status === "object") {
+    return (turn.status as { type?: unknown }).type;
+  }
+
+  return null;
+}
+
+function codexThreadToConversationStatus(thread: CodexAppThread): ConversationStatus {
+  const latestTurn = thread.turns.at(-1) ?? null;
+
+  if (thread.status.type === "systemError" || Boolean(latestTurn?.error)) {
     return "failed";
   }
 
+  if (latestTurn && isTurnInterrupted(latestTurn)) {
+    return "cancelled";
+  }
+
+  if (thread.status.type === "active") {
+    if (latestTurn && isTurnTerminal(latestTurn)) {
+      return "approved";
+    }
+
+    if (latestTurn && isTurnInProgress(latestTurn)) {
+      return "running";
+    }
+
+    if (hasActiveFlag(thread.status, "waitingOnApproval")) {
+      return "awaiting_approval";
+    }
+
+    return "running";
+  }
+
   return "approved";
+}
+
+function hasActiveFlag(status: CodexAppThreadStatus, flag: string) {
+  return (
+    status.type === "active" &&
+    Array.isArray(status.activeFlags) &&
+    status.activeFlags.includes(flag)
+  );
 }
 
 function codexThreadTitle(thread: CodexAppThread) {

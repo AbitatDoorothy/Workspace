@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { createBrowserRedirectUrl, sanitizeRedirectPath } from "../../../../../server/auth/session";
 import { mobileService } from "../../../../../server/mobile";
+import { mobileActivityLog } from "../../../../../server/mobile/mobile-activity-log";
 
 const requestSchema = phonePairingStartRequestSchema.extend({
   createdByUserId: z.string().min(1).default("user_demo"),
@@ -17,6 +18,11 @@ export async function POST(request: Request) {
       ?.includes("application/x-www-form-urlencoded");
     const input = requestSchema.parse(await parseRequest(request));
     const pairing = await mobileService.createPhonePairing(input);
+    mobileActivityLog.record("mobile_pairing_started", {
+      hostMachineId: input.hostMachineId,
+      pairingId: pairing.pairingId,
+      workspaceId: input.workspaceId
+    });
 
     if (isFormRequest) {
       return NextResponse.redirect(
