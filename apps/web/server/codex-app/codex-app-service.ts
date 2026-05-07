@@ -559,12 +559,12 @@ function codexThreadToConversationStatus(thread: CodexAppThread): ConversationSt
       return "approved";
     }
 
-    if (latestTurn && isTurnInProgress(latestTurn)) {
-      return "running";
-    }
-
     if (hasActiveFlag(thread.status, "waitingOnApproval")) {
       return "awaiting_approval";
+    }
+
+    if (latestTurn && isTurnInProgress(latestTurn)) {
+      return "running";
     }
 
     return "running";

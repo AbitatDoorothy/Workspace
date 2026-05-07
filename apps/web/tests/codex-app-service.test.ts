@@ -395,6 +395,56 @@ describe("Codex app service", () => {
     ]);
   });
 
+  it("reports active Codex turns waiting on approval instead of running", async () => {
+    const cwd = "/Users/reece/Desktop/Abitat_Workspace";
+    const client = createFakeClient([
+      createThread({
+        cwd,
+        id: "thread_waiting",
+        preview: "Waiting for approval",
+        status: { type: "active", activeFlags: ["waitingOnApproval"] },
+        turns: [
+          {
+            completedAt: null,
+            durationMs: null,
+            error: null,
+            id: "turn_waiting",
+            items: [
+              {
+                id: "item_agent",
+                memoryCitation: null,
+                phase: null,
+                text: "I need approval before continuing.",
+                type: "agentMessage"
+              }
+            ],
+            startedAt: 1_775_000_020,
+            status: { type: "inProgress" }
+          }
+        ]
+      })
+    ]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    const [conversation] = await service.listProjectConversations(externalCodexProjectId(cwd));
+    const [completion] = await service.listCompletionStates();
+
+    expect(conversation).toEqual(
+      expect.objectContaining({
+        id: externalCodexConversationId("thread_waiting"),
+        status: "awaiting_approval"
+      })
+    );
+    expect(completion).toEqual(
+      expect.objectContaining({
+        conversationId: externalCodexConversationId("thread_waiting"),
+        isComplete: false,
+        latestTurnId: "turn_waiting",
+        status: "awaiting_approval"
+      })
+    );
+  });
+
   it("uses the thread update time when Codex marks a turn completed without completedAt", async () => {
     const cwd = "/Users/reece/Desktop/Abitat_Workspace";
     const client = createFakeClient([
