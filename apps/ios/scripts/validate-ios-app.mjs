@@ -171,6 +171,19 @@ if (!conversationScreen.includes("const latestConversation = latestConversations
 if (!conversationScreen.includes("setStatus(latestConversation?.status ?? conversation.status);")) {
   throw new Error("Expected ConversationScreen to sync stale running status from the server");
 }
+if (
+  !conversationScreen.includes(
+    "const canSendNow = canAcceptConversationInput(status) && !isSending;"
+  )
+) {
+  throw new Error("Expected ConversationScreen to block phone sends while a Codex turn is running");
+}
+if (!conversationScreen.includes("{sendButtonLabel(status, isSending)}")) {
+  throw new Error("Expected ConversationScreen to label blocked Codex turns as running");
+}
+if (conversationScreen.includes('source === "codex_app" && status === "running"')) {
+  throw new Error("Expected ConversationScreen not to allow sends into running Codex app turns");
+}
 const projectDetailScreen = await readFile(
   join(process.cwd(), "src/screens/ProjectDetailScreen.tsx"),
   "utf8"

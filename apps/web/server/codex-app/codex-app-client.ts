@@ -3,9 +3,9 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import WebSocket from "ws";
 
-import { codexAppDeepLink } from "./codex-app-deep-link";
 import type {
   CodexAppClient,
+  CodexAppResponseItem,
   CodexAppStartTurnOptions,
   CodexAppThread,
   CodexAppThreadListParams,
@@ -17,12 +17,8 @@ import type {
 const DEFAULT_SERVER_URL = "ws://127.0.0.1:47777";
 const DEFAULT_CODEX_BINARY = "/Applications/Codex.app/Contents/Resources/codex";
 const REQUEST_TIMEOUT_MS = 30_000;
-const DESKTOP_OWNER_REQUEST_TIMEOUT_MS = 5_000;
 const START_TIMEOUT_MS = 15_000;
 const TURN_KEEPALIVE_TIMEOUT_MS = 30 * 60_000;
-const TURN_BACKFILL_TIMEOUT_MS = 4_000;
-const TURN_BACKFILL_REQUEST_TIMEOUT_MS = 1_000;
-const TURN_BACKFILL_POLL_INTERVAL_MS = 250;
 
 let spawnedAppServer: ChildProcess | null = null;
 let nextRequestId = 1;
@@ -39,19 +35,42 @@ interface JsonRpcMessage {
 interface CodexAppClientOptions {
   serverUrl?: string;
   codexBinaryPath?: string;
-  desktopRefresh?:
-    | false
-    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void);
 }
 
 export function createCodexAppClient(options: CodexAppClientOptions = {}): CodexAppClient {
   const serverUrl = options.serverUrl ?? process.env.CODEX_APP_SERVER_URL ?? DEFAULT_SERVER_URL;
   const codexBinaryPath =
     options.codexBinaryPath ?? process.env.CODEX_APP_BINARY ?? DEFAULT_CODEX_BINARY;
-  const desktopRefresh =
-    options.desktopRefresh === false ? null : (options.desktopRefresh ?? refreshCodexDesktopThread);
 
   return {
+    async injectItems(threadId: string, items: CodexAppResponseItem[]) {
+      await callCodexApp(serverUrl, codexBinaryPath, "thread/inject_items", {
+        items,
+        threadId
+      });
+    },
+
+    async listLoadedThreads() {
+      const threadIds: string[] = [];
+      let cursor: string | null | undefined = null;
+
+      do {
+        const response: { data: string[]; nextCursor: string | null } = await callCodexApp(
+          serverUrl,
+          codexBinaryPath,
+          "thread/loaded/list",
+          {
+            cursor,
+            limit: 200
+          }
+        );
+        threadIds.push(...response.data);
+        cursor = response.nextCursor;
+      } while (cursor);
+
+      return threadIds;
+    },
+
     listThreads(params: CodexAppThreadListParams = {}) {
       return callCodexApp<CodexAppThreadListResponse>(serverUrl, codexBinaryPath, "thread/list", {
         archived: false,
@@ -98,14 +117,7 @@ export function createCodexAppClient(options: CodexAppClientOptions = {}): Codex
       input: CodexAppUserInput[],
       options: CodexAppStartTurnOptions = {}
     ) {
-      return startTurnWithKeepAlive(
-        serverUrl,
-        codexBinaryPath,
-        threadId,
-        input,
-        options,
-        desktopRefresh
-      );
+      return startTurnWithKeepAlive(serverUrl, codexBinaryPath, threadId, input, options);
     }
   };
 }
@@ -149,105 +161,17 @@ async function startTurnWithKeepAlive(
   codexBinaryPath: string,
   threadId: string,
   input: CodexAppUserInput[],
-  options: CodexAppStartTurnOptions,
-  desktopRefresh:
-    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
-    | null
+  options: CodexAppStartTurnOptions
 ) {
   try {
-    return await startTurnPreferringDesktopOwnerOnce(
-      serverUrl,
-      threadId,
-      input,
-      options,
-      desktopRefresh
-    );
+    return await startTurnWithKeepAliveOnce(serverUrl, threadId, input, options);
   } catch (error) {
     if (!isConnectionFailure(error) || !canStartLocalServer(serverUrl)) {
       throw error;
     }
 
     await ensureLocalAppServer(serverUrl, codexBinaryPath);
-    return startTurnPreferringDesktopOwnerOnce(serverUrl, threadId, input, options, desktopRefresh);
-  }
-}
-
-async function startTurnPreferringDesktopOwnerOnce(
-  serverUrl: string,
-  threadId: string,
-  input: CodexAppUserInput[],
-  options: CodexAppStartTurnOptions,
-  desktopRefresh:
-    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
-    | null
-) {
-  try {
-    return await startTurnThroughDesktopOwnerOnce(
-      serverUrl,
-      threadId,
-      input,
-      options,
-      desktopRefresh
-    );
-  } catch (error) {
-    if (isConnectionFailure(error) || !isDesktopOwnerStartTurnFallbackError(error)) {
-      throw error;
-    }
-
-    return startTurnWithKeepAliveOnce(serverUrl, threadId, input, options, desktopRefresh);
-  }
-}
-
-async function startTurnThroughDesktopOwnerOnce(
-  serverUrl: string,
-  threadId: string,
-  input: CodexAppUserInput[],
-  options: CodexAppStartTurnOptions,
-  desktopRefresh:
-    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
-    | null
-) {
-  const connection = await JsonRpcConnection.connect(serverUrl);
-  let keepAliveStarted = false;
-
-  try {
-    await initializeConnection(connection);
-    const response = await connection.call(
-      "thread-follower-start-turn",
-      {
-        conversationId: threadId,
-        turnStartParams: turnStartParams(threadId, input, options)
-      },
-      DESKTOP_OWNER_REQUEST_TIMEOUT_MS
-    );
-    const normalizedResponse = normalizeStartTurnResponse(response);
-
-    if (isTurnInProgress(normalizedResponse.turn)) {
-      keepAliveStarted = true;
-      refreshStartedTurnInBackground(threadId, options, desktopRefresh);
-      keepTurnConnectionAlive(
-        connection,
-        threadId,
-        normalizedResponse.turn.id,
-        options,
-        desktopRefresh
-      );
-    } else if (desktopRefresh) {
-      keepAliveStarted = true;
-      refreshCompletedTurnInBackground(
-        connection,
-        threadId,
-        normalizedResponse.turn.id,
-        options,
-        desktopRefresh
-      );
-    }
-
-    return normalizedResponse;
-  } finally {
-    if (!keepAliveStarted) {
-      connection.close();
-    }
+    return startTurnWithKeepAliveOnce(serverUrl, threadId, input, options);
   }
 }
 
@@ -255,10 +179,7 @@ async function startTurnWithKeepAliveOnce(
   serverUrl: string,
   threadId: string,
   input: CodexAppUserInput[],
-  options: CodexAppStartTurnOptions,
-  desktopRefresh:
-    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
-    | null
+  options: CodexAppStartTurnOptions
 ) {
   const connection = await JsonRpcConnection.connect(serverUrl);
   let keepAliveStarted = false;
@@ -272,17 +193,7 @@ async function startTurnWithKeepAliveOnce(
 
     if (isTurnInProgress(response.turn)) {
       keepAliveStarted = true;
-      refreshStartedTurnInBackground(threadId, options, desktopRefresh);
-      keepTurnConnectionAlive(connection, threadId, response.turn.id, options, desktopRefresh);
-    } else if (desktopRefresh) {
-      keepAliveStarted = true;
-      refreshCompletedTurnInBackground(
-        connection,
-        threadId,
-        response.turn.id,
-        options,
-        desktopRefresh
-      );
+      keepTurnConnectionAlive(connection, threadId, response.turn.id);
     }
 
     return response;
@@ -306,39 +217,7 @@ async function initializeConnection(connection: JsonRpcConnection) {
   connection.notify("initialized");
 }
 
-function refreshStartedTurnInBackground(
-  threadId: string,
-  options: CodexAppStartTurnOptions,
-  desktopRefresh:
-    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
-    | null
-) {
-  if (!desktopRefresh) {
-    return;
-  }
-
-  const refresh = Promise.resolve()
-    .then(() => desktopRefresh(threadId, options))
-    .catch(() => {
-      // Desktop refresh is best-effort; starting the turn is the durable operation.
-    })
-    .finally(() => {
-      activeTurnKeepAlives.delete(refresh);
-    });
-
-  activeTurnKeepAlives.add(refresh);
-  void refresh;
-}
-
-function keepTurnConnectionAlive(
-  connection: JsonRpcConnection,
-  threadId: string,
-  turnId: string,
-  options: CodexAppStartTurnOptions,
-  desktopRefresh:
-    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
-    | null
-) {
+function keepTurnConnectionAlive(connection: JsonRpcConnection, threadId: string, turnId: string) {
   let removeNotificationHandler: () => void = () => undefined;
   let removeCloseHandler: () => void = () => undefined;
   let resolveKeepAlive: () => void = () => undefined;
@@ -357,56 +236,12 @@ function keepTurnConnectionAlive(
     clearTimeout(timer);
     removeNotificationHandler();
     removeCloseHandler();
-    await refreshAfterTurnBackfill(connection, threadId, turnId, options, desktopRefresh);
     connection.close();
     activeTurnKeepAlives.delete(keepAlive);
   });
 
   activeTurnKeepAlives.add(keepAlive);
   void keepAlive;
-}
-
-function refreshCompletedTurnInBackground(
-  connection: JsonRpcConnection,
-  threadId: string,
-  turnId: string,
-  options: CodexAppStartTurnOptions,
-  desktopRefresh: (threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void
-) {
-  const refresh = refreshAfterTurnBackfill(
-    connection,
-    threadId,
-    turnId,
-    options,
-    desktopRefresh
-  ).finally(() => {
-    connection.close();
-    activeTurnKeepAlives.delete(refresh);
-  });
-
-  activeTurnKeepAlives.add(refresh);
-  void refresh;
-}
-
-async function refreshAfterTurnBackfill(
-  connection: JsonRpcConnection,
-  threadId: string,
-  turnId: string,
-  options: CodexAppStartTurnOptions,
-  desktopRefresh:
-    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
-    | null
-) {
-  if (!desktopRefresh) {
-    return;
-  }
-
-  try {
-    await waitForTurnBackfill(connection, threadId, turnId);
-    await desktopRefresh(threadId, options);
-  } catch {
-    // Desktop refresh is best-effort; the phone reply has already been persisted.
-  }
 }
 
 function turnStartParams(
@@ -464,81 +299,6 @@ function isTurnFinishedNotification(
   return (
     method === "thread/status/changed" &&
     (notification as { status?: { type?: unknown } }).status?.type === "idle"
-  );
-}
-
-async function waitForTurnBackfill(
-  connection: JsonRpcConnection,
-  threadId: string,
-  turnId: string
-) {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < TURN_BACKFILL_TIMEOUT_MS) {
-    try {
-      const response = await connection.call<{
-        thread?: { turns?: Array<{ id?: unknown; items?: unknown[] }> };
-      }>(
-        "thread/read",
-        {
-          includeTurns: true,
-          threadId
-        },
-        TURN_BACKFILL_REQUEST_TIMEOUT_MS
-      );
-      const turn = response.thread?.turns?.find((candidate) => candidate.id === turnId);
-
-      if (turn && Array.isArray(turn.items) && turn.items.length > 0) {
-        return;
-      }
-    } catch (error) {
-      if (isConnectionFailure(error)) {
-        return;
-      }
-    }
-
-    await delay(TURN_BACKFILL_POLL_INTERVAL_MS);
-  }
-}
-
-function normalizeStartTurnResponse(response: unknown): { turn: CodexAppTurn } {
-  if (!response || typeof response !== "object") {
-    throw new Error("Codex desktop owner returned an invalid turn response");
-  }
-
-  const candidate = response as { result?: unknown; turn?: unknown };
-
-  if (isCodexAppTurn(candidate.turn)) {
-    return { turn: candidate.turn };
-  }
-
-  if ("result" in candidate) {
-    return normalizeStartTurnResponse(candidate.result);
-  }
-
-  throw new Error("Codex desktop owner returned an invalid turn response");
-}
-
-function isCodexAppTurn(value: unknown): value is CodexAppTurn {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    typeof (value as { id?: unknown }).id === "string" &&
-    Array.isArray((value as { items?: unknown }).items)
-  );
-}
-
-function isDesktopOwnerStartTurnFallbackError(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  if (/already|active|busy|in progress|running/i.test(error.message)) {
-    return false;
-  }
-
-  return /thread-follower-start-turn|thread follower|desktop owner|owner|webcontents|destroyed|method not found|unknown method/i.test(
-    error.message
   );
 }
 
@@ -746,48 +506,4 @@ function isConnectionFailure(error: unknown) {
   return /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|closed before|connection closed|Timed out connecting|Unexpected server response/.test(
     error.message
   );
-}
-
-async function refreshCodexDesktopThread(threadId: string) {
-  if (process.platform !== "darwin" || process.env.ABITAT_CODEX_APP_DESKTOP_REFRESH === "false") {
-    return;
-  }
-
-  const deepLink = codexAppDeepLink(threadId);
-  await delay(300);
-  await openCodexDeepLink(deepLink);
-  await delay(250);
-  await openCodexDeepLink(deepLink);
-}
-
-function openCodexDeepLink(url: string) {
-  return new Promise<void>((resolve) => {
-    let child: ChildProcess;
-
-    try {
-      child = spawn("/usr/bin/open", ["-g", url], { stdio: "ignore" });
-    } catch {
-      resolve();
-      return;
-    }
-
-    let settled = false;
-    const finish = () => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      child.kill();
-      finish();
-    }, 2_000);
-
-    timer.unref?.();
-    child.once("error", finish);
-    child.once("exit", finish);
-  });
 }
