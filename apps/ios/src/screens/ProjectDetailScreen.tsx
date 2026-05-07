@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import type { ApiClient } from "../api/client";
 import { Button, Header, StatusPill } from "../components/Controls";
@@ -105,10 +105,10 @@ export function ProjectDetailScreen({ api, onConversation, project }: ProjectDet
           onPress={() => onConversation(conversation)}
           style={sharedStyles.card}
         >
-          <View style={[sharedStyles.row, { justifyContent: "space-between" }]}>
-            <Text style={sharedStyles.value} numberOfLines={1}>
-              {conversation.prompt || "Untitled conversation"}
-            </Text>
+          <Text style={sharedStyles.value} numberOfLines={2}>
+            {conversation.prompt || "Untitled conversation"}
+          </Text>
+          <View style={styles.conversationStatusRow}>
             <StatusPill status={conversation.status} />
           </View>
           <Text style={sharedStyles.subtitle}>{conversation.type}</Text>
@@ -127,3 +127,10 @@ export function ProjectDetailScreen({ api, onConversation, project }: ProjectDet
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  conversationStatusRow: {
+    alignItems: "flex-start",
+    marginTop: 10
+  }
+});
