@@ -69,6 +69,7 @@ export default function App() {
       {route === "project" && project ? (
         <ProjectDetailScreen
           api={store.api}
+          onBack={() => setRoute("projects")}
           onConversation={(nextConversation) => {
             setConversation(nextConversation);
             setRoute("conversation");

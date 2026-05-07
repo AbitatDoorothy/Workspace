@@ -10,11 +10,17 @@ import type { ConversationSummary, ProjectSummary } from "../types";
 
 interface ProjectDetailScreenProps {
   api: ApiClient;
+  onBack(): void;
   onConversation(conversation: ConversationSummary): void;
   project: ProjectSummary;
 }
 
-export function ProjectDetailScreen({ api, onConversation, project }: ProjectDetailScreenProps) {
+export function ProjectDetailScreen({
+  api,
+  onBack,
+  onConversation,
+  project
+}: ProjectDetailScreenProps) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +81,16 @@ export function ProjectDetailScreen({ api, onConversation, project }: ProjectDet
 
   return (
     <Screen>
+      <Pressable
+        accessibilityLabel="Back to all projects"
+        accessibilityRole="button"
+        hitSlop={8}
+        onPress={onBack}
+        style={styles.backButton}
+      >
+        <Text style={styles.backButtonText}>Projects</Text>
+      </Pressable>
+
       <Header
         eyebrow="Project"
         title={project.name}
@@ -129,6 +145,23 @@ export function ProjectDetailScreen({ api, onConversation, project }: ProjectDet
 }
 
 const styles = StyleSheet.create({
+  backButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.surfaceHigh,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: "center",
+    marginBottom: 14,
+    minHeight: 34,
+    paddingHorizontal: 12
+  },
+  backButtonText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "800"
+  },
   conversationStatusRow: {
     alignItems: "flex-start",
     marginTop: 10

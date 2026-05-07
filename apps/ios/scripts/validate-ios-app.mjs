@@ -191,6 +191,18 @@ const projectDetailScreen = await readFile(
 if (!projectDetailScreen.includes("const timer = setInterval(loadConversations, 1800);")) {
   throw new Error("Expected ProjectDetailScreen to refresh conversation statuses");
 }
+if (!projectDetailScreen.includes("onBack(): void")) {
+  throw new Error("Expected ProjectDetailScreen to accept a projects back callback");
+}
+if (!projectDetailScreen.includes('accessibilityLabel="Back to all projects"')) {
+  throw new Error("Expected ProjectDetailScreen to expose an accessible back-to-projects button");
+}
+if (!projectDetailScreen.includes("onPress={onBack}")) {
+  throw new Error("Expected ProjectDetailScreen back button to call onBack");
+}
+if (!projectDetailScreen.includes("styles.backButton")) {
+  throw new Error("Expected ProjectDetailScreen to style the projects back button");
+}
 if (
   !conversationScreen.includes("const [isHeaderExpanded, setIsHeaderExpanded] = useState(false)")
 ) {
@@ -241,6 +253,9 @@ if (!appScreen.includes("useThreadCompletionNotifications")) {
 }
 if (!appScreen.includes('onBack={() => setRoute(project ? "project" : "projects")')) {
   throw new Error("Expected App to route conversation back actions to the project page");
+}
+if (!appScreen.includes('onBack={() => setRoute("projects")}')) {
+  throw new Error("Expected App to route project back actions to the projects page");
 }
 
 const notificationWatcher = await readFile(
