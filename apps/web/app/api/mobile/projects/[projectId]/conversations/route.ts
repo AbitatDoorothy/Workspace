@@ -4,7 +4,11 @@ import { z } from "zod";
 
 import { conversationMessageService } from "../../../../../../server/conversation-messages";
 import { conversationQueueService } from "../../../../../../server/conversations";
-import { codexAppService, isCodexProjectId } from "../../../../../../server/codex-app";
+import {
+  codexAppService,
+  isCodexConversationBusyError,
+  isCodexProjectId
+} from "../../../../../../server/codex-app";
 import { mobileActivityLog } from "../../../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../../../server/mobile/request-auth";
 import { runEventService } from "../../../../../../server/run-events";
@@ -73,12 +77,21 @@ export async function GET(request: Request, context: { params: Promise<{ project
 }
 
 export async function POST(request: Request, context: { params: Promise<{ projectId: string }> }) {
+  let projectIdForLog = "unknown";
+  let actorDetails: Record<string, unknown> = {};
+
   try {
     const [{ projectId }, actor, input] = await Promise.all([
       context.params,
       requireMobileActor(request),
       createRequestSchema.parseAsync(await request.json())
     ]);
+    projectIdForLog = projectId;
+    actorDetails = {
+      hostMachineId: actor.hostMachineId,
+      machineId: actor.machineId,
+      workspaceId: actor.workspaceId
+    };
 
     if (!actor.hostMachineId) {
       throw new Error("Phone is not paired to a Mac host");
@@ -143,9 +156,27 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       { status: 201 }
     );
   } catch (error) {
+    mobileActivityLog.record("mobile_conversation_start_failed", {
+      error: error instanceof Error ? error.message : String(error),
+      projectId: projectIdForLog,
+      reason: isCodexConversationBusyError(error) ? "codex_thread_busy" : "request_failed",
+      ...actorDetails
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to start mobile conversation" },
-      { status: error instanceof Error && error.message === "Invalid mobile token" ? 401 : 400 }
+      { status: responseStatus(error) }
     );
   }
+}
+
+function responseStatus(error: unknown) {
+  if (error instanceof Error && error.message === "Invalid mobile token") {
+    return 401;
+  }
+
+  if (isCodexConversationBusyError(error)) {
+    return 409;
+  }
+
+  return 400;
 }

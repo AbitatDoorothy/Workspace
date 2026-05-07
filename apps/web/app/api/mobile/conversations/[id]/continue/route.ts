@@ -3,7 +3,11 @@ import { z } from "zod";
 
 import { conversationMessageService } from "../../../../../../server/conversation-messages";
 import { conversationQueueService } from "../../../../../../server/conversations";
-import { codexAppService, isCodexConversationId } from "../../../../../../server/codex-app";
+import {
+  codexAppService,
+  isCodexConversationBusyError,
+  isCodexConversationId
+} from "../../../../../../server/codex-app";
 import { mobileActivityLog } from "../../../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../../../server/mobile/request-auth";
 import { runEventService } from "../../../../../../server/run-events";
@@ -138,6 +142,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       status: conversation.status
     });
   } catch (error) {
+    if (isCodexConversationBusyError(error)) {
+      mobileActivityLog.record("mobile_codex_conversation_continue_blocked", {
+        conversationId,
+        error: error.message,
+        reason: "codex_thread_busy",
+        ...actorDetails,
+        ...requestDetails
+      });
+    }
     mobileActivityLog.record("mobile_conversation_continue_failed", {
       conversationId,
       error: error instanceof Error ? error.message : String(error),
@@ -146,9 +159,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to continue mobile conversation" },
-      { status: error instanceof Error && error.message === "Invalid mobile token" ? 401 : 400 }
+      { status: responseStatus(error) }
     );
   }
+}
+
+function responseStatus(error: unknown) {
+  if (error instanceof Error && error.message === "Invalid mobile token") {
+    return 401;
+  }
+
+  if (isCodexConversationBusyError(error)) {
+    return 409;
+  }
+
+  return 400;
 }
 
 async function assertMobileConversation(workspaceId: string, conversationId: string) {

@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import WebSocket from "ws";
 
+import { codexAppDeepLink } from "./codex-app-deep-link";
 import type {
   CodexAppClient,
   CodexAppStartTurnOptions,
@@ -752,12 +753,11 @@ async function refreshCodexDesktopThread(threadId: string) {
     return;
   }
 
+  const deepLink = codexAppDeepLink(threadId);
   await delay(300);
-  await openCodexDeepLink("codex://settings");
-  await delay(300);
-  await openCodexDeepLink(`codex://local/${encodeURIComponent(threadId)}`);
+  await openCodexDeepLink(deepLink);
   await delay(250);
-  await openCodexDeepLink(`codex://local/${encodeURIComponent(threadId)}`);
+  await openCodexDeepLink(deepLink);
 }
 
 function openCodexDeepLink(url: string) {

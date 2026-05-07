@@ -4,7 +4,11 @@ import { z } from "zod";
 
 import { conversationMessageService } from "../../../../../../server/conversation-messages";
 import { conversationQueueService } from "../../../../../../server/conversations";
-import { codexAppService, isCodexConversationId } from "../../../../../../server/codex-app";
+import {
+  codexAppService,
+  isCodexConversationBusyError,
+  isCodexConversationId
+} from "../../../../../../server/codex-app";
 import { mobileActivityLog } from "../../../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../../../server/mobile/request-auth";
 import { runEventService } from "../../../../../../server/run-events";
@@ -167,9 +171,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to append mobile message" },
-      { status: error instanceof Error && error.message === "Invalid mobile token" ? 401 : 400 }
+      { status: responseStatus(error) }
     );
   }
+}
+
+function responseStatus(error: unknown) {
+  if (error instanceof Error && error.message === "Invalid mobile token") {
+    return 401;
+  }
+
+  if (isCodexConversationBusyError(error)) {
+    return 409;
+  }
+
+  return 400;
 }
 
 async function assertMobileConversation(workspaceId: string, conversationId: string) {

@@ -1,11 +1,12 @@
 export {
-  codexAppDeepLink,
+  CodexConversationBusyError,
   codexAppService,
   codexThreadToConversation,
   createCodexAppService,
   externalCodexConversationId,
   externalCodexProjectId,
   flattenThreadMessages,
+  isCodexConversationBusyError,
   isCodexConversationId,
   isCodexProjectId,
   toCodexThreadId,
@@ -16,3 +17,4 @@ export {
   type CodexAppThread,
   type CodexCompletionState
 } from "./codex-app-service";
+export { codexAppDeepLink } from "./codex-app-deep-link";

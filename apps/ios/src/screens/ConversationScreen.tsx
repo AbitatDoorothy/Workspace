@@ -62,6 +62,7 @@ export function ConversationScreen({ api, conversation, onBack }: ConversationSc
   const pendingAutoScrollRef = useRef(true);
   const latestSequenceRef = useRef(0);
   const sendingCountRef = useRef(0);
+  const canSendNow = canAcceptConversationInput(status) && !isSending;
 
   function scrollToLatest(animated = true) {
     requestAnimationFrame(() => {
@@ -126,7 +127,7 @@ export function ConversationScreen({ api, conversation, onBack }: ConversationSc
     const messageTimer = setInterval(() => {
       void refreshMessages(latestSequenceRef.current);
     }, 1800);
-    const statusTimer = setInterval(refreshStatus, 8000);
+    const statusTimer = setInterval(refreshStatus, 2500);
     return () => {
       cancelled = true;
       clearInterval(messageTimer);
@@ -211,7 +212,7 @@ export function ConversationScreen({ api, conversation, onBack }: ConversationSc
     const queuedPrompt = prompt;
     const queuedAttachments = attachments;
 
-    if (!canSendPrompt(queuedPrompt, queuedAttachments)) {
+    if (!canSendPrompt(queuedPrompt, queuedAttachments) || !canSendNow) {
       return;
     }
 
@@ -221,6 +222,10 @@ export function ConversationScreen({ api, conversation, onBack }: ConversationSc
   }
 
   function sendGitShortcut() {
+    if (!canSendNow) {
+      return;
+    }
+
     void sendConversation({ prompt: "git" });
   }
 
@@ -425,8 +430,9 @@ export function ConversationScreen({ api, conversation, onBack }: ConversationSc
             <Pressable
               accessibilityLabel="Commit and push with git"
               accessibilityRole="button"
+              disabled={!canSendNow}
               onPress={sendGitShortcut}
-              style={styles.gitButton}
+              style={[styles.gitButton, !canSendNow ? styles.disabledAction : null]}
             >
               <Text style={styles.gitButtonText}>Git</Text>
             </Pressable>
@@ -441,8 +447,11 @@ export function ConversationScreen({ api, conversation, onBack }: ConversationSc
               value={prompt}
             />
             <View style={styles.composerButton}>
-              <Button disabled={!canSendPrompt(prompt, attachments)} onPress={continueConversation}>
-                {isSending ? "Sending" : "Send"}
+              <Button
+                disabled={!canSendPrompt(prompt, attachments) || !canSendNow}
+                onPress={continueConversation}
+              >
+                {sendButtonLabel(status, isSending)}
               </Button>
             </View>
           </View>
@@ -534,6 +543,9 @@ const styles = StyleSheet.create({
   composerShell: {
     gap: 10
   },
+  disabledAction: {
+    opacity: 0.55
+  },
   failedSend: {
     color: colors.danger,
     fontSize: 16,
@@ -599,6 +611,26 @@ const styles = StyleSheet.create({
 
 function canSendPrompt(prompt: string, attachments: PendingAttachment[]) {
   return prompt.trim().length > 0 || attachments.length > 0;
+}
+
+function canAcceptConversationInput(status: string) {
+  return !["awaiting_approval", "committing", "preparing", "queued", "running"].includes(status);
+}
+
+function sendButtonLabel(status: string, isSending: boolean) {
+  if (isSending) {
+    return "Sending";
+  }
+
+  if (status === "awaiting_approval") {
+    return "Waiting";
+  }
+
+  if (!canAcceptConversationInput(status)) {
+    return "Running";
+  }
+
+  return "Send";
 }
 
 function promptForSend(prompt: string, attachments: PendingAttachment[]) {

@@ -73,7 +73,7 @@ export function conversationCodexAppHref(
   }
 
   return conversation.runtimeSessionId
-    ? `codex://local/${encodeURIComponent(conversation.runtimeSessionId)}`
+    ? `codex://threads/${encodeURIComponent(conversation.runtimeSessionId)}`
     : null;
 }
 

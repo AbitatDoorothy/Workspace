@@ -554,6 +554,56 @@ describe("Codex app client", () => {
     ]);
     expect(methods).toContain("thread/read");
   });
+
+  it("tolerates the Codex app-server socket closing while a phone-started turn is running", async () => {
+    let activeSocket: WebSocket | undefined;
+    const refreshes: string[] = [];
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread-follower-start-turn") {
+        sendError(socket, message.id, "thread-follower-start-turn-timeout");
+      }
+
+      if (message.method === "turn/start") {
+        activeSocket = socket;
+        sendResult(socket, message.id, {
+          turn: {
+            completedAt: null,
+            durationMs: null,
+            error: null,
+            id: "turn_running",
+            items: [],
+            startedAt: 1_778_000_000,
+            status: "inProgress"
+          }
+        });
+      }
+    });
+    const client = createCodexAppClient({
+      codexBinaryPath: "/unused",
+      desktopRefresh: (threadId: string) => {
+        refreshes.push(threadId);
+      },
+      serverUrl
+    });
+
+    const response = await client.startTurn("thread_1", [
+      { text: "from phone", text_elements: [], type: "text" }
+    ]);
+
+    expect(response.turn.id).toBe("turn_running");
+    if (!activeSocket) {
+      throw new Error("Expected the mock server to receive a Codex app websocket connection");
+    }
+
+    activeSocket.close();
+    await delay(50);
+
+    expect(refreshes).toEqual(["thread_1"]);
+  });
 });
 
 async function startMockCodexAppServer(

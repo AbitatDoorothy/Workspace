@@ -6,6 +6,7 @@ import { conversationQueueService } from "../../../../../server/conversations";
 import {
   codexAppDeepLink,
   codexAppService,
+  isCodexConversationBusyError,
   isCodexConversationId,
   toCodexThreadId
 } from "../../../../../server/codex-app";
@@ -64,7 +65,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to continue conversation" },
-      { status: 400 }
+      { status: isCodexConversationBusyError(error) ? 409 : 400 }
     );
   }
 }

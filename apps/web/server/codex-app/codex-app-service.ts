@@ -4,12 +4,17 @@ import { basename, normalize } from "node:path";
 import type { ConversationStatus, ConversationType } from "@abitat/shared";
 
 import { createCodexAppClient } from "./codex-app-client";
+import { codexAppDeepLink } from "./codex-app-deep-link";
+
+export { codexAppDeepLink };
 
 const CODEX_PROJECT_PREFIX = "codex_project_";
 const CODEX_THREAD_PREFIX = "codex_thread_";
 const DEFAULT_WORKSPACE_ID = "workspace_demo";
 const DEFAULT_USER_ID = "user_demo";
 const MAX_CODEX_MESSAGE_CONTENT_LENGTH = 12_000;
+const CODEX_CONVERSATION_BUSY_MESSAGE =
+  "Codex is already working on this thread. Wait for the current Mac or phone turn to finish before sending another message.";
 const PHONE_FULL_ACCESS_TURN_OPTIONS = {
   approvalPolicy: "never",
   sandboxPolicy: { type: "dangerFullAccess" }
@@ -210,6 +215,26 @@ interface ListMessagesOptions {
   includeRuntime?: boolean;
 }
 
+export class CodexConversationBusyError extends Error {
+  readonly code = "CODEX_CONVERSATION_BUSY";
+  readonly statusCode = 409;
+
+  constructor(message = CODEX_CONVERSATION_BUSY_MESSAGE) {
+    super(message);
+    this.name = "CodexConversationBusyError";
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+export function isCodexConversationBusyError(error: unknown): error is CodexConversationBusyError {
+  return (
+    error instanceof CodexConversationBusyError ||
+    (error instanceof Error &&
+      error.name === "CodexConversationBusyError" &&
+      (error as { code?: unknown }).code === "CODEX_CONVERSATION_BUSY")
+  );
+}
+
 export function createCodexAppService(
   client: CodexAppClient,
   options: CodexAppServiceOptions = {}
@@ -341,10 +366,14 @@ export function createCodexAppService(
         experimentalRawEvents: false,
         persistExtendedHistory: true
       });
-      await client.startTurn(thread.id, userInput(prompt, input.attachments), {
-        ...PHONE_FULL_ACCESS_TURN_OPTIONS,
-        cwd
-      });
+      try {
+        await client.startTurn(thread.id, userInput(prompt, input.attachments), {
+          ...PHONE_FULL_ACCESS_TURN_OPTIONS,
+          cwd
+        });
+      } catch (error) {
+        throw normalizeStartTurnError(error);
+      }
       messageCache.delete(thread.id);
 
       return {
@@ -377,21 +406,32 @@ export function createCodexAppService(
         await resumeThread();
       }
 
+      await rejectIfCodexThreadBusy(thread);
+
+      const turnInput = userInput(prompt, input.attachments);
       try {
-        await client.startTurn(threadId, userInput(prompt, input.attachments), {
+        await client.startTurn(threadId, turnInput, {
           ...PHONE_FULL_ACCESS_TURN_OPTIONS,
           cwd: thread.cwd
         });
       } catch (error) {
+        if (isConcurrentTurnError(error)) {
+          throw new CodexConversationBusyError();
+        }
+
         if (!isThreadNotFoundError(error, threadId)) {
           throw error;
         }
 
         await resumeThread();
-        await client.startTurn(threadId, userInput(prompt, input.attachments), {
-          ...PHONE_FULL_ACCESS_TURN_OPTIONS,
-          cwd: thread.cwd
-        });
+        try {
+          await client.startTurn(threadId, turnInput, {
+            ...PHONE_FULL_ACCESS_TURN_OPTIONS,
+            cwd: thread.cwd
+          });
+        } catch (retryError) {
+          throw normalizeStartTurnError(retryError);
+        }
       }
       messageCache.delete(threadId);
 
@@ -432,6 +472,23 @@ export function createCodexAppService(
     });
     return messages;
   }
+
+  async function rejectIfCodexThreadBusy(thread: CodexAppThread) {
+    if (thread.status.type !== "active") {
+      return;
+    }
+
+    const activeThread =
+      thread.turns.length > 0
+        ? thread
+        : await client.readThread(thread.id, true).catch(() => thread);
+
+    if (!isCodexThreadBusy(activeThread)) {
+      return;
+    }
+
+    throw new CodexConversationBusyError(codexThreadBusyMessage(activeThread));
+  }
 }
 
 export const codexAppService = createCodexAppService(createCodexAppClient());
@@ -458,10 +515,6 @@ export function toCodexThreadId(conversationId: string) {
   return isCodexConversationId(conversationId)
     ? decodeURIComponent(conversationId.slice(CODEX_THREAD_PREFIX.length))
     : conversationId;
-}
-
-export function codexAppDeepLink(threadId: string) {
-  return `codex://local/${encodeURIComponent(threadId)}`;
 }
 
 export function codexThreadToConversation(
@@ -587,6 +640,23 @@ function isTurnInProgress(turn: CodexAppTurn) {
 
 function isTurnTerminal(turn: CodexAppTurn) {
   return isTurnCompleted(turn) || isTurnInterrupted(turn);
+}
+
+function isCodexThreadBusy(thread: CodexAppThread) {
+  if (thread.status.type !== "active") {
+    return false;
+  }
+
+  const latestTurn = thread.turns.at(-1) ?? null;
+  return !(latestTurn && isTurnTerminal(latestTurn));
+}
+
+function codexThreadBusyMessage(thread: CodexAppThread) {
+  if (hasActiveFlag(thread.status, "waitingOnApproval")) {
+    return "Codex is waiting for approval on this thread. Approve or cancel it on the Mac before sending another message from the phone.";
+  }
+
+  return CODEX_CONVERSATION_BUSY_MESSAGE;
 }
 
 function turnStatusType(turn: CodexAppTurn) {
@@ -734,6 +804,24 @@ function isThreadNotFoundError(error: unknown, threadId: string) {
 
   const message = error.message.toLowerCase();
   return message.includes("thread not found") && message.includes(threadId.toLowerCase());
+}
+
+function normalizeStartTurnError(error: unknown) {
+  if (isConcurrentTurnError(error)) {
+    return new CodexConversationBusyError();
+  }
+
+  return error;
+}
+
+function isConcurrentTurnError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return /\b(already|busy|in progress|running)\b|active turn|turn is active|thread is active/i.test(
+    error.message
+  );
 }
 
 function secondsToDate(seconds: number) {

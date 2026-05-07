@@ -61,11 +61,13 @@ describe("conversation board model", () => {
   });
 
   it("opens Codex app cards through the desktop app and keeps queue actions disabled", () => {
+    const threadId = "019e01b0-7d24-72e0-8de8-ce2c8c6a55c0";
+
     expect(
       conversationCodexAppHref({
-        runtimeSessionId: "thread_demo"
+        runtimeSessionId: threadId
       })
-    ).toBe("codex://local/thread_demo");
+    ).toBe(`codex://threads/${threadId}`);
     expect(
       canManageConversationCard({
         source: "codex_app"

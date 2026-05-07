@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CodexConversationBusyError,
   codexAppDeepLink,
   createCodexAppService,
   externalCodexConversationId,
   externalCodexProjectId,
+  isCodexConversationBusyError,
   isCodexConversationId,
   isCodexProjectId,
   toCodexThreadId,
@@ -54,7 +56,7 @@ interface FakeCodexAppClient extends CodexAppClient {
 
 function createFakeClient(
   threads: CodexAppThread[],
-  clientOptions: { rejectUnloadedTurns?: boolean } = {}
+  clientOptions: { rejectUnloadedTurns?: boolean; startTurnError?: Error } = {}
 ): FakeCodexAppClient {
   const readThreadRequests: FakeCodexAppClient["readThreadRequests"] = [];
   const resumedThreads: string[] = [];
@@ -108,6 +110,9 @@ function createFakeClient(
       const thread = threads.find((candidate) => candidate.id === threadId);
       if (clientOptions.rejectUnloadedTurns && thread?.status.type === "notLoaded") {
         throw new Error(`thread not found: ${threadId}`);
+      }
+      if (clientOptions.startTurnError) {
+        throw clientOptions.startTurnError;
       }
 
       const text = input
@@ -769,6 +774,66 @@ describe("Codex app service", () => {
     ]);
   });
 
+  it("rejects phone continuation while the Codex app thread is already running", async () => {
+    const cwd = "/Users/reece/Desktop/Abitat_Workspace";
+    const client = createFakeClient([
+      createThread({
+        cwd,
+        id: "thread_active",
+        preview: "Running on another device",
+        status: { type: "active", activeFlags: [] },
+        turns: [
+          {
+            completedAt: null,
+            durationMs: null,
+            error: null,
+            id: "turn_active",
+            items: [],
+            startedAt: 1_775_000_040,
+            status: { type: "inProgress" }
+          }
+        ]
+      })
+    ]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    await expect(
+      service.continueConversation(externalCodexConversationId("thread_active"), {
+        prompt: "Keep going while active"
+      })
+    ).rejects.toThrow(CodexConversationBusyError);
+    expect(client.startedTurns).toEqual([]);
+  });
+
+  it("normalizes app-server busy races when another device starts a Codex turn first", async () => {
+    const cwd = "/Users/reece/Desktop/Abitat_Workspace";
+    const client = createFakeClient(
+      [
+        createThread({
+          cwd,
+          id: "thread_race",
+          preview: "Existing",
+          status: { type: "idle" }
+        })
+      ],
+      { startTurnError: new Error("thread is already running") }
+    );
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    let caught: unknown;
+    try {
+      await service.continueConversation(externalCodexConversationId("thread_race"), {
+        prompt: "Keep going after a race"
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(isCodexConversationBusyError(caught)).toBe(true);
+    expect(caught).toBeInstanceOf(CodexConversationBusyError);
+    expect(caught).toHaveProperty("statusCode", 409);
+  });
+
   it("rejects continuation when a Codex app thread is in system error", async () => {
     const cwd = "/Users/reece/Desktop/Abitat_Workspace";
     const client = createFakeClient([
@@ -789,10 +854,12 @@ describe("Codex app service", () => {
     expect(client.startedTurns).toEqual([]);
   });
 
-  it("marks Codex external identifiers and deep links", () => {
+  it("marks Codex external identifiers and desktop app deep links", () => {
+    const threadId = "019e01b0-7d24-72e0-8de8-ce2c8c6a55c0";
+
     expect(isCodexProjectId(externalCodexProjectId("/tmp/example"))).toBe(true);
-    expect(isCodexConversationId(externalCodexConversationId("thread_a"))).toBe(true);
-    expect(toCodexThreadId(externalCodexConversationId("thread_a"))).toBe("thread_a");
-    expect(codexAppDeepLink("thread_a")).toBe("codex://local/thread_a");
+    expect(isCodexConversationId(externalCodexConversationId(threadId))).toBe(true);
+    expect(toCodexThreadId(externalCodexConversationId(threadId))).toBe(threadId);
+    expect(codexAppDeepLink(threadId)).toBe(`codex://threads/${threadId}`);
   });
 });
