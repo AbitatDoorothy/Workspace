@@ -77,17 +77,9 @@ export function createCodexCompletionNotifier(options: CodexCompletionNotifierOp
           snapshots.set(state.conversationId, snapshotCompletion(state));
           const key = completionKey(state);
           if (state.isComplete && completionHappenedAfter(state, startedAtMs)) {
-            await options.mobilePushService.sendCodexThreadDone({
-              conversationId: state.conversationId,
-              failed: state.failed,
-              hostMachineId,
-              projectId: state.projectId,
-              prompt: state.prompt,
-              source: state.source,
-              turnId: state.latestTurnId ?? "unknown",
-              workspaceId: state.workspaceId
-            });
-            notifiedCompletionKeys.add(key);
+            if ((await sendCompletionPush(state)) > 0) {
+              notifiedCompletionKeys.add(key);
+            }
           } else if (state.isComplete) {
             notifiedCompletionKeys.add(key);
           }
@@ -107,17 +99,9 @@ export function createCodexCompletionNotifier(options: CodexCompletionNotifierOp
           shouldNotifyForCompletion(state, previous, startedAtMs) &&
           !notifiedCompletionKeys.has(key)
         ) {
-          await options.mobilePushService.sendCodexThreadDone({
-            conversationId: state.conversationId,
-            failed: state.failed,
-            hostMachineId,
-            projectId: state.projectId,
-            prompt: state.prompt,
-            source: state.source,
-            turnId: state.latestTurnId ?? "unknown",
-            workspaceId: state.workspaceId
-          });
-          notifiedCompletionKeys.add(key);
+          if ((await sendCompletionPush(state)) > 0) {
+            notifiedCompletionKeys.add(key);
+          }
         }
       }
 
@@ -149,6 +133,19 @@ export function createCodexCompletionNotifier(options: CodexCompletionNotifierOp
     return () => clearInterval(interval);
   }
 
+  function sendCompletionPush(state: CodexCompletionState) {
+    return options.mobilePushService.sendCodexThreadDone({
+      conversationId: state.conversationId,
+      failed: state.failed,
+      hostMachineId,
+      projectId: state.projectId,
+      prompt: state.prompt,
+      source: state.source,
+      turnId: state.latestTurnId ?? "unknown",
+      workspaceId: state.workspaceId
+    });
+  }
+
   return {
     pollOnce,
     start
@@ -173,7 +170,7 @@ function shouldNotifyForCompletion(
   }
 
   if (previous.latestTurnId === state.latestTurnId) {
-    return !previous.isComplete;
+    return !previous.isComplete || completionHappenedAfter(state, startedAtMs);
   }
 
   return completionHappenedAfter(state, startedAtMs);

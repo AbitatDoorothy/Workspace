@@ -342,6 +342,51 @@ describe("Codex app service", () => {
     ]);
   });
 
+  it("uses the thread update time when Codex marks a turn completed without completedAt", async () => {
+    const cwd = "/Users/reece/Desktop/Abitat_Workspace";
+    const client = createFakeClient([
+      createThread({
+        cwd,
+        id: "thread_completed_without_timestamp",
+        preview: "Finished without completedAt",
+        status: { type: "idle" },
+        turns: [
+          {
+            completedAt: null,
+            durationMs: 1000,
+            error: null,
+            id: "turn_without_timestamp",
+            items: [
+              {
+                id: "item_agent",
+                memoryCitation: null,
+                phase: null,
+                text: "Finished.",
+                type: "agentMessage"
+              }
+            ],
+            startedAt: 1_775_000_040,
+            status: "completed"
+          }
+        ],
+        updatedAt: 1_775_000_050
+      })
+    ]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    const states = await service.listCompletionStates();
+
+    expect(states).toEqual([
+      expect.objectContaining({
+        conversationId: externalCodexConversationId("thread_completed_without_timestamp"),
+        isComplete: true,
+        latestTurnCompletedAt: "2026-03-31T23:34:10.000Z",
+        latestTurnId: "turn_without_timestamp",
+        status: "approved"
+      })
+    ]);
+  });
+
   it("bounds pathological Codex message content and keeps duplicate item ids unique", async () => {
     const client = createFakeClient([
       createThread({

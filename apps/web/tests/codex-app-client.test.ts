@@ -133,13 +133,13 @@ describe("Codex app client", () => {
         sendResult(socket, message.id, {
           result: {
             turn: {
-              completedAt: null,
-              durationMs: null,
+              completedAt: 1_778_000_001,
+              durationMs: 1000,
               error: null,
               id: "turn_owner",
               items: [],
               startedAt: 1_778_000_000,
-              status: "inProgress"
+              status: "completed"
             }
           }
         });
@@ -184,6 +184,98 @@ describe("Codex app client", () => {
         threadId: "thread_1"
       }
     });
+  });
+
+  it("keeps desktop-owner turns alive until they complete", async () => {
+    let activeSocket: WebSocket | undefined;
+    let closeResolved = false;
+    let resolveClosed: () => void = () => undefined;
+    const methods: string[] = [];
+    const refreshes: Array<{ cwd?: string | null; threadId: string }> = [];
+    const closed = new Promise<void>((resolve) => {
+      resolveClosed = () => {
+        closeResolved = true;
+        resolve();
+      };
+    });
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method) {
+        methods.push(message.method);
+      }
+
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread-follower-start-turn") {
+        activeSocket = socket;
+        socket.once("close", resolveClosed);
+        sendResult(socket, message.id, {
+          result: {
+            turn: {
+              completedAt: null,
+              durationMs: null,
+              error: null,
+              id: "turn_owner",
+              items: [],
+              startedAt: 1_778_000_000,
+              status: "inProgress"
+            }
+          }
+        });
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          thread: {
+            turns: [
+              {
+                id: "turn_owner",
+                items: [{ id: "item_agent", text: "done", type: "agentMessage" }],
+                status: "completed"
+              }
+            ]
+          }
+        });
+      }
+    });
+    const client = createCodexAppClient({
+      codexBinaryPath: "/unused",
+      desktopRefresh: (threadId: string, options?: { cwd?: string | null }) => {
+        refreshes.push({ cwd: options?.cwd, threadId });
+      },
+      serverUrl
+    });
+
+    await client.startTurn("thread_1", [{ text: "git", text_elements: [], type: "text" }], {
+      cwd: "/Users/reece/Desktop/Abitat_Workspace"
+    });
+    await delay(50);
+
+    expect(closeResolved).toBe(false);
+    expect(refreshes).toEqual([]);
+    if (!activeSocket) {
+      throw new Error("Expected the desktop-owner websocket to stay available");
+    }
+
+    expect(activeSocket.readyState).toBe(WebSocket.OPEN);
+    expect(methods).not.toContain("turn/start");
+
+    activeSocket.send(
+      JSON.stringify({
+        method: "turn/completed",
+        params: {
+          threadId: "thread_1",
+          turnId: "turn_owner"
+        }
+      })
+    );
+    await closed;
+
+    expect(refreshes).toEqual([
+      { cwd: "/Users/reece/Desktop/Abitat_Workspace", threadId: "thread_1" }
+    ]);
+    expect(methods).toContain("thread/read");
   });
 
   it("falls back to raw app-server turns when there is no desktop owner", async () => {

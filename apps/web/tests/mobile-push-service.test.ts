@@ -207,6 +207,41 @@ describe("mobile push service", () => {
 
     expect(pushedHosts).toEqual(["machine_demo"]);
   });
+
+  it("retries a completed Codex turn when no push subscription was available yet", async () => {
+    const pushed: Array<{ attempt: number; turnId: string }> = [];
+    let attempt = 0;
+    const notifier = createCodexCompletionNotifier({
+      codexAppService: {
+        listCompletionStates: async () => [
+          completionState({
+            latestTurnCompletedAt: "2026-05-05T12:00:02.000Z",
+            latestTurnId: "turn_1",
+            status: "approved",
+            updatedAt: "2026-05-05T12:00:02.000Z"
+          })
+        ]
+      },
+      hostMachineId: "machine_demo",
+      mobilePushService: {
+        sendCodexThreadDone: async (input) => {
+          attempt += 1;
+          pushed.push({ attempt, turnId: input.turnId });
+          return attempt === 1 ? 0 : 1;
+        }
+      },
+      now: () => new Date("2026-05-05T12:00:00.000Z")
+    });
+
+    await notifier.pollOnce();
+    await notifier.pollOnce();
+    await notifier.pollOnce();
+
+    expect(pushed).toEqual([
+      { attempt: 1, turnId: "turn_1" },
+      { attempt: 2, turnId: "turn_1" }
+    ]);
+  });
 });
 
 function completionState(input: Partial<CodexCompletionState> = {}): CodexCompletionState {

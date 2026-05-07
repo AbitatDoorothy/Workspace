@@ -470,16 +470,16 @@ function codexThreadToCompletionState(
   const latestTurn = thread.turns.at(-1) ?? null;
   const status = codexThreadStatusToConversationStatus(thread.status);
   const failed = thread.status.type === "systemError" || Boolean(latestTurn?.error);
-  const latestTurnCompletedAt =
-    typeof latestTurn?.completedAt === "number" && Number.isFinite(latestTurn.completedAt)
-      ? secondsToIso(latestTurn.completedAt)
-      : null;
+  const latestTurnCompletedAt = latestTurnCompletedAtIso(thread, latestTurn);
+  const latestTurnCompleted = Boolean(latestTurn && isTurnCompleted(latestTurn));
 
   return {
     conversationId: externalCodexConversationId(thread.id),
     failed,
     isComplete: Boolean(
-      latestTurn?.id && (latestTurnCompletedAt || failed) && status !== "running"
+      latestTurn?.id &&
+      (latestTurnCompletedAt || latestTurnCompleted || failed) &&
+      status !== "running"
     ),
     latestTurnCompletedAt,
     latestTurnId: latestTurn?.id ?? null,
@@ -490,6 +490,31 @@ function codexThreadToCompletionState(
     updatedAt: secondsToIso(safeSeconds(thread.updatedAt, thread.createdAt)),
     workspaceId
   };
+}
+
+function latestTurnCompletedAtIso(thread: CodexAppThread, turn: CodexAppTurn | null) {
+  if (!turn) {
+    return null;
+  }
+
+  if (typeof turn.completedAt === "number" && Number.isFinite(turn.completedAt)) {
+    return secondsToIso(turn.completedAt);
+  }
+
+  if (isTurnCompleted(turn) && Number.isFinite(thread.updatedAt)) {
+    return secondsToIso(thread.updatedAt);
+  }
+
+  return null;
+}
+
+function isTurnCompleted(turn: CodexAppTurn) {
+  return (
+    turn.status === "completed" ||
+    (!!turn.status &&
+      typeof turn.status === "object" &&
+      (turn.status as { type?: unknown }).type === "completed")
+  );
 }
 
 function codexThreadStatusToConversationStatus(status: CodexAppThreadStatus): ConversationStatus {

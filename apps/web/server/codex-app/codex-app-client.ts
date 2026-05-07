@@ -181,7 +181,13 @@ async function startTurnPreferringDesktopOwnerOnce(
     | null
 ) {
   try {
-    return await startTurnThroughDesktopOwnerOnce(serverUrl, threadId, input, options);
+    return await startTurnThroughDesktopOwnerOnce(
+      serverUrl,
+      threadId,
+      input,
+      options,
+      desktopRefresh
+    );
   } catch (error) {
     if (isConnectionFailure(error) || !isDesktopOwnerStartTurnFallbackError(error)) {
       throw error;
@@ -195,9 +201,13 @@ async function startTurnThroughDesktopOwnerOnce(
   serverUrl: string,
   threadId: string,
   input: CodexAppUserInput[],
-  options: CodexAppStartTurnOptions
+  options: CodexAppStartTurnOptions,
+  desktopRefresh:
+    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
+    | null
 ) {
   const connection = await JsonRpcConnection.connect(serverUrl);
+  let keepAliveStarted = false;
 
   try {
     await initializeConnection(connection);
@@ -209,10 +219,33 @@ async function startTurnThroughDesktopOwnerOnce(
       },
       DESKTOP_OWNER_REQUEST_TIMEOUT_MS
     );
+    const normalizedResponse = normalizeStartTurnResponse(response);
 
-    return normalizeStartTurnResponse(response);
+    if (isTurnInProgress(normalizedResponse.turn)) {
+      keepAliveStarted = true;
+      keepTurnConnectionAlive(
+        connection,
+        threadId,
+        normalizedResponse.turn.id,
+        options,
+        desktopRefresh
+      );
+    } else if (desktopRefresh) {
+      keepAliveStarted = true;
+      refreshCompletedTurnInBackground(
+        connection,
+        threadId,
+        normalizedResponse.turn.id,
+        options,
+        desktopRefresh
+      );
+    }
+
+    return normalizedResponse;
   } finally {
-    connection.close();
+    if (!keepAliveStarted) {
+      connection.close();
+    }
   }
 }
 
