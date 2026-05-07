@@ -1,4 +1,5 @@
 import type { ConversationStatus } from "@abitat/shared";
+import type { MobileActivityLog } from "./mobile-activity-log";
 
 export interface CodexCompletionState {
   conversationId: string;
@@ -36,6 +37,7 @@ interface CodexCompletionNotifierLogger {
 }
 
 interface CodexCompletionNotifierOptions {
+  activityLog?: Pick<MobileActivityLog, "record">;
   codexAppService: CodexCompletionNotifierCodexService;
   hostMachineId: string;
   intervalMs?: number;
@@ -71,18 +73,16 @@ export function createCodexCompletionNotifier(options: CodexCompletionNotifierOp
     isPolling = true;
     try {
       const states = await options.codexAppService.listCompletionStates();
+      recordActivity("codex_completion_poll_loaded", {
+        bootstrapping: !hasBootstrapped,
+        stateCount: states.length
+      });
 
       if (!hasBootstrapped) {
         for (const state of states) {
           snapshots.set(state.conversationId, snapshotCompletion(state));
           const key = completionKey(state);
-          if (state.isComplete && completionHappenedAfter(state, startedAtMs)) {
-            if ((await sendCompletionPush(state)) > 0) {
-              notifiedCompletionKeys.add(key);
-            }
-          } else if (state.isComplete) {
-            notifiedCompletionKeys.add(key);
-          }
+          await handleCompletionNotification(state, undefined, key);
         }
         hasBootstrapped = true;
         return;
@@ -94,20 +94,15 @@ export function createCodexCompletionNotifier(options: CodexCompletionNotifierOp
         const key = completionKey(state);
 
         snapshots.set(state.conversationId, snapshotCompletion(state));
+        recordStateChange(state, previous);
 
-        if (
-          shouldNotifyForCompletion(state, previous, startedAtMs) &&
-          !notifiedCompletionKeys.has(key)
-        ) {
-          if ((await sendCompletionPush(state)) > 0) {
-            notifiedCompletionKeys.add(key);
-          }
-        }
+        await handleCompletionNotification(state, previous, key);
       }
 
       for (const conversationId of snapshots.keys()) {
         if (!visibleConversationIds.has(conversationId)) {
           snapshots.delete(conversationId);
+          recordActivity("codex_completion_state_removed", { conversationId });
         }
       }
     } finally {
@@ -146,6 +141,92 @@ export function createCodexCompletionNotifier(options: CodexCompletionNotifierOp
     });
   }
 
+  async function handleCompletionNotification(
+    state: CodexCompletionState,
+    previous: CompletionSnapshot | undefined,
+    key: string
+  ) {
+    if (notifiedCompletionKeys.has(key)) {
+      return;
+    }
+
+    const skipReason = completionNotificationSkipReason(state, previous, startedAtMs);
+
+    if (skipReason) {
+      recordActivity("codex_completion_notification_skipped", {
+        conversationId: state.conversationId,
+        reason: skipReason,
+        status: state.status,
+        turnId: state.latestTurnId ?? "unknown"
+      });
+
+      if (shouldResolveSkippedCompletion(skipReason)) {
+        notifiedCompletionKeys.add(key);
+      }
+      return;
+    }
+
+    let sentCount: number;
+    try {
+      sentCount = await sendCompletionPush(state);
+    } catch (error) {
+      recordActivity("codex_completion_notification_failed", {
+        conversationId: state.conversationId,
+        error: errorMessage(error),
+        failed: state.failed,
+        status: state.status,
+        turnId: state.latestTurnId ?? "unknown"
+      });
+      throw error;
+    }
+
+    if (sentCount > 0) {
+      notifiedCompletionKeys.add(key);
+      recordActivity("codex_completion_notification_sent", {
+        conversationId: state.conversationId,
+        failed: state.failed,
+        sentCount,
+        status: state.status,
+        turnId: state.latestTurnId ?? "unknown"
+      });
+      return;
+    }
+
+    recordActivity("codex_completion_notification_deferred", {
+      conversationId: state.conversationId,
+      reason: "no_push_subscriptions",
+      status: state.status,
+      turnId: state.latestTurnId ?? "unknown"
+    });
+  }
+
+  function recordStateChange(
+    state: CodexCompletionState,
+    previous: CompletionSnapshot | undefined
+  ) {
+    if (!previous || snapshotsEqual(previous, state)) {
+      return;
+    }
+
+    recordActivity("codex_completion_state_changed", {
+      conversationId: state.conversationId,
+      failed: state.failed,
+      isComplete: state.isComplete,
+      previousIsComplete: previous.isComplete,
+      previousStatus: previous.status,
+      previousTurnId: previous.latestTurnId,
+      status: state.status,
+      turnId: state.latestTurnId
+    });
+  }
+
+  function recordActivity(event: string, details: Record<string, unknown> = {}) {
+    options.activityLog?.record(event, {
+      hostMachineId,
+      ...details
+    });
+  }
+
   return {
     pollOnce,
     start
@@ -156,24 +237,50 @@ function normalizeHostMachineId(hostMachineId: string) {
   return hostMachineId.trim() || DEFAULT_HOST_MACHINE_ID;
 }
 
-function shouldNotifyForCompletion(
+function completionNotificationSkipReason(
   state: CodexCompletionState,
   previous: CompletionSnapshot | undefined,
   startedAtMs: number
 ) {
-  if (!state.isComplete || !state.latestTurnId) {
-    return false;
+  if (!state.isComplete) {
+    return "not_complete";
+  }
+
+  if (!state.latestTurnId) {
+    return "missing_turn_id";
+  }
+
+  if (state.status === "cancelled") {
+    return "cancelled";
   }
 
   if (!previous) {
-    return completionHappenedAfter(state, startedAtMs);
+    return completionHappenedAfter(state, startedAtMs) ? null : "before_notifier_start";
   }
 
   if (previous.latestTurnId === state.latestTurnId) {
-    return !previous.isComplete || completionHappenedAfter(state, startedAtMs);
+    if (!previous.isComplete || completionHappenedAfter(state, startedAtMs)) {
+      return null;
+    }
+
+    return "already_completed_before_start";
   }
 
-  return completionHappenedAfter(state, startedAtMs);
+  return completionHappenedAfter(state, startedAtMs) ? null : "before_notifier_start";
+}
+
+function shouldResolveSkippedCompletion(reason: string) {
+  return !["missing_turn_id", "not_complete"].includes(reason);
+}
+
+function snapshotsEqual(previous: CompletionSnapshot, state: CodexCompletionState) {
+  return (
+    previous.isComplete === state.isComplete &&
+    previous.latestTurnCompletedAt === state.latestTurnCompletedAt &&
+    previous.latestTurnId === state.latestTurnId &&
+    previous.status === state.status &&
+    previous.updatedAt === state.updatedAt
+  );
 }
 
 function completionHappenedAfter(state: CodexCompletionState, timestampMs: number) {

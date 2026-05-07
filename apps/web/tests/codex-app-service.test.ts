@@ -195,6 +195,59 @@ describe("Codex app service", () => {
     ]);
   });
 
+  it("does not leave interrupted Codex app turns marked as running", async () => {
+    const cwd = "/Users/reece/Desktop/Abitat_Workspace";
+    const client = createFakeClient([
+      createThread({
+        cwd,
+        id: "thread_interrupted",
+        preview: "Interrupted on the Mac",
+        status: { type: "active", activeFlags: ["waitingOnApproval"] },
+        turns: [
+          {
+            completedAt: 1_775_000_050,
+            durationMs: 1000,
+            error: null,
+            id: "turn_interrupted",
+            items: [
+              {
+                id: "item_agent",
+                memoryCitation: null,
+                phase: null,
+                text: "Interrupted while waiting for approval.",
+                type: "agentMessage"
+              }
+            ],
+            startedAt: 1_775_000_040,
+            status: "interrupted"
+          }
+        ],
+        updatedAt: 1_775_000_050
+      })
+    ]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    const [conversation] = await service.listProjectConversations(externalCodexProjectId(cwd));
+    const completion = (await service.listCompletionStates())[0];
+
+    expect(conversation).toEqual(
+      expect.objectContaining({
+        id: externalCodexConversationId("thread_interrupted"),
+        status: "cancelled"
+      })
+    );
+    expect(completion).toEqual(
+      expect.objectContaining({
+        conversationId: externalCodexConversationId("thread_interrupted"),
+        failed: true,
+        isComplete: true,
+        latestTurnCompletedAt: "2026-03-31T23:34:10.000Z",
+        latestTurnId: "turn_interrupted",
+        status: "cancelled"
+      })
+    );
+  });
+
   it("flattens Codex app thread history into mobile chat messages", async () => {
     const client = createFakeClient([
       createThread({

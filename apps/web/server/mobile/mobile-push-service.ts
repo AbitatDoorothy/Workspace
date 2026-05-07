@@ -1,4 +1,5 @@
 import type { MobilePushSubscription } from "./mobile-service";
+import type { MobileActivityLog } from "./mobile-activity-log";
 
 const EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
 
@@ -41,15 +42,30 @@ interface SendCodexThreadDoneInput {
 
 export function createMobilePushService(
   mobileService: MobilePushServiceMobileService,
-  options: { logger?: MobilePushLogger; transport?: MobilePushTransport } = {}
+  options: {
+    activityLog?: Pick<MobileActivityLog, "record">;
+    logger?: MobilePushLogger;
+    transport?: MobilePushTransport;
+  } = {}
 ) {
   const transport = options.transport ?? createExpoPushTransport();
   const logger = options.logger;
+  const activityLog = options.activityLog;
 
   return {
     async sendCodexThreadDone(input: SendCodexThreadDoneInput) {
       const subscriptions = await mobileService.listPushSubscriptionsForHost({
         hostMachineId: input.hostMachineId,
+        workspaceId: input.workspaceId
+      });
+      activityLog?.record("mobile_push_subscriptions_loaded", {
+        conversationId: input.conversationId,
+        expoSubscriptionCount: subscriptions.filter(
+          (subscription) => subscription.provider === "expo"
+        ).length,
+        hostMachineId: input.hostMachineId,
+        subscriptionCount: subscriptions.length,
+        turnId: input.turnId,
         workspaceId: input.workspaceId
       });
       const messages = subscriptions
@@ -70,13 +86,41 @@ export function createMobilePushService(
         }));
 
       if (messages.length === 0) {
+        activityLog?.record("mobile_push_notification_skipped", {
+          conversationId: input.conversationId,
+          hostMachineId: input.hostMachineId,
+          reason: "no_expo_subscriptions",
+          turnId: input.turnId,
+          workspaceId: input.workspaceId
+        });
         logger?.warn(
           `[mobile-push] No registered Expo push subscriptions for host ${input.hostMachineId} in workspace ${input.workspaceId}. Open the iPhone app once after pairing to register remote notifications.`
         );
         return 0;
       }
 
-      await transport.send(messages);
+      try {
+        await transport.send(messages);
+      } catch (error) {
+        activityLog?.record("mobile_push_notification_failed", {
+          conversationId: input.conversationId,
+          error: errorMessage(error),
+          hostMachineId: input.hostMachineId,
+          messageCount: messages.length,
+          turnId: input.turnId,
+          workspaceId: input.workspaceId
+        });
+        throw error;
+      }
+
+      activityLog?.record("mobile_push_notification_sent", {
+        conversationId: input.conversationId,
+        failed: input.failed,
+        hostMachineId: input.hostMachineId,
+        messageCount: messages.length,
+        turnId: input.turnId,
+        workspaceId: input.workspaceId
+      });
       logger?.info(
         `[mobile-push] Sent ${messages.length} Codex completion push notification${
           messages.length === 1 ? "" : "s"
@@ -171,4 +215,8 @@ function chunkMessages<T>(messages: T[], size: number) {
   }
 
   return chunks;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -69,9 +69,14 @@ export function ConversationScreen({ api, conversation, onBack }: ConversationSc
     async function refresh() {
       try {
         const nextMessages = await api.listMessages(conversation.id);
+        const latestConversations = await api.listConversations(conversation.projectId);
+        const latestConversation = latestConversations.find(
+          (candidate) => candidate.id === conversation.id
+        );
         if (!cancelled) {
           setError(null);
           setMessages(mergeConversationMessages([], nextMessages));
+          setStatus(latestConversation?.status ?? conversation.status);
         }
       } catch (caught) {
         if (!cancelled) {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { mobileService } from "../../../../../server/mobile";
+import { mobileActivityLog } from "../../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../../server/mobile/request-auth";
 
 const registerPushTokenSchema = z.object({
@@ -17,6 +18,13 @@ export async function POST(request: Request) {
       registerPushTokenSchema.parseAsync(await request.json())
     ]);
     const subscription = await mobileService.registerPushToken(actor, input);
+    mobileActivityLog.record("mobile_push_token_registered", {
+      hostMachineId: actor.hostMachineId ?? "unknown",
+      machineId: actor.machineId,
+      platform: subscription.platform,
+      provider: subscription.provider,
+      workspaceId: actor.workspaceId
+    });
     console.info(
       `[mobile-push] Registered ${subscription.provider} push token for phone ${actor.machineId} paired to host ${actor.hostMachineId ?? "unknown"}.`
     );

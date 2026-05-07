@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { mobileService } from "../../../../../server/mobile";
+import { mobileActivityLog } from "../../../../../server/mobile/mobile-activity-log";
 import { formatMobilePushRegistrationDiagnostic } from "../../../../../server/mobile/mobile-push-diagnostics";
 import { requireMobileActor } from "../../../../../server/mobile/request-auth";
 
@@ -18,6 +19,13 @@ export async function POST(request: Request) {
     ]);
 
     await mobileService.recordPushRegistrationDiagnostic(actor, input);
+    mobileActivityLog.record("mobile_push_registration_diagnostic", {
+      hostMachineId: actor.hostMachineId ?? "unknown",
+      machineId: actor.machineId,
+      message: input.message,
+      stage: input.stage,
+      workspaceId: actor.workspaceId
+    });
 
     console.warn(
       formatMobilePushRegistrationDiagnostic({
