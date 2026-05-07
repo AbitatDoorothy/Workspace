@@ -1,30 +1,17 @@
-import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 
-import type { ApiClient } from "../api/client";
 import { Button, Header, StatusPill } from "../components/Controls";
 import { Screen } from "../components/Screen";
 import { sharedStyles } from "../theme";
 import type { MobileBootstrap, RouteName } from "../types";
 
 interface WorkspaceScreenProps {
-  api: ApiClient;
+  bootstrap: MobileBootstrap | null;
+  error: string | null;
   onNavigate(route: RouteName): void;
 }
 
-export function WorkspaceScreen({ api, onNavigate }: WorkspaceScreenProps) {
-  const [bootstrap, setBootstrap] = useState<MobileBootstrap | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api
-      .bootstrap()
-      .then(setBootstrap)
-      .catch((caught) =>
-        setError(caught instanceof Error ? caught.message : "Unable to load workspace")
-      );
-  }, [api]);
-
+export function WorkspaceScreen({ bootstrap, error, onNavigate }: WorkspaceScreenProps) {
   return (
     <Screen>
       <Header
@@ -38,10 +25,10 @@ export function WorkspaceScreen({ api, onNavigate }: WorkspaceScreenProps) {
           <View>
             <Text style={sharedStyles.label}>Mac host</Text>
             <Text style={[sharedStyles.value, { marginTop: 4 }]}>
-              {bootstrap?.host?.name ?? "Waiting for host"}
+              {bootstrap?.host?.name ?? "Checking host"}
             </Text>
           </View>
-          <StatusPill status={bootstrap?.host?.status ?? "pending"} />
+          <StatusPill status={bootstrap?.host?.status ?? "checking"} />
         </View>
       </View>
 

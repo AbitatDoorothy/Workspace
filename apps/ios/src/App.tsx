@@ -50,7 +50,13 @@ export default function App() {
 
   return (
     <View style={{ backgroundColor: colors.canvas, flex: 1 }}>
-      {route === "workspace" ? <WorkspaceScreen api={store.api} onNavigate={setRoute} /> : null}
+      {route === "workspace" ? (
+        <WorkspaceScreen
+          bootstrap={store.bootstrap}
+          error={store.bootstrapError}
+          onNavigate={setRoute}
+        />
+      ) : null}
       {route === "projects" ? (
         <ProjectsScreen
           api={store.api}

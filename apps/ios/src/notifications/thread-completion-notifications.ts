@@ -7,15 +7,19 @@ import type { ApiClient } from "../api/client";
 const PUSH_REGISTRATION_RETRY_INTERVAL_MS = 30000;
 const PUSH_TOKEN_TIMEOUT_MS = 10000;
 
+export const CODEX_COMPLETION_NOTIFICATION_SOUNDS = [
+  "codex-done-1.wav",
+  "codex-done-2.wav",
+  "codex-done-3.wav"
+] as const;
+
 let notificationPermissionPromise: Promise<boolean> | null = null;
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true
-  })
+  handleNotification: async (notification) =>
+    shouldMirrorForegroundNotification(notification)
+      ? silentNotificationBehavior()
+      : visibleNotificationBehavior()
 });
 
 export function rememberRunningConversation(_conversationId: string) {
@@ -132,6 +136,99 @@ export function useThreadCompletionNotifications(api: ApiClient, isEnabled: bool
       clearInterval(interval);
     };
   }, [api, isEnabled]);
+
+  useEffect(() => {
+    if (!isEnabled) {
+      return;
+    }
+
+    const subscription = Notifications.addNotificationReceivedListener((notification) => {
+      void mirrorForegroundCodexCompletionNotification(notification);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isEnabled]);
+}
+
+async function mirrorForegroundCodexCompletionNotification(
+  notification: Notifications.Notification
+) {
+  if (!shouldMirrorForegroundNotification(notification)) {
+    return;
+  }
+
+  const content = notification.request.content;
+
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        body: content.body ?? undefined,
+        data: {
+          ...content.data,
+          foregroundMirror: true
+        },
+        interruptionLevel: "timeSensitive",
+        sound: notificationSoundFromData(content.data),
+        title: content.title ?? "Codex thread done"
+      },
+      trigger: null
+    });
+  } catch (error) {
+    console.warn(`[notifications] Foreground notification mirror failed: ${errorMessage(error)}`);
+  }
+}
+
+export function randomCodexCompletionSound(random = Math.random) {
+  const index = Math.floor(random() * CODEX_COMPLETION_NOTIFICATION_SOUNDS.length);
+  return CODEX_COMPLETION_NOTIFICATION_SOUNDS[
+    Math.max(0, Math.min(index, CODEX_COMPLETION_NOTIFICATION_SOUNDS.length - 1))
+  ];
+}
+
+function notificationSoundFromData(data: Notifications.NotificationContent["data"]) {
+  const sound = data?.sound;
+
+  return typeof sound === "string" && isCodexCompletionSound(sound)
+    ? sound
+    : randomCodexCompletionSound();
+}
+
+function isCodexCompletionSound(sound: string) {
+  return CODEX_COMPLETION_NOTIFICATION_SOUNDS.some((candidate) => candidate === sound);
+}
+
+function shouldMirrorForegroundNotification(notification: Notifications.Notification) {
+  const data = notification.request.content.data;
+
+  return (
+    data?.source === "codex_app" &&
+    typeof data.conversationId === "string" &&
+    typeof data.turnId === "string" &&
+    data.foregroundMirror !== true &&
+    data.foregroundMirror !== "true"
+  );
+}
+
+function visibleNotificationBehavior(): Notifications.NotificationBehavior {
+  return {
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true
+  };
+}
+
+function silentNotificationBehavior(): Notifications.NotificationBehavior {
+  return {
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+    shouldShowAlert: false,
+    shouldShowBanner: false,
+    shouldShowList: false
+  };
 }
 
 function pushTokenOptions() {

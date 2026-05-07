@@ -10,6 +10,10 @@ const CODEX_THREAD_PREFIX = "codex_thread_";
 const DEFAULT_WORKSPACE_ID = "workspace_demo";
 const DEFAULT_USER_ID = "user_demo";
 const MAX_CODEX_MESSAGE_CONTENT_LENGTH = 12_000;
+const PHONE_FULL_ACCESS_TURN_OPTIONS = {
+  approvalPolicy: "never",
+  sandboxPolicy: { type: "dangerFullAccess" }
+} satisfies Pick<CodexAppStartTurnOptions, "approvalPolicy" | "sandboxPolicy">;
 
 export type CodexAppThreadStatus =
   | { type: "active"; activeFlags?: unknown[] }
@@ -31,6 +35,12 @@ export type CodexAppUserInput =
   | { type: "localImage"; path: string }
   | { type: "skill"; name: string; path: string }
   | { type: "mention"; name: string; path: string };
+
+export interface CodexAppAttachmentInput {
+  kind: "file" | "image";
+  name: string;
+  path: string;
+}
 
 export type CodexAppThreadItem =
   | { type: "userMessage"; id: string; content: CodexAppUserInput[] }
@@ -105,7 +115,9 @@ export interface CodexAppThreadListResponse {
 }
 
 export interface CodexAppStartTurnOptions {
+  approvalPolicy?: "never";
   cwd?: string | null;
+  sandboxPolicy?: { type: "dangerFullAccess" };
 }
 
 export interface CodexAppClient {
@@ -189,7 +201,13 @@ interface CodexAppServiceOptions {
 }
 
 interface StartConversationInput {
+  attachments?: CodexAppAttachmentInput[];
   prompt: string;
+}
+
+interface ListMessagesOptions {
+  afterSequence?: number;
+  includeRuntime?: boolean;
 }
 
 export function createCodexAppService(
@@ -198,6 +216,13 @@ export function createCodexAppService(
 ) {
   const workspaceId = options.workspaceId ?? DEFAULT_WORKSPACE_ID;
   const userId = options.userId ?? DEFAULT_USER_ID;
+  const messageCache = new Map<
+    string,
+    {
+      messages: CodexAppMessage[];
+      updatedAt: number;
+    }
+  >();
 
   async function listAllThreads(params: CodexAppThreadListParams = {}) {
     const threads: CodexAppThread[] = [];
@@ -266,7 +291,7 @@ export function createCodexAppService(
     projectId: string
   ): Promise<CodexAppConversationSummary[]> {
     const cwd = await resolveProjectCwd(projectId);
-    const threads = await readThreadsWithTurns(await listAllThreads({ cwd }));
+    const threads = await listAllThreads({ cwd });
 
     return threads
       .filter((thread) => externalCodexProjectId(thread.cwd) === projectId)
@@ -295,14 +320,17 @@ export function createCodexAppService(
 
     listProjectConversations,
 
-    async listMessages(conversationId: string, options: { afterSequence?: number } = {}) {
+    async listMessages(conversationId: string, options: ListMessagesOptions = {}) {
       const threadId = toCodexThreadId(conversationId);
-      const thread = await client.readThread(threadId, true);
-      const messages = flattenThreadMessages(thread, externalCodexConversationId(threadId));
+      const messages = await cachedThreadMessages(threadId, externalCodexConversationId(threadId));
+      const filteredMessages =
+        options.includeRuntime === false
+          ? messages.filter((message) => message.role !== "runtime")
+          : messages;
 
       return typeof options.afterSequence === "number"
-        ? messages.filter((message) => message.sequence > options.afterSequence!)
-        : messages;
+        ? filteredMessages.filter((message) => message.sequence > options.afterSequence!)
+        : filteredMessages;
     },
 
     async startConversation(projectId: string, input: StartConversationInput) {
@@ -313,7 +341,11 @@ export function createCodexAppService(
         experimentalRawEvents: false,
         persistExtendedHistory: true
       });
-      await client.startTurn(thread.id, textInput(prompt), { cwd });
+      await client.startTurn(thread.id, userInput(prompt, input.attachments), {
+        ...PHONE_FULL_ACCESS_TURN_OPTIONS,
+        cwd
+      });
+      messageCache.delete(thread.id);
 
       return {
         conversationId: externalCodexConversationId(thread.id),
@@ -346,15 +378,22 @@ export function createCodexAppService(
       }
 
       try {
-        await client.startTurn(threadId, textInput(prompt), { cwd: thread.cwd });
+        await client.startTurn(threadId, userInput(prompt, input.attachments), {
+          ...PHONE_FULL_ACCESS_TURN_OPTIONS,
+          cwd: thread.cwd
+        });
       } catch (error) {
         if (!isThreadNotFoundError(error, threadId)) {
           throw error;
         }
 
         await resumeThread();
-        await client.startTurn(threadId, textInput(prompt), { cwd: thread.cwd });
+        await client.startTurn(threadId, userInput(prompt, input.attachments), {
+          ...PHONE_FULL_ACCESS_TURN_OPTIONS,
+          cwd: thread.cwd
+        });
       }
+      messageCache.delete(threadId);
 
       return {
         conversationId: externalCodexConversationId(threadId),
@@ -373,6 +412,25 @@ export function createCodexAppService(
         }
       })
     );
+  }
+
+  async function cachedThreadMessages(threadId: string, conversationId: string) {
+    const cached = messageCache.get(threadId);
+
+    if (cached) {
+      const threadSummary = await client.readThread(threadId, false);
+      if (threadSummary.updatedAt === cached.updatedAt) {
+        return cached.messages;
+      }
+    }
+
+    const thread = await client.readThread(threadId, true);
+    const messages = flattenThreadMessages(thread, conversationId);
+    messageCache.set(threadId, {
+      messages,
+      updatedAt: thread.updatedAt
+    });
+    return messages;
   }
 }
 
@@ -643,8 +701,20 @@ function userInputToText(input: CodexAppUserInput) {
   }
 }
 
-function textInput(prompt: string): CodexAppUserInput[] {
-  return [{ text: prompt, text_elements: [], type: "text" }];
+function userInput(
+  prompt: string,
+  attachments: CodexAppAttachmentInput[] = []
+): CodexAppUserInput[] {
+  return [
+    { text: prompt, text_elements: [], type: "text" },
+    ...attachments.map((attachment): CodexAppUserInput => {
+      if (attachment.kind === "image") {
+        return { path: attachment.path, type: "localImage" };
+      }
+
+      return { name: attachment.name, path: attachment.path, type: "mention" };
+    })
+  ];
 }
 
 function normalizedPrompt(prompt: string) {

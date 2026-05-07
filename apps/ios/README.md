@@ -13,6 +13,16 @@ pnpm --filter abitat-ios start
 Set `ABITAT_MOBILE_API_URL` in Expo config or the pairing screen when testing against a local
 tunnel. The default API base is `https://workspace.abitat.io`.
 
+## Notification Sounds
+
+Codex completion pushes use the bundled `codex-done-*.wav` sounds declared in `app.json` through
+the `expo-notifications` config plugin. Expo copies these files into the native iOS app at build
+time, and the web API sends the selected filename in the Expo push payload.
+
+Changing, adding, or removing these sounds requires rebuilding and reinstalling the iPhone app.
+JavaScript-only reloads cannot add new native notification sound assets to an already installed iOS
+binary.
+
 ## Screens
 
 - Pairing: manual code entry with space for QR scanner integration.

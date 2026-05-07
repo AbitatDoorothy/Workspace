@@ -223,6 +223,7 @@ async function startTurnThroughDesktopOwnerOnce(
 
     if (isTurnInProgress(normalizedResponse.turn)) {
       keepAliveStarted = true;
+      refreshStartedTurnInBackground(threadId, options, desktopRefresh);
       keepTurnConnectionAlive(
         connection,
         threadId,
@@ -270,6 +271,7 @@ async function startTurnWithKeepAliveOnce(
 
     if (isTurnInProgress(response.turn)) {
       keepAliveStarted = true;
+      refreshStartedTurnInBackground(threadId, options, desktopRefresh);
       keepTurnConnectionAlive(connection, threadId, response.turn.id, options, desktopRefresh);
     } else if (desktopRefresh) {
       keepAliveStarted = true;
@@ -301,6 +303,30 @@ async function initializeConnection(connection: JsonRpcConnection) {
     }
   });
   connection.notify("initialized");
+}
+
+function refreshStartedTurnInBackground(
+  threadId: string,
+  options: CodexAppStartTurnOptions,
+  desktopRefresh:
+    | ((threadId: string, options?: CodexAppStartTurnOptions) => Promise<void> | void)
+    | null
+) {
+  if (!desktopRefresh) {
+    return;
+  }
+
+  const refresh = Promise.resolve()
+    .then(() => desktopRefresh(threadId, options))
+    .catch(() => {
+      // Desktop refresh is best-effort; starting the turn is the durable operation.
+    })
+    .finally(() => {
+      activeTurnKeepAlives.delete(refresh);
+    });
+
+  activeTurnKeepAlives.add(refresh);
+  void refresh;
 }
 
 function keepTurnConnectionAlive(
@@ -388,8 +414,10 @@ function turnStartParams(
   options: CodexAppStartTurnOptions
 ) {
   return {
+    ...(options.approvalPolicy ? { approvalPolicy: options.approvalPolicy } : {}),
     ...(options.cwd ? { cwd: options.cwd } : {}),
     input,
+    ...(options.sandboxPolicy ? { sandboxPolicy: options.sandboxPolicy } : {}),
     threadId
   };
 }
@@ -724,9 +752,11 @@ async function refreshCodexDesktopThread(threadId: string) {
     return;
   }
 
-  await delay(500);
+  await delay(300);
   await openCodexDeepLink("codex://settings");
-  await delay(500);
+  await delay(300);
+  await openCodexDeepLink(`codex://local/${encodeURIComponent(threadId)}`);
+  await delay(250);
   await openCodexDeepLink(`codex://local/${encodeURIComponent(threadId)}`);
 }
 

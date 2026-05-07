@@ -29,6 +29,11 @@ if (!packageJson.dependencies?.["expo-notifications"]) {
 if (!packageJson.dependencies?.["expo-constants"]) {
   throw new Error("Expected abitat-ios to depend on expo-constants for push registration");
 }
+for (const dependency of ["expo-document-picker", "expo-file-system", "expo-image-picker"]) {
+  if (!packageJson.dependencies?.[dependency]) {
+    throw new Error(`Expected abitat-ios to depend on ${dependency} for mobile attachments`);
+  }
+}
 
 const indexFile = await readFile(join(process.cwd(), "index.ts"), "utf8");
 if (!indexFile.includes("registerRootComponent(App)")) {
@@ -36,8 +41,25 @@ if (!indexFile.includes("registerRootComponent(App)")) {
 }
 
 const appJson = JSON.parse(await readFile(join(process.cwd(), "app.json"), "utf8"));
-if (!appJson.expo?.plugins?.includes("expo-notifications")) {
+const expoNotificationsPlugin = appJson.expo?.plugins?.find((plugin) =>
+  Array.isArray(plugin) ? plugin[0] === "expo-notifications" : plugin === "expo-notifications"
+);
+if (!expoNotificationsPlugin) {
   throw new Error("Expected app.json to include the expo-notifications config plugin");
+}
+const notificationSounds = [
+  "./assets/notifications/codex-done-1.wav",
+  "./assets/notifications/codex-done-2.wav",
+  "./assets/notifications/codex-done-3.wav"
+];
+if (!Array.isArray(expoNotificationsPlugin) || !Array.isArray(expoNotificationsPlugin[1]?.sounds)) {
+  throw new Error("Expected expo-notifications config plugin to bundle custom sounds");
+}
+for (const sound of notificationSounds) {
+  if (!expoNotificationsPlugin[1].sounds.includes(sound)) {
+    throw new Error(`Expected expo-notifications to bundle ${sound}`);
+  }
+  await access(join(process.cwd(), sound));
 }
 for (const mode of ["fetch", "remote-notification"]) {
   if (!appJson.expo?.ios?.infoPlist?.UIBackgroundModes?.includes(mode)) {
@@ -137,8 +159,11 @@ for (const removedGate of [
     );
   }
 }
-if (!conversationScreen.includes("const nextMessages = await api.listMessages(conversation.id);")) {
-  throw new Error("Expected ConversationScreen to load messages when opening any conversation");
+if (!conversationScreen.includes("latestSequenceRef")) {
+  throw new Error("Expected ConversationScreen to track the latest synced message sequence");
+}
+if (!conversationScreen.includes("includeRuntime: false")) {
+  throw new Error("Expected ConversationScreen to skip runtime output in mobile history requests");
 }
 if (!conversationScreen.includes("const latestConversation = latestConversations.find")) {
   throw new Error("Expected ConversationScreen to refresh conversation status while open");
@@ -182,6 +207,20 @@ if (!conversationScreen.includes("styles.composerRow")) {
 if (!conversationScreen.includes("styles.composerInput")) {
   throw new Error("Expected ConversationScreen message input to flex within the composer row");
 }
+for (const expected of [
+  "createOptimisticMessage",
+  "localStatus",
+  "markLocalMessageFailed",
+  "markLocalMessageSent",
+  "sendGitShortcut",
+  "pickImageAttachment",
+  "pickFileAttachment",
+  "uploadAttachment"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected ConversationScreen to include ${expected}`);
+  }
+}
 
 const appScreen = await readFile(join(process.cwd(), "src/App.tsx"), "utf8");
 if (!appScreen.includes("useThreadCompletionNotifications")) {
@@ -206,14 +245,16 @@ for (const expected of [
   "registerPushToken",
   "reportPushRegistrationIssue",
   "withPushRegistrationTimeout",
-  "allowSound"
+  "allowSound",
+  "CODEX_COMPLETION_NOTIFICATION_SOUNDS",
+  "randomCodexCompletionSound",
+  "mirrorForegroundCodexCompletionNotification"
 ]) {
   if (!notificationWatcher.includes(expected)) {
     throw new Error(`Expected notification watcher to include ${expected}`);
   }
 }
 for (const duplicateNotificationPath of [
-  "Notifications.scheduleNotificationAsync",
   "pollCompletionsForForegroundFallback",
   "sendForegroundThreadDoneNotification",
   "shouldNotifyForCompletedTurn",

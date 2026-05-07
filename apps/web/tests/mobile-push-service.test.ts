@@ -57,15 +57,15 @@ describe("mobile push service", () => {
       [
         expect.objectContaining({
           body: "Fix the notifications",
-          data: {
+          data: expect.objectContaining({
             conversationId: "codex_thread_thread_1",
             projectId: "codex_project_project_1",
             source: "codex_app",
             turnId: "turn_1"
-          },
+          }),
           interruptionLevel: "time-sensitive",
           priority: "high",
-          sound: "default",
+          sound: expect.stringMatching(/^codex-done-[123]\.wav$/u),
           title: "Codex thread done",
           to: "ExpoPushToken[test-token]"
         })
@@ -138,6 +138,47 @@ describe("mobile push service", () => {
     );
   });
 
+  it("uses a bundled custom iOS sound for Codex completion pushes", async () => {
+    const sent: unknown[][] = [];
+    const service = createMobilePushService(
+      {
+        listPushSubscriptionsForHost: async () => [
+          {
+            machineId: "machine_phone",
+            platform: "ios",
+            provider: "expo",
+            token: "ExpoPushToken[test-token]"
+          }
+        ]
+      },
+      {
+        soundPicker: () => "codex-done-2.wav",
+        transport: {
+          send: async (messages) => {
+            sent.push(messages);
+          }
+        }
+      }
+    );
+
+    await service.sendCodexThreadDone({
+      conversationId: "codex_thread_thread_1",
+      failed: false,
+      hostMachineId: "machine_demo",
+      projectId: "codex_project_project_1",
+      prompt: "Fix the notifications",
+      source: "codex_app",
+      turnId: "turn_1",
+      workspaceId: "workspace_demo"
+    });
+
+    expect(sent[0]?.[0]).toEqual(
+      expect.objectContaining({
+        sound: "codex-done-2.wav"
+      })
+    );
+  });
+
   it("rejects Expo push ticket errors returned in successful HTTP responses", async () => {
     const transport = createExpoPushTransport(async () => {
       return new Response(
@@ -161,15 +202,15 @@ describe("mobile push service", () => {
       transport.send([
         {
           body: "Fix notifications",
-          data: {
+          data: expect.objectContaining({
             conversationId: "codex_thread_thread_1",
             projectId: "codex_project_project_1",
             source: "codex_app",
             turnId: "turn_1"
-          },
+          }),
           interruptionLevel: "time-sensitive",
           priority: "high",
-          sound: "default",
+          sound: "codex-done-1.wav",
           title: "Codex thread done",
           to: "ExpoPushToken[test-token]"
         }

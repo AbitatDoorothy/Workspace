@@ -69,6 +69,14 @@ export interface ConversationMessage {
   createdAt: string;
 }
 
+export interface ConversationAttachment {
+  kind: "file" | "image";
+  mimeType: string;
+  name: string;
+  path: string;
+  size: number;
+}
+
 export interface CodexCompletionSummary {
   conversationId: string;
   failed: boolean;

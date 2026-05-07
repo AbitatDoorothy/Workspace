@@ -1,5 +1,6 @@
 import type {
   CodexCompletionSummary,
+  ConversationAttachment,
   ConversationMessage,
   ConversationSummary,
   MobileBootstrap,
@@ -18,7 +19,11 @@ export interface ApiClient {
   }): Promise<PairingState>;
   continueConversation(
     conversationId: string,
-    input: { prompt: string; clientMessageId: string }
+    input: {
+      attachments?: Pick<ConversationAttachment, "kind" | "name" | "path">[];
+      prompt: string;
+      clientMessageId: string;
+    }
   ): Promise<{ conversationId: string; status: string }>;
   createConversation(
     projectId: string,
@@ -28,7 +33,11 @@ export interface ApiClient {
   endRemoteSession(sessionId: string): Promise<RemoteControlSession>;
   listConversations(projectId: string): Promise<ConversationSummary[]>;
   listCompletionStates(): Promise<CodexCompletionSummary[]>;
-  listMessages(conversationId: string, afterSequence?: number): Promise<ConversationMessage[]>;
+  listMessages(
+    conversationId: string,
+    afterSequence?: number,
+    options?: { includeRuntime?: boolean }
+  ): Promise<ConversationMessage[]>;
   listProjects(): Promise<ProjectSummary[]>;
   listRemoteSignals(sessionId: string): Promise<RemoteControlSignal[]>;
   registerPushToken(input: { platform: "ios"; provider: "expo"; token: string }): Promise<void>;
@@ -37,6 +46,11 @@ export interface ApiClient {
     sessionId: string,
     input: { type: string; payload: Record<string, unknown>; recipientMachineId?: string }
   ): Promise<void>;
+  uploadAttachment(input: {
+    dataBase64: string;
+    fileName: string;
+    mimeType: string;
+  }): Promise<ConversationAttachment>;
 }
 
 export function createApiClient(pairing: PairingState): ApiClient {
@@ -84,13 +98,10 @@ export function createApiClient(pairing: PairingState): ApiClient {
       get(pairing, "/api/mobile/codex/completions").then(
         (body) => body.completions as CodexCompletionSummary[]
       ),
-    listMessages: (conversationId, afterSequence) =>
-      get(
-        pairing,
-        `/api/mobile/conversations/${conversationId}/messages${
-          afterSequence ? `?afterSequence=${afterSequence}` : ""
-        }`
-      ).then((body) => body.messages as ConversationMessage[]),
+    listMessages: (conversationId, afterSequence, options) =>
+      get(pairing, mobileMessagesPath(conversationId, afterSequence, options)).then(
+        (body) => body.messages as ConversationMessage[]
+      ),
     listProjects: () =>
       get(pairing, "/api/mobile/projects").then((body) => body.projects as ProjectSummary[]),
     listRemoteSignals: (sessionId) =>
@@ -104,6 +115,10 @@ export function createApiClient(pairing: PairingState): ApiClient {
     sendRemoteSignal: (sessionId, input) =>
       post(pairing, `/api/remote-control/sessions/${sessionId}/signals`, input).then(
         () => undefined
+      ),
+    uploadAttachment: (input) =>
+      post(pairing, "/api/mobile/attachments", input).then(
+        (body) => body.attachment as ConversationAttachment
       )
   };
 }
@@ -149,7 +164,7 @@ async function request(pairing: PairingState, path: string, init: RequestInit) {
     throw new Error(await readableError(response));
   }
 
-  return response.json() as Promise<Record<string, any>>;
+  return readJsonBody(response, path) as Promise<Record<string, any>>;
 }
 
 async function postUnauthed(apiUrl: string, path: string, body: unknown) {
@@ -165,14 +180,56 @@ async function postUnauthed(apiUrl: string, path: string, body: unknown) {
     throw new Error(await readableError(response));
   }
 
-  return response.json() as Promise<Record<string, string>>;
+  return readJsonBody(response, path) as Promise<Record<string, string>>;
 }
 
 async function readableError(response: Response) {
-  try {
-    const body = (await response.json()) as { error?: string };
-    return body.error ?? `${response.status} ${response.statusText}`;
-  } catch {
+  const text = await response.text();
+  if (!text.trim()) {
     return `${response.status} ${response.statusText}`;
   }
+
+  try {
+    const body = JSON.parse(text) as { error?: string };
+    return body.error ?? `${response.status} ${response.statusText}`;
+  } catch {
+    return text;
+  }
+}
+
+async function readJsonBody(response: Response, path: string) {
+  const text = await response.text();
+
+  if (!text.trim()) {
+    throw new Error(`Empty response from ${path}`);
+  }
+
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(`Invalid JSON response from ${path}: ${errorMessage(error)}`);
+  }
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function mobileMessagesPath(
+  conversationId: string,
+  afterSequence?: number,
+  options: { includeRuntime?: boolean } = {}
+) {
+  const params: string[] = [];
+
+  if (typeof afterSequence === "number") {
+    params.push(`afterSequence=${encodeURIComponent(String(afterSequence))}`);
+  }
+
+  if (options.includeRuntime) {
+    params.push("includeRuntime=true");
+  }
+
+  const query = params.join("&");
+  return `/api/mobile/conversations/${conversationId}/messages${query ? `?${query}` : ""}`;
 }

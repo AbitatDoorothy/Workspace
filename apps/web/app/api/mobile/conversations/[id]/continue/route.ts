@@ -10,12 +10,22 @@ import { runEventService } from "../../../../../../server/run-events";
 
 const continueRequestSchema = z
   .object({
+    attachments: z
+      .array(
+        z.object({
+          kind: z.enum(["file", "image"]),
+          name: z.string().trim().min(1),
+          path: z.string().trim().min(1)
+        })
+      )
+      .default([]),
     prompt: z.string().trim().optional(),
     content: z.string().trim().optional(),
     clientMessageId: z.string().min(1).optional(),
     metadata: z.record(z.string(), z.unknown()).default({})
   })
   .transform((input) => ({
+    attachments: input.attachments,
     prompt: input.prompt ?? input.content ?? "",
     clientMessageId: input.clientMessageId,
     metadata: input.metadata
@@ -25,19 +35,48 @@ const continueRequestSchema = z
   });
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  let conversationId = "unknown";
+  let actorDetails: Record<string, unknown> = {};
+  let requestDetails: Record<string, unknown> = {};
+
   try {
     const [{ id }, actor, input] = await Promise.all([
       context.params,
       requireMobileActor(request),
       continueRequestSchema.parseAsync(await request.json())
     ]);
+    conversationId = id;
+    actorDetails = {
+      hostMachineId: actor.hostMachineId,
+      machineId: actor.machineId,
+      workspaceId: actor.workspaceId
+    };
+    requestDetails = {
+      attachmentCount: input.attachments.length,
+      clientMessageId: input.clientMessageId ?? "unknown"
+    };
+
+    mobileActivityLog.record("mobile_conversation_continue_requested", {
+      conversationId,
+      ...actorDetails,
+      ...requestDetails
+    });
 
     if (!actor.hostMachineId) {
       throw new Error("Phone is not paired to a Mac host");
     }
 
     if (isCodexConversationId(id)) {
+      mobileActivityLog.record("mobile_codex_conversation_continue_requested", {
+        attachmentCount: input.attachments.length,
+        clientMessageId: input.clientMessageId ?? "unknown",
+        conversationId: id,
+        hostMachineId: actor.hostMachineId,
+        machineId: actor.machineId,
+        workspaceId: actor.workspaceId
+      });
       const conversation = await codexAppService.continueConversation(id, {
+        attachments: input.attachments,
         prompt: input.prompt
       });
       mobileActivityLog.record("mobile_codex_conversation_continued", {
@@ -65,7 +104,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       role: "user",
       sourceDeviceId: actor.machineId,
       clientMessageId: input.clientMessageId,
-      metadata: { ...input.metadata, client: "ios", action: "continue" }
+      metadata: {
+        ...input.metadata,
+        attachments: input.attachments,
+        client: "ios",
+        action: "continue"
+      }
     });
     const conversation = await conversationQueueService.continueConversation(id, {
       prompt: input.prompt,
@@ -94,6 +138,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       status: conversation.status
     });
   } catch (error) {
+    mobileActivityLog.record("mobile_conversation_continue_failed", {
+      conversationId,
+      error: error instanceof Error ? error.message : String(error),
+      ...actorDetails,
+      ...requestDetails
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to continue mobile conversation" },
       { status: error instanceof Error && error.message === "Invalid mobile token" ? 401 : 400 }

@@ -169,6 +169,8 @@ describe("Codex app client", () => {
       "thread_1",
       [{ text: "hello from phone", text_elements: [], type: "text" }],
       {
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "dangerFullAccess" },
         cwd: "/Users/reece/Desktop/Abitat_Workspace"
       }
     );
@@ -179,8 +181,10 @@ describe("Codex app client", () => {
     expect(followerParams).toEqual({
       conversationId: "thread_1",
       turnStartParams: {
+        approvalPolicy: "never",
         cwd: "/Users/reece/Desktop/Abitat_Workspace",
         input: [{ text: "hello from phone", text_elements: [], type: "text" }],
+        sandboxPolicy: { type: "dangerFullAccess" },
         threadId: "thread_1"
       }
     });
@@ -253,7 +257,9 @@ describe("Codex app client", () => {
     await delay(50);
 
     expect(closeResolved).toBe(false);
-    expect(refreshes).toEqual([]);
+    expect(refreshes).toEqual([
+      { cwd: "/Users/reece/Desktop/Abitat_Workspace", threadId: "thread_1" }
+    ]);
     if (!activeSocket) {
       throw new Error("Expected the desktop-owner websocket to stay available");
     }
@@ -273,6 +279,7 @@ describe("Codex app client", () => {
     await closed;
 
     expect(refreshes).toEqual([
+      { cwd: "/Users/reece/Desktop/Abitat_Workspace", threadId: "thread_1" },
       { cwd: "/Users/reece/Desktop/Abitat_Workspace", threadId: "thread_1" }
     ]);
     expect(methods).toContain("thread/read");
@@ -319,14 +326,18 @@ describe("Codex app client", () => {
       "thread_1",
       [{ text: "hello from phone", text_elements: [], type: "text" }],
       {
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "dangerFullAccess" },
         cwd: "/Users/reece/Desktop/Abitat_Workspace"
       }
     );
 
     expect(response.turn.id).toBe("turn_raw");
     expect(rawTurnParams).toEqual({
+      approvalPolicy: "never",
       cwd: "/Users/reece/Desktop/Abitat_Workspace",
       input: [{ text: "hello from phone", text_elements: [], type: "text" }],
+      sandboxPolicy: { type: "dangerFullAccess" },
       threadId: "thread_1"
     });
     expect(methods).toEqual([
@@ -519,7 +530,9 @@ describe("Codex app client", () => {
     });
     await delay(50);
 
-    expect(refreshes).toEqual([]);
+    expect(refreshes).toEqual([
+      { cwd: "/Users/reece/Desktop/Abitat_Workspace", threadId: "thread_1" }
+    ]);
     if (!activeSocket) {
       throw new Error("Expected the mock server to receive a Codex app websocket connection");
     }
@@ -536,6 +549,7 @@ describe("Codex app client", () => {
     await closed;
 
     expect(refreshes).toEqual([
+      { cwd: "/Users/reece/Desktop/Abitat_Workspace", threadId: "thread_1" },
       { cwd: "/Users/reece/Desktop/Abitat_Workspace", threadId: "thread_1" }
     ]);
     expect(methods).toContain("thread/read");

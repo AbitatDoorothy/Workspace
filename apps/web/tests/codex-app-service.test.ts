@@ -33,8 +33,18 @@ function createThread(input: Partial<CodexAppThread> & Pick<CodexAppThread, "id"
 }
 
 interface FakeCodexAppClient extends CodexAppClient {
+  readThreadRequests: Array<{
+    includeTurns: boolean;
+    threadId: string;
+  }>;
   resumedThreads: string[];
-  startedTurns: Array<{ threadId: string; cwd?: string | null; input: string }>;
+  startedTurns: Array<{
+    approvalPolicy?: unknown;
+    cwd?: string | null;
+    input: string;
+    sandboxPolicy?: unknown;
+    threadId: string;
+  }>;
   startedThreads: string[];
   resumeThread(params: {
     threadId: string;
@@ -46,11 +56,13 @@ function createFakeClient(
   threads: CodexAppThread[],
   clientOptions: { rejectUnloadedTurns?: boolean } = {}
 ): FakeCodexAppClient {
+  const readThreadRequests: FakeCodexAppClient["readThreadRequests"] = [];
   const resumedThreads: string[] = [];
-  const startedTurns: Array<{ threadId: string; cwd?: string | null; input: string }> = [];
+  const startedTurns: FakeCodexAppClient["startedTurns"] = [];
   const startedThreads: string[] = [];
 
   return {
+    readThreadRequests,
     resumedThreads,
     startedThreads,
     startedTurns,
@@ -62,7 +74,8 @@ function createFakeClient(
         nextCursor: null
       };
     },
-    async readThread(threadId) {
+    async readThread(threadId, includeTurns = true) {
+      readThreadRequests.push({ includeTurns, threadId });
       const thread = threads.find((candidate) => candidate.id === threadId);
       if (!thread) {
         throw new Error(`Missing thread ${threadId}`);
@@ -104,7 +117,13 @@ function createFakeClient(
         .map((item) => item.text)
         .join("\n");
 
-      startedTurns.push({ cwd: options?.cwd, input: text, threadId });
+      startedTurns.push({
+        approvalPolicy: options?.approvalPolicy,
+        cwd: options?.cwd,
+        input: text,
+        sandboxPolicy: options?.sandboxPolicy,
+        threadId
+      });
       return {
         turn: {
           completedAt: null,
@@ -193,6 +212,41 @@ describe("Codex app service", () => {
         worktreePath: cwd
       })
     ]);
+  });
+
+  it("lists Codex project conversations from thread summaries without reading full turn history", async () => {
+    const cwd = "/Users/reece/Desktop/Abitat_Workspace";
+    const client = createFakeClient([
+      createThread({
+        cwd,
+        id: "thread_a",
+        preview: "Add iPhone app",
+        turns: [
+          {
+            completedAt: 1_775_000_050,
+            durationMs: 1000,
+            error: null,
+            id: "turn_a",
+            items: [
+              {
+                id: "item_agent",
+                memoryCitation: null,
+                phase: null,
+                text: "Done.",
+                type: "agentMessage"
+              }
+            ],
+            startedAt: 1_775_000_040,
+            status: "completed"
+          }
+        ]
+      })
+    ]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    await service.listProjectConversations(externalCodexProjectId(cwd));
+
+    expect(client.readThreadRequests).toEqual([]);
   });
 
   it("does not leave interrupted Codex app turns marked as running", async () => {
@@ -315,6 +369,105 @@ describe("Codex app service", () => {
         role: "runtime",
         sequence: 3
       })
+    ]);
+  });
+
+  it("can omit runtime command output from mobile Codex message history", async () => {
+    const client = createFakeClient([
+      createThread({
+        cwd: "/Users/reece/Desktop/Abitat_Workspace",
+        id: "thread_a",
+        turns: [
+          {
+            completedAt: 1_775_000_006,
+            durationMs: 1000,
+            error: null,
+            id: "turn_a",
+            items: [
+              {
+                content: [
+                  { text: "Can you inspect this project?", text_elements: [], type: "text" }
+                ],
+                id: "item_user",
+                type: "userMessage"
+              },
+              {
+                aggregatedOutput: "x".repeat(20_000),
+                command: "pnpm test",
+                commandActions: [],
+                cwd: "/Users/reece/Desktop/Abitat_Workspace",
+                durationMs: 10,
+                exitCode: 0,
+                id: "item_command",
+                processId: null,
+                source: "localShell",
+                status: "completed",
+                type: "commandExecution"
+              },
+              {
+                id: "item_agent",
+                memoryCitation: null,
+                phase: null,
+                text: "I will inspect the project structure.",
+                type: "agentMessage"
+              }
+            ],
+            startedAt: 1_775_000_005,
+            status: { type: "completed" }
+          }
+        ]
+      })
+    ]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    const messages = await service.listMessages(externalCodexConversationId("thread_a"), {
+      includeRuntime: false
+    });
+
+    expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+  });
+
+  it("reuses cached Codex history when polling for messages after the thread has not changed", async () => {
+    const client = createFakeClient([
+      createThread({
+        cwd: "/Users/reece/Desktop/Abitat_Workspace",
+        id: "thread_a",
+        turns: [
+          {
+            completedAt: 1_775_000_006,
+            durationMs: 1000,
+            error: null,
+            id: "turn_a",
+            items: [
+              {
+                content: [
+                  { text: "Can you inspect this project?", text_elements: [], type: "text" }
+                ],
+                id: "item_user",
+                type: "userMessage"
+              },
+              {
+                id: "item_agent",
+                memoryCitation: null,
+                phase: null,
+                text: "I will inspect the project structure.",
+                type: "agentMessage"
+              }
+            ],
+            startedAt: 1_775_000_005,
+            status: { type: "completed" }
+          }
+        ]
+      })
+    ]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    await service.listMessages(externalCodexConversationId("thread_a"));
+    await service.listMessages(externalCodexConversationId("thread_a"), { afterSequence: 1 });
+
+    expect(client.readThreadRequests).toEqual([
+      { includeTurns: true, threadId: "thread_a" },
+      { includeTurns: false, threadId: "thread_a" }
     ]);
   });
 
@@ -564,8 +717,20 @@ describe("Codex app service", () => {
     });
     expect(client.startedThreads).toEqual([cwd]);
     expect(client.startedTurns).toEqual([
-      { cwd, input: "Start from my phone", threadId: "thread_new" },
-      { cwd, input: "Keep going from iPhone", threadId: "thread_a" }
+      {
+        approvalPolicy: "never",
+        cwd,
+        input: "Start from my phone",
+        sandboxPolicy: { type: "dangerFullAccess" },
+        threadId: "thread_new"
+      },
+      {
+        approvalPolicy: "never",
+        cwd,
+        input: "Keep going from iPhone",
+        sandboxPolicy: { type: "dangerFullAccess" },
+        threadId: "thread_a"
+      }
     ]);
   });
 
@@ -594,7 +759,13 @@ describe("Codex app service", () => {
     });
     expect(client.resumedThreads).toEqual(["thread_a"]);
     expect(client.startedTurns).toEqual([
-      { cwd, input: "Keep going after loading", threadId: "thread_a" }
+      {
+        approvalPolicy: "never",
+        cwd,
+        input: "Keep going after loading",
+        sandboxPolicy: { type: "dangerFullAccess" },
+        threadId: "thread_a"
+      }
     ]);
   });
 

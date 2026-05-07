@@ -21,20 +21,50 @@ const createRequestSchema = conversationCreateRequestSchema
   });
 
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
+  const startedAt = Date.now();
+  let projectIdForLog = "unknown";
+  let actorDetails: Record<string, unknown> = {};
+
   try {
     const [{ projectId }, actor] = await Promise.all([context.params, requireMobileActor(request)]);
+    projectIdForLog = projectId;
+    actorDetails = {
+      hostMachineId: actor.hostMachineId,
+      machineId: actor.machineId,
+      workspaceId: actor.workspaceId
+    };
 
     if (isCodexProjectId(projectId)) {
       const conversations = await codexAppService.listProjectConversations(projectId);
+      mobileActivityLog.record("mobile_conversations_listed", {
+        conversationCount: conversations.length,
+        durationMs: Date.now() - startedAt,
+        projectId,
+        source: "codex_app",
+        ...actorDetails
+      });
       return NextResponse.json({ conversations });
     }
 
     const conversations = (await conversationQueueService.listConversations(actor.workspaceId))
       .filter((conversation) => conversation.projectId === projectId)
       .sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0));
+    mobileActivityLog.record("mobile_conversations_listed", {
+      conversationCount: conversations.length,
+      durationMs: Date.now() - startedAt,
+      projectId,
+      source: "abitat",
+      ...actorDetails
+    });
 
     return NextResponse.json({ conversations });
   } catch (error) {
+    mobileActivityLog.record("mobile_conversations_list_failed", {
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+      projectId: projectIdForLog,
+      ...actorDetails
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to list mobile conversations" },
       { status: error instanceof Error && error.message === "Invalid mobile token" ? 401 : 400 }

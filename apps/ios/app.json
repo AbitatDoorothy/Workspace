@@ -14,7 +14,20 @@
         "UIBackgroundModes": ["fetch", "remote-notification"]
       }
     },
-    "plugins": ["expo-secure-store", "expo-camera", "expo-notifications"],
+    "plugins": [
+      "expo-secure-store",
+      "expo-camera",
+      [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/notifications/codex-done-1.wav",
+            "./assets/notifications/codex-done-2.wav",
+            "./assets/notifications/codex-done-3.wav"
+          ]
+        }
+      ]
+    ],
     "extra": {
       "defaultApiUrl": "https://workspace.abitat.io",
       "eas": {

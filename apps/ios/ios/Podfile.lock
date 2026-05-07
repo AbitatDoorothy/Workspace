@@ -32,11 +32,15 @@ PODS:
     - ExpoModulesCore
   - ExpoCamera (55.0.16):
     - ExpoModulesCore
+  - ExpoDocumentPicker (55.0.13):
+    - ExpoModulesCore
   - ExpoDomWebView (55.0.5):
     - ExpoModulesCore
-  - ExpoFileSystem (55.0.17):
+  - ExpoFileSystem (55.0.19):
     - ExpoModulesCore
   - ExpoFont (55.0.6):
+    - ExpoModulesCore
+  - ExpoImagePicker (55.0.20):
     - ExpoModulesCore
   - ExpoKeepAwake (55.0.7):
     - ExpoModulesCore
@@ -1865,9 +1869,11 @@ DEPENDENCIES:
   - "Expo (from `../../../node_modules/.pnpm/expo@55.0.19_@babel+core@7.29.0_@expo+dom-webview@55.0.5_react-dom@19.2.5_react@19.2.5__6e2481d2a92d439656bec5589abd745a/node_modules/expo`)"
   - "ExpoAsset (from `../../../node_modules/.pnpm/expo-asset@55.0.16_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19._fe355e54f046e1c389423174b8f7c469/node_modules/expo-asset/ios`)"
   - "ExpoCamera (from `../../../node_modules/.pnpm/expo-camera@55.0.16_@types+emscripten@1.41.5_expo@55.0.19_react-native@0.83.6_@babel+co_68e4044e70ac46c3bc36210f831e7e6c/node_modules/expo-camera/ios`)"
+  - "ExpoDocumentPicker (from `../../../node_modules/.pnpm/expo-document-picker@55.0.13_expo@55.0.19/node_modules/expo-document-picker/ios`)"
   - "ExpoDomWebView (from `../../../node_modules/.pnpm/@expo+dom-webview@55.0.5_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+rea_f6d19358bdf24455540cc77a0b9ded43/node_modules/@expo/dom-webview/ios`)"
-  - "ExpoFileSystem (from `../../../node_modules/.pnpm/expo-file-system@55.0.17_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5_/node_modules/expo-file-system/ios`)"
+  - "ExpoFileSystem (from `../../../node_modules/.pnpm/expo-file-system@55.0.19_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5_/node_modules/expo-file-system/ios`)"
   - "ExpoFont (from `../../../node_modules/.pnpm/expo-font@55.0.6_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5__react@19.2.5/node_modules/expo-font/ios`)"
+  - "ExpoImagePicker (from `../../../node_modules/.pnpm/expo-image-picker@55.0.20_expo@55.0.19/node_modules/expo-image-picker/ios`)"
   - "ExpoKeepAwake (from `../../../node_modules/.pnpm/expo-keep-awake@55.0.7_expo@55.0.19_react@19.2.5/node_modules/expo-keep-awake/ios`)"
   - "ExpoLogBox (from `../../../node_modules/.pnpm/@expo+log-box@55.0.11_@expo+dom-webview@55.0.5_expo@55.0.19_react-native@0.83.6_@babel+_335922a94f8ca3e0d00201caa6f9c43a/node_modules/@expo/log-box`)"
   - "ExpoModulesCore (from `../../../node_modules/.pnpm/expo-modules-core@55.0.24_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5__react@19.2.5/node_modules/expo-modules-core`)"
@@ -1960,12 +1966,16 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.pnpm/expo-asset@55.0.16_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19._fe355e54f046e1c389423174b8f7c469/node_modules/expo-asset/ios"
   ExpoCamera:
     :path: "../../../node_modules/.pnpm/expo-camera@55.0.16_@types+emscripten@1.41.5_expo@55.0.19_react-native@0.83.6_@babel+co_68e4044e70ac46c3bc36210f831e7e6c/node_modules/expo-camera/ios"
+  ExpoDocumentPicker:
+    :path: "../../../node_modules/.pnpm/expo-document-picker@55.0.13_expo@55.0.19/node_modules/expo-document-picker/ios"
   ExpoDomWebView:
     :path: "../../../node_modules/.pnpm/@expo+dom-webview@55.0.5_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+rea_f6d19358bdf24455540cc77a0b9ded43/node_modules/@expo/dom-webview/ios"
   ExpoFileSystem:
-    :path: "../../../node_modules/.pnpm/expo-file-system@55.0.17_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5_/node_modules/expo-file-system/ios"
+    :path: "../../../node_modules/.pnpm/expo-file-system@55.0.19_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5_/node_modules/expo-file-system/ios"
   ExpoFont:
     :path: "../../../node_modules/.pnpm/expo-font@55.0.6_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5__react@19.2.5/node_modules/expo-font/ios"
+  ExpoImagePicker:
+    :path: "../../../node_modules/.pnpm/expo-image-picker@55.0.20_expo@55.0.19/node_modules/expo-image-picker/ios"
   ExpoKeepAwake:
     :path: "../../../node_modules/.pnpm/expo-keep-awake@55.0.7_expo@55.0.19_react@19.2.5/node_modules/expo-keep-awake/ios"
   ExpoLogBox:
@@ -2132,9 +2142,11 @@ SPEC CHECKSUMS:
   Expo: 8d901a968aee7a848334798753b63c4a8bf08bd4
   ExpoAsset: f56ed740b6a127da2bfd90832cf688ae309d4410
   ExpoCamera: 0ed88db61b7dc54712a98b8baaf415a3be88b76b
+  ExpoDocumentPicker: be59b82799ae30811e3f37a7521d6622baa63a19
   ExpoDomWebView: 2b2fbd9a07de8790569257cbf9dfdaa31cf95c70
-  ExpoFileSystem: a0e4a5a09c9c4f84338289b273a172609452dec9
+  ExpoFileSystem: 0b73b097e67c83622640168f620defc65a1a6f70
   ExpoFont: cdd7a1d574a376fa003c713eff49e0a4df8672c7
+  ExpoImagePicker: 7c75b2f076d6f45598fcbd035908aebc4c2eb257
   ExpoKeepAwake: 861c66deb0f9f28f87882610195f26c4b88fba6f
   ExpoLogBox: 617da77cbc083627692b2ea050a3666808aef2cd
   ExpoModulesCore: 0e5079ef327756a902e966a894b9d8982719766c

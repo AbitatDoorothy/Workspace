@@ -13,7 +13,7 @@ export interface MobilePushMessage {
   data: Record<string, string>;
   interruptionLevel: "time-sensitive";
   priority: "high";
-  sound: "default";
+  sound: string;
   title: string;
   to: string;
 }
@@ -21,6 +21,12 @@ export interface MobilePushMessage {
 export interface MobilePushTransport {
   send(messages: MobilePushMessage[]): Promise<void>;
 }
+
+export const CODEX_COMPLETION_NOTIFICATION_SOUNDS = [
+  "codex-done-1.wav",
+  "codex-done-2.wav",
+  "codex-done-3.wav"
+] as const;
 
 interface MobilePushServiceMobileService {
   listPushSubscriptionsForHost(input: {
@@ -45,12 +51,14 @@ export function createMobilePushService(
   options: {
     activityLog?: Pick<MobileActivityLog, "record">;
     logger?: MobilePushLogger;
+    soundPicker?: () => string;
     transport?: MobilePushTransport;
   } = {}
 ) {
   const transport = options.transport ?? createExpoPushTransport();
   const logger = options.logger;
   const activityLog = options.activityLog;
+  const soundPicker = options.soundPicker ?? randomCodexCompletionSound;
 
   return {
     async sendCodexThreadDone(input: SendCodexThreadDoneInput) {
@@ -70,20 +78,25 @@ export function createMobilePushService(
       });
       const messages = subscriptions
         .filter((subscription) => subscription.provider === "expo")
-        .map((subscription) => ({
-          body: input.prompt.trim() || "Untitled Codex thread",
-          data: {
-            conversationId: input.conversationId,
-            projectId: input.projectId,
-            source: input.source,
-            turnId: input.turnId
-          },
-          interruptionLevel: "time-sensitive" as const,
-          priority: "high" as const,
-          sound: "default" as const,
-          title: `Codex thread ${input.failed ? "failed" : "done"}`,
-          to: subscription.token
-        }));
+        .map((subscription) => {
+          const sound = soundPicker();
+
+          return {
+            body: input.prompt.trim() || "Untitled Codex thread",
+            data: {
+              conversationId: input.conversationId,
+              projectId: input.projectId,
+              sound,
+              source: input.source,
+              turnId: input.turnId
+            },
+            interruptionLevel: "time-sensitive" as const,
+            priority: "high" as const,
+            sound,
+            title: `Codex thread ${input.failed ? "failed" : "done"}`,
+            to: subscription.token
+          };
+        });
 
       if (messages.length === 0) {
         activityLog?.record("mobile_push_notification_skipped", {
@@ -129,6 +142,13 @@ export function createMobilePushService(
       return messages.length;
     }
   };
+}
+
+export function randomCodexCompletionSound(random = Math.random) {
+  const index = Math.floor(random() * CODEX_COMPLETION_NOTIFICATION_SOUNDS.length);
+  return CODEX_COMPLETION_NOTIFICATION_SOUNDS[
+    Math.max(0, Math.min(index, CODEX_COMPLETION_NOTIFICATION_SOUNDS.length - 1))
+  ];
 }
 
 export function createExpoPushTransport(

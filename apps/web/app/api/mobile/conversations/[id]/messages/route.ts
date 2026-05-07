@@ -5,28 +5,56 @@ import { z } from "zod";
 import { conversationMessageService } from "../../../../../../server/conversation-messages";
 import { conversationQueueService } from "../../../../../../server/conversations";
 import { codexAppService, isCodexConversationId } from "../../../../../../server/codex-app";
+import { mobileActivityLog } from "../../../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../../../server/mobile/request-auth";
 import { runEventService } from "../../../../../../server/run-events";
 
 const querySchema = z.object({
-  afterSequence: z.coerce.number().int().nonnegative().optional()
+  afterSequence: z.coerce.number().int().nonnegative().optional(),
+  includeRuntime: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true")
 });
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const startedAt = Date.now();
+  let conversationId = "unknown";
+  let actorDetails: Record<string, unknown> = {};
+  let requestDetails: Record<string, unknown> = {};
+
   try {
     const [{ id }, actor] = await Promise.all([context.params, requireMobileActor(request)]);
+    const query = querySchema.parse(Object.fromEntries(new URL(request.url).searchParams));
+    conversationId = id;
+    actorDetails = {
+      hostMachineId: actor.hostMachineId,
+      machineId: actor.machineId,
+      workspaceId: actor.workspaceId
+    };
+    requestDetails = {
+      afterSequence: query.afterSequence ?? null,
+      includeRuntime: query.includeRuntime
+    };
 
     if (isCodexConversationId(id)) {
-      const query = querySchema.parse(Object.fromEntries(new URL(request.url).searchParams));
       const messages = await codexAppService.listMessages(id, {
-        afterSequence: query.afterSequence
+        afterSequence: query.afterSequence,
+        includeRuntime: query.includeRuntime
+      });
+      mobileActivityLog.record("mobile_messages_loaded", {
+        conversationId,
+        durationMs: Date.now() - startedAt,
+        messageCount: messages.length,
+        source: "codex_app",
+        ...actorDetails,
+        ...requestDetails
       });
 
       return NextResponse.json({ messages });
     }
 
     await assertMobileConversation(actor.workspaceId, id);
-    const query = querySchema.parse(Object.fromEntries(new URL(request.url).searchParams));
     let messages = await conversationMessageService.listMessages(id, {
       afterSequence: query.afterSequence
     });
@@ -36,8 +64,27 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       messages = await conversationMessageService.listMessages(id);
     }
 
-    return NextResponse.json({ messages: messages.map(serializeMessage) });
+    const serializedMessages = messages
+      .map(serializeMessage)
+      .filter((message) => query.includeRuntime || message.role !== "runtime");
+    mobileActivityLog.record("mobile_messages_loaded", {
+      conversationId,
+      durationMs: Date.now() - startedAt,
+      messageCount: serializedMessages.length,
+      source: "abitat",
+      ...actorDetails,
+      ...requestDetails
+    });
+
+    return NextResponse.json({ messages: serializedMessages });
   } catch (error) {
+    mobileActivityLog.record("mobile_messages_load_failed", {
+      conversationId,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+      ...actorDetails,
+      ...requestDetails
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to load mobile messages" },
       { status: error instanceof Error && error.message === "Invalid mobile token" ? 401 : 400 }
