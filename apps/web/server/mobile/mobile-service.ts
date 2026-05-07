@@ -132,12 +132,14 @@ interface ListPushSubscriptionsInput {
 
 interface MobileServiceOptions {
   codeGenerator?: () => string;
+  hostFreshnessMs?: number;
   idGenerator?: (prefix: string) => string;
   now?: () => Date;
   tokenGenerator?: () => string;
 }
 
 const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_HOST_FRESHNESS_MS = 30_000;
 
 export function hashMobileToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -149,6 +151,7 @@ export function hashPairingCode(code: string) {
 
 export function createMobileService(db: MobileDb, options: MobileServiceOptions = {}) {
   const now = options.now ?? (() => new Date());
+  const hostFreshnessMs = options.hostFreshnessMs ?? DEFAULT_HOST_FRESHNESS_MS;
   const idGenerator =
     options.idGenerator ?? ((prefix: string) => `${prefix}_${randomBytes(8).toString("hex")}`);
   const tokenGenerator =
@@ -299,8 +302,8 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
           id: workspace.id,
           name: workspace.name
         },
-        phone: mobileDeviceSummary(phone),
-        host: host ? mobileDeviceSummary(host) : null
+        phone: mobileDeviceSummary(phone, { freshnessMs: hostFreshnessMs, now: now() }),
+        host: host ? mobileDeviceSummary(host, { freshnessMs: hostFreshnessMs, now: now() }) : null
       };
     },
 
@@ -415,16 +418,34 @@ function normalizePairingCode(code: string) {
   return code.trim().toUpperCase();
 }
 
-function mobileDeviceSummary(machine: MachineRecord) {
+function mobileDeviceSummary(machine: MachineRecord, options?: { freshnessMs: number; now: Date }) {
   return {
     id: machine.id,
     name: machine.name,
-    status: normalizeStatus(machine.status)
+    status: normalizeStatus(machine.status, machine.lastSeenAt, options)
   };
 }
 
-function normalizeStatus(status: string): MachineStatus {
-  return status === "online" || status === "offline" || status === "error" ? status : "pending";
+function normalizeStatus(
+  status: string,
+  lastSeenAt?: Date | null,
+  options?: { freshnessMs: number; now: Date }
+): MachineStatus {
+  const normalized =
+    status === "online" || status === "offline" || status === "error" ? status : "pending";
+
+  if (!options || !lastSeenAt) {
+    return normalized;
+  }
+
+  const ageMs = options.now.getTime() - lastSeenAt.getTime();
+  const isFresh = ageMs >= 0 && ageMs <= options.freshnessMs;
+
+  if (normalized === "pending" && isFresh) {
+    return "online";
+  }
+
+  return normalized;
 }
 
 function normalizeMachineCapabilities(value: unknown): MachineCapabilities {

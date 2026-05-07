@@ -223,6 +223,76 @@ describe("mobile service", () => {
     ]);
   });
 
+  it("reports a paired host as online when a recent heartbeat exists even if the stored status is pending", async () => {
+    const db = createMobileDb();
+    db.state.machines.set("machine_demo", {
+      id: "machine_demo",
+      workspaceId: "workspace_demo",
+      name: "Demo Host",
+      type: "host",
+      status: "pending",
+      pairingTokenHash: "host-token",
+      lastSeenAt: new Date("2026-05-07T12:00:20.000Z")
+    });
+    db.state.machines.set("machine_phone", {
+      id: "machine_phone",
+      workspaceId: "workspace_demo",
+      name: "Reece iPhone",
+      type: "client",
+      status: "online",
+      tokenHash: hashMobileToken("client_secret"),
+      pairedHostMachineId: "machine_demo",
+      deviceKind: "phone",
+      platform: "ios"
+    });
+    const service = createMobileService(db, {
+      now: () => new Date("2026-05-07T12:00:30.000Z")
+    });
+
+    const actor = await service.requireMobileActor("client_secret");
+    const bootstrap = await service.bootstrap(actor);
+
+    expect(bootstrap.host).toMatchObject({
+      id: "machine_demo",
+      status: "online"
+    });
+  });
+
+  it("does not report an explicitly online paired host as offline solely from stale heartbeat age", async () => {
+    const db = createMobileDb();
+    db.state.machines.set("machine_demo", {
+      id: "machine_demo",
+      workspaceId: "workspace_demo",
+      name: "Demo Host",
+      type: "host",
+      status: "online",
+      pairingTokenHash: "host-token",
+      lastSeenAt: new Date("2026-05-07T12:00:00.000Z")
+    });
+    db.state.machines.set("machine_phone", {
+      id: "machine_phone",
+      workspaceId: "workspace_demo",
+      name: "Reece iPhone",
+      type: "client",
+      status: "online",
+      tokenHash: hashMobileToken("client_secret"),
+      pairedHostMachineId: "machine_demo",
+      deviceKind: "phone",
+      platform: "ios"
+    });
+    const service = createMobileService(db, {
+      now: () => new Date("2026-05-07T12:01:00.000Z")
+    });
+
+    const actor = await service.requireMobileActor("client_secret");
+    const bootstrap = await service.bootstrap(actor);
+
+    expect(bootstrap.host).toMatchObject({
+      id: "machine_demo",
+      status: "online"
+    });
+  });
+
   it("registers Expo push tokens on the paired phone and lists them for the paired host", async () => {
     const db = createMobileDb();
     db.state.machines.set("machine_phone", {
