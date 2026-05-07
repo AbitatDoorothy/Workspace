@@ -71,7 +71,11 @@ export default function App() {
         />
       ) : null}
       {route === "conversation" && conversation ? (
-        <ConversationScreen api={store.api} conversation={conversation} />
+        <ConversationScreen
+          api={store.api}
+          conversation={conversation}
+          onBack={() => setRoute(project ? "project" : "projects")}
+        />
       ) : null}
       {route === "settings" ? (
         <SettingsScreen

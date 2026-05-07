@@ -73,6 +73,19 @@ if (!conversationScreen.includes("scrollToOffset({ animated, offset: 0 })")) {
 if (!conversationScreen.includes("KeyboardAvoidingView")) {
   throw new Error("Expected ConversationScreen to keep the composer above the iOS keyboard");
 }
+if (!conversationScreen.includes("styles.keyboardAvoidingScreen")) {
+  throw new Error("Expected ConversationScreen to use an outer keyboard-avoiding screen wrapper");
+}
+if (!conversationScreen.includes("return (\n    <KeyboardAvoidingView")) {
+  throw new Error(
+    "Expected ConversationScreen to wrap the fixed screen in KeyboardAvoidingView"
+  );
+}
+if (conversationScreen.includes("<FixedScreen>\n      <KeyboardAvoidingView")) {
+  throw new Error(
+    "Expected ConversationScreen to avoid nesting KeyboardAvoidingView inside the fixed screen"
+  );
+}
 if (!conversationScreen.includes("FlatList")) {
   throw new Error("Expected ConversationScreen to virtualize long Codex threads");
 }
@@ -86,6 +99,14 @@ if (!conversationScreen.includes("newestFirstMessages")) {
 }
 if (!conversationScreen.includes("safeMessageContent")) {
   throw new Error("Expected ConversationScreen to cap pathological message bodies");
+}
+if (!conversationScreen.includes("visibleConversationMessages")) {
+  throw new Error("Expected ConversationScreen to filter runtime messages from the mobile chat");
+}
+if (!conversationScreen.includes('message.role !== "runtime"')) {
+  throw new Error(
+    "Expected ConversationScreen to hide runtime messages from the conversation page"
+  );
 }
 if (conversationScreen.includes("scrollToEnd")) {
   throw new Error(
@@ -106,16 +127,62 @@ if (!conversationScreen.includes("handleMessagesScroll")) {
 if (!conversationScreen.includes("showScrollToLatestButton")) {
   throw new Error("Expected ConversationScreen to show a scroll-to-latest affordance");
 }
-if (!conversationScreen.includes("shouldWaitForMacRunningThread")) {
-  throw new Error("Expected ConversationScreen to guard Mac-running Codex app threads");
+for (const removedGate of [
+  "isWaitingForMacThread",
+  "shouldWaitForMacRunningThread",
+  "This thread is running on your Mac. Please wait.",
+  "The phone will unlock this conversation when the Mac Codex run finishes."
+]) {
+  if (conversationScreen.includes(removedGate)) {
+    throw new Error(
+      "Expected ConversationScreen to always open chats without a Mac-running wait gate"
+    );
+  }
 }
-if (!conversationScreen.includes("This thread is running on your Mac. Please wait.")) {
-  throw new Error("Expected ConversationScreen to show a Mac-running wait message");
+if (conversationScreen.includes("api.listConversations(conversation.projectId)")) {
+  throw new Error(
+    "Expected ConversationScreen to load latest messages instead of polling thread gates"
+  );
+}
+if (!conversationScreen.includes("const nextMessages = await api.listMessages(conversation.id);")) {
+  throw new Error("Expected ConversationScreen to load messages when opening any conversation");
+}
+if (
+  !conversationScreen.includes("const [isHeaderExpanded, setIsHeaderExpanded] = useState(false)")
+) {
+  throw new Error("Expected ConversationScreen title area to start collapsed");
+}
+if (!conversationScreen.includes("styles.chatHeader")) {
+  throw new Error("Expected ConversationScreen to use a compact chat header");
+}
+if (!conversationScreen.includes("onBack(): void")) {
+  throw new Error("Expected ConversationScreen to accept a project back callback");
+}
+if (!conversationScreen.includes('accessibilityLabel="Back to project"')) {
+  throw new Error("Expected ConversationScreen to expose an accessible back-to-project button");
+}
+if (!conversationScreen.includes("onPress={onBack}")) {
+  throw new Error("Expected ConversationScreen back button to call onBack");
+}
+if (!conversationScreen.includes("styles.backButton")) {
+  throw new Error("Expected ConversationScreen to style the project back button");
+}
+if (!conversationScreen.includes('isHeaderExpanded ? "Collapse" : "Expand"')) {
+  throw new Error("Expected ConversationScreen to expose an expand/collapse title button");
+}
+if (!conversationScreen.includes("styles.composerRow")) {
+  throw new Error("Expected ConversationScreen to keep the send button beside the message box");
+}
+if (!conversationScreen.includes("styles.composerInput")) {
+  throw new Error("Expected ConversationScreen message input to flex within the composer row");
 }
 
 const appScreen = await readFile(join(process.cwd(), "src/App.tsx"), "utf8");
 if (!appScreen.includes("useThreadCompletionNotifications")) {
   throw new Error("Expected App to start the thread completion notification watcher");
+}
+if (!appScreen.includes("onBack={() => setRoute(project ? \"project\" : \"projects\")")) {
+  throw new Error("Expected App to route conversation back actions to the project page");
 }
 
 const notificationWatcher = await readFile(
@@ -126,22 +193,30 @@ for (const expected of [
   "Notifications.setNotificationHandler",
   "Notifications.getExpoPushTokenAsync",
   "Notifications.requestPermissionsAsync",
-  "Notifications.scheduleNotificationAsync",
   "registerForPushNotifications",
-  "pollCompletionsForForegroundFallback",
-  "shouldNotifyForCompletedTurn",
   "rememberRunningConversation",
   "useThreadCompletionNotifications",
   "console.warn",
   "registerPushToken",
   "reportPushRegistrationIssue",
   "withPushRegistrationTimeout",
-  "allowSound",
-  "interruptionLevel",
-  "listCompletionStates"
+  "allowSound"
 ]) {
   if (!notificationWatcher.includes(expected)) {
     throw new Error(`Expected notification watcher to include ${expected}`);
+  }
+}
+for (const duplicateNotificationPath of [
+  "Notifications.scheduleNotificationAsync",
+  "pollCompletionsForForegroundFallback",
+  "sendForegroundThreadDoneNotification",
+  "shouldNotifyForCompletedTurn",
+  "listCompletionStates"
+]) {
+  if (notificationWatcher.includes(duplicateNotificationPath)) {
+    throw new Error(
+      `Expected backend push to be the only completion notification source, but found ${duplicateNotificationPath}`
+    );
   }
 }
 if (notificationWatcher.includes("wasMessageCreatedAfterSnapshot")) {

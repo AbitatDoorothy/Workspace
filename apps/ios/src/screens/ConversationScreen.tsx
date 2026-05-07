@@ -5,13 +5,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  StyleSheet,
   Text,
   TextInput,
   View
 } from "react-native";
 
 import type { ApiClient } from "../api/client";
-import { Button, Header, StatusPill } from "../components/Controls";
+import { Button, StatusPill } from "../components/Controls";
 import { rememberRunningConversation } from "../notifications/thread-completion-notifications";
 import { FixedScreen } from "../components/Screen";
 import { colors, sharedStyles } from "../theme";
@@ -20,20 +21,22 @@ import type { ConversationMessage, ConversationSummary } from "../types";
 interface ConversationScreenProps {
   api: ApiClient;
   conversation: ConversationSummary;
+  onBack(): void;
 }
 
-export function ConversationScreen({ api, conversation }: ConversationScreenProps) {
+export function ConversationScreen({ api, conversation, onBack }: ConversationScreenProps) {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [prompt, setPrompt] = useState("");
   const [status, setStatus] = useState(conversation.status);
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const [isWaitingForMacThread, setIsWaitingForMacThread] = useState(() =>
-    shouldWaitForMacRunningThread(conversation)
-  );
+  const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [showScrollToLatestButton, setShowScrollToLatestButton] = useState(false);
   const listRef = useRef<FlatList<ConversationMessage> | null>(null);
-  const newestFirstMessages = useMemo(() => [...messages].reverse(), [messages]);
+  const newestFirstMessages = useMemo(
+    () => visibleConversationMessages(messages).reverse(),
+    [messages]
+  );
   const lastSequence = useMemo(
     () => messages.reduce((max, message) => Math.max(max, message.sequence), 0),
     [messages]
@@ -65,20 +68,6 @@ export function ConversationScreen({ api, conversation }: ConversationScreenProp
 
     async function refresh() {
       try {
-        if (isWaitingForMacThread) {
-          const latestConversation = (await api.listConversations(conversation.projectId)).find(
-            (candidate) => candidate.id === conversation.id
-          );
-
-          if (!cancelled && latestConversation) {
-            setError(null);
-            setStatus(latestConversation.status);
-            setIsWaitingForMacThread(shouldWaitForMacRunningThread(latestConversation));
-          }
-
-          return;
-        }
-
         const nextMessages = await api.listMessages(conversation.id);
         if (!cancelled) {
           setError(null);
@@ -92,19 +81,19 @@ export function ConversationScreen({ api, conversation }: ConversationScreenProp
     }
 
     void refresh();
-    const timer = setInterval(refresh, isWaitingForMacThread ? 3000 : 1800);
+    const timer = setInterval(refresh, 1800);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [api, conversation.id, conversation.projectId, isWaitingForMacThread]);
+  }, [api, conversation.id]);
 
   useEffect(() => {
     setError(null);
     setMessages([]);
     setPrompt("");
     setStatus(conversation.status);
-    setIsWaitingForMacThread(shouldWaitForMacRunningThread(conversation));
+    setIsHeaderExpanded(false);
     pendingAutoScrollRef.current = true;
   }, [conversation]);
 
@@ -140,94 +129,106 @@ export function ConversationScreen({ api, conversation }: ConversationScreenProp
   }
 
   return (
-    <FixedScreen>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={8}
-        style={{ flex: 1, gap: 12 }}
-      >
-        <Header
-          eyebrow="Conversation"
-          title={conversation.prompt || "Codex"}
-          subtitle="Messages are synced through Abitat Workspace."
-        />
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      style={styles.keyboardAvoidingScreen}
+    >
+      <FixedScreen>
+        <View style={styles.chatHeader}>
+          <Pressable
+            accessibilityLabel="Back to project"
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={onBack}
+            style={styles.backButton}
+          >
+            <Text style={styles.backButtonText}>Back</Text>
+          </Pressable>
+          <View style={styles.chatHeaderCopy}>
+            <Text style={sharedStyles.label}>Conversation</Text>
+            <Text numberOfLines={isHeaderExpanded ? 3 : 1} style={styles.chatHeaderTitle}>
+              {conversation.prompt || "Codex"}
+            </Text>
+            {isHeaderExpanded ? (
+              <Text style={sharedStyles.subtitle}>
+                Messages are synced through Abitat Workspace.
+              </Text>
+            ) : null}
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: isHeaderExpanded }}
+            hitSlop={8}
+            onPress={() => setIsHeaderExpanded((current) => !current)}
+            style={styles.headerToggle}
+          >
+            <Text style={styles.headerToggleText}>{isHeaderExpanded ? "Collapse" : "Expand"}</Text>
+          </Pressable>
+        </View>
         <StatusPill status={status} />
 
-        {isWaitingForMacThread ? (
-          <View style={sharedStyles.card}>
-            <Text style={sharedStyles.value}>This thread is running on your Mac. Please wait.</Text>
-            <Text style={[sharedStyles.subtitle, { marginTop: 8 }]}>
-              The phone will unlock this conversation when the Mac Codex run finishes.
-            </Text>
-          </View>
-        ) : (
-          <View style={{ flex: 1 }}>
-            <FlatList
-              contentContainerStyle={{ gap: 10, paddingBottom: 12 }}
-              data={newestFirstMessages}
-              inverted
-              keyExtractor={(message) => message.id}
-              maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-              onContentSizeChange={handleMessagesContentSizeChange}
-              onScroll={handleMessagesScroll}
-              ref={listRef}
-              renderItem={({ item: message }) => (
-                <View
-                  style={[
-                    sharedStyles.card,
-                    {
-                      alignSelf: message.role === "user" ? "flex-end" : "stretch",
-                      backgroundColor:
-                        message.role === "user" ? colors.primarySoft : colors.surface,
-                      maxWidth: message.role === "user" ? "88%" : "100%"
-                    }
-                  ]}
-                >
-                  <Text style={sharedStyles.label}>{message.role}</Text>
-                  <Text style={{ color: colors.text, fontSize: 15, lineHeight: 21, marginTop: 6 }}>
-                    {safeMessageContent(message.content)}
-                  </Text>
-                </View>
-              )}
-              scrollEventThrottle={16}
-              style={{ flex: 1 }}
-              windowSize={9}
-            />
-            {showScrollToLatestButton ? (
-              <Pressable
-                onPress={() => scrollToLatest(true)}
+        <View style={{ flex: 1 }}>
+          <FlatList
+            contentContainerStyle={{ gap: 10, paddingBottom: 12 }}
+            data={newestFirstMessages}
+            inverted
+            keyExtractor={(message) => message.id}
+            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            onContentSizeChange={handleMessagesContentSizeChange}
+            onScroll={handleMessagesScroll}
+            ref={listRef}
+            renderItem={({ item: message }) => (
+              <View
                 style={[
-                  sharedStyles.secondaryButton,
+                  sharedStyles.card,
                   {
-                    alignSelf: "center",
-                    bottom: 12,
-                    minHeight: 38,
-                    paddingHorizontal: 14,
-                    position: "absolute"
+                    alignSelf: message.role === "user" ? "flex-end" : "stretch",
+                    backgroundColor: message.role === "user" ? colors.primarySoft : colors.surface,
+                    maxWidth: message.role === "user" ? "88%" : "100%"
                   }
                 ]}
               >
-                <Text style={sharedStyles.buttonText}>Latest</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        )}
+                <Text style={sharedStyles.label}>{message.role}</Text>
+                <Text style={{ color: colors.text, fontSize: 15, lineHeight: 21, marginTop: 6 }}>
+                  {safeMessageContent(message.content)}
+                </Text>
+              </View>
+            )}
+            scrollEventThrottle={16}
+            style={{ flex: 1 }}
+            windowSize={9}
+          />
+          {showScrollToLatestButton ? (
+            <Pressable
+              onPress={() => scrollToLatest(true)}
+              style={[
+                sharedStyles.secondaryButton,
+                {
+                  alignSelf: "center",
+                  bottom: 12,
+                  minHeight: 38,
+                  paddingHorizontal: 14,
+                  position: "absolute"
+                }
+              ]}
+            >
+              <Text style={sharedStyles.buttonText}>Latest</Text>
+            </Pressable>
+          ) : null}
+        </View>
 
         {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
 
-        {!isWaitingForMacThread ? (
-          <View style={{ gap: 10 }}>
-            <TextInput
-              multiline
-              onChangeText={setPrompt}
-              placeholder="Continue this Codex thread"
-              placeholderTextColor={colors.muted}
-              style={[
-                sharedStyles.input,
-                { minHeight: 70, paddingTop: 12, textAlignVertical: "top" }
-              ]}
-              value={prompt}
-            />
+        <View style={styles.composerRow}>
+          <TextInput
+            multiline
+            onChangeText={setPrompt}
+            placeholder="Continue this Codex thread"
+            placeholderTextColor={colors.muted}
+            style={[sharedStyles.input, styles.composerInput]}
+            value={prompt}
+          />
+          <View style={styles.composerButton}>
             <Button
               disabled={isSending || prompt.trim().length === 0}
               onPress={continueConversation}
@@ -235,21 +236,78 @@ export function ConversationScreen({ api, conversation }: ConversationScreenProp
               {isSending ? "Sending" : "Send"}
             </Button>
           </View>
-        ) : null}
-      </KeyboardAvoidingView>
-    </FixedScreen>
+        </View>
+      </FixedScreen>
+    </KeyboardAvoidingView>
   );
 }
 
-export function shouldWaitForMacRunningThread(
-  conversation: Pick<ConversationSummary, "mobileOpenState" | "source" | "status">
-) {
-  return (
-    conversation.source === "codex_app" &&
-    conversation.status === "running" &&
-    conversation.mobileOpenState !== "phone_active"
-  );
-}
+const styles = StyleSheet.create({
+  backButton: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceHigh,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 34,
+    paddingHorizontal: 12
+  },
+  backButtonText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  chatHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 12
+  },
+  chatHeaderCopy: {
+    flex: 1,
+    minWidth: 0
+  },
+  chatHeaderTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "800",
+    lineHeight: 23,
+    marginTop: 3
+  },
+  composerButton: {
+    justifyContent: "flex-end",
+    width: 92
+  },
+  composerInput: {
+    flex: 1,
+    minHeight: 70,
+    paddingTop: 12,
+    textAlignVertical: "top"
+  },
+  composerRow: {
+    alignItems: "stretch",
+    flexDirection: "row",
+    gap: 10
+  },
+  headerToggle: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceHigh,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    minHeight: 34,
+    justifyContent: "center",
+    paddingHorizontal: 12
+  },
+  headerToggleText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  keyboardAvoidingScreen: {
+    flex: 1
+  }
+});
 
 export function mergeConversationMessages(
   current: ConversationMessage[],
@@ -268,6 +326,10 @@ export function mergeConversationMessages(
 
     return left.createdAt.localeCompare(right.createdAt);
   });
+}
+
+export function visibleConversationMessages(messages: ConversationMessage[]) {
+  return messages.filter((message) => message.role !== "runtime");
 }
 
 export function safeMessageContent(content: string) {
