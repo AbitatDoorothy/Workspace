@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { ConversationType } from "@abitat/shared";
+import type { ConversationType } from "@abitat_reece/shared";
 
 import {
   assertInsideWorkspace,

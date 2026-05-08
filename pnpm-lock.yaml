@@ -35,7 +35,7 @@ importers:
 
   apps/cli:
     dependencies:
-      '@abitat/host-daemon':
+      '@abitat_reece/host-daemon':
         specifier: workspace:*
         version: link:../host-daemon
     devDependencies:
@@ -54,7 +54,7 @@ importers:
 
   apps/host-daemon:
     dependencies:
-      '@abitat/shared':
+      '@abitat_reece/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       node-pty:
@@ -73,7 +73,7 @@ importers:
 
   apps/ios:
     dependencies:
-      '@abitat/shared':
+      '@abitat_reece/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@expo/vector-icons':
@@ -119,7 +119,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@abitat/shared':
+      '@abitat_reece/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@prisma/adapter-pg':

@@ -1,5 +1,5 @@
 {
-  "name": "@abitat/cli",
+  "name": "@abitat_reece/cli",
   "private": false,
   "version": "0.1.0",
   "description": "Remote Codex control from Mac and iPhone",
@@ -21,7 +21,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@abitat/host-daemon": "workspace:*"
+    "@abitat_reece/host-daemon": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "25.6.0",

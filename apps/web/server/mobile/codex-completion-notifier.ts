@@ -1,4 +1,4 @@
-import type { ConversationStatus } from "@abitat/shared";
+import type { ConversationStatus } from "@abitat_reece/shared";
 import type { MobileActivityLog } from "./mobile-activity-log";
 
 export interface CodexCompletionState {

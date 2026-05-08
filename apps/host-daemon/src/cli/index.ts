@@ -2,7 +2,7 @@
 
 import { homedir } from "node:os";
 import { access } from "node:fs/promises";
-import { runtimeSchema, type DaemonJob } from "@abitat/shared";
+import { runtimeSchema, type DaemonJob } from "@abitat_reece/shared";
 
 import { defaultConfigPath, loadHostConfig, saveHostConfig } from "../config/host-config.js";
 import { collectChangeset } from "../git/changeset.js";

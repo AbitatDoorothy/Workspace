@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import {
   conversationMessageCreateRequestSchema,
   type ConversationMessageRole
-} from "@abitat/shared";
+} from "@abitat_reece/shared";
 import type { z } from "zod";
 
 export interface ConversationMessageRecord {

@@ -1,6 +1,6 @@
 # Abitat CLI
 
-`abitat` connects a Mac host to the hosted Abitat Workspace control plane so an iPhone can control Codex off-network. The CLI installs `@abitat/host-daemon` as a dependency and launches it directly.
+`abitat` connects a Mac host to the hosted Abitat Workspace control plane so an iPhone can control Codex off-network. The CLI installs `@abitat_reece/host-daemon` as a dependency and launches it directly.
 
 ## Install
 
@@ -18,7 +18,7 @@ brew install abitat
 The npm package is also available:
 
 ```sh
-npm install -g @abitat/cli
+npm install -g @abitat_reece/cli
 ```
 
 ## Use

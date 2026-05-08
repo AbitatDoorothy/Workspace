@@ -1,4 +1,4 @@
-import { toolScanUploadRequestSchema } from "@abitat/shared";
+import { toolScanUploadRequestSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 
 import { hostService } from "../../../../server/hosts";

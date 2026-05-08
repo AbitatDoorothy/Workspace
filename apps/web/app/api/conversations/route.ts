@@ -1,4 +1,4 @@
-import { conversationCreateRequestSchema } from "@abitat/shared";
+import { conversationCreateRequestSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 

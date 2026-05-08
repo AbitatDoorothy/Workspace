@@ -5,20 +5,20 @@
 Publish in dependency order:
 
 ```sh
-pnpm --filter @abitat/shared build
-pnpm --filter @abitat/shared publish --access public
+pnpm --filter @abitat_reece/shared build
+pnpm --filter @abitat_reece/shared publish --access public
 
-pnpm --filter @abitat/host-daemon build
-pnpm --filter @abitat/host-daemon publish --access public
+pnpm --filter @abitat_reece/host-daemon build
+pnpm --filter @abitat_reece/host-daemon publish --access public
 
-pnpm --filter @abitat/cli build
-pnpm --filter @abitat/cli publish --access public
+pnpm --filter @abitat_reece/cli build
+pnpm --filter @abitat_reece/cli publish --access public
 ```
 
 `pnpm pack` and `pnpm publish` rewrite workspace dependencies to the package version, so the published packages resolve as:
 
-- `@abitat/cli -> @abitat/host-daemon`
-- `@abitat/host-daemon -> @abitat/shared`
+- `@abitat_reece/cli -> @abitat_reece/host-daemon`
+- `@abitat_reece/host-daemon -> @abitat_reece/shared`
 
 Run the local release smoke first:
 
@@ -29,7 +29,7 @@ pnpm test:homebrew
 
 ## Homebrew
 
-The formula source lives at `Formula/abitat.rb` and installs the published `@abitat/cli` npm tarball with `node@22`. It also declares Python as a build dependency because the packaged host daemon includes the native `node-pty` dependency.
+The formula source lives at `Formula/abitat.rb` and installs the published `@abitat_reece/cli` npm tarball with `node@22`. It also declares Python as a build dependency because the packaged host daemon includes the native `node-pty` dependency.
 
 For the first public Homebrew release:
 
@@ -37,7 +37,7 @@ For the first public Homebrew release:
 2. Create a public tap repository named `Abitat/homebrew-abitat`.
 3. Copy `Formula/abitat.rb` into that repository.
 4. Publish the npm packages listed above.
-5. Download the published `@abitat/cli` tarball and update the formula `sha256` if it differs from the local `pnpm pack` output.
+5. Download the published `@abitat_reece/cli` tarball and update the formula `sha256` if it differs from the local `pnpm pack` output.
 6. Test the tap locally:
 
 ```sh

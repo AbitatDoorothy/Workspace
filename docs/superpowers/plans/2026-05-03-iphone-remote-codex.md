@@ -339,7 +339,7 @@ Recommended stack:
 - QR scanning with Expo Camera.
 - WebSocket/SSE client for realtime sync.
 - `react-native-webrtc` or LiveKit client for remote screen sessions.
-- Shared API schemas imported from `@abitat/shared`.
+- Shared API schemas imported from `@abitat_reece/shared`.
 
 Core screens:
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ConversationStatus } from "@abitat/shared";
+import type { ConversationStatus } from "@abitat_reece/shared";
 
 import {
   createConversationQueueService,

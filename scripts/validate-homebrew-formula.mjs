@@ -10,7 +10,7 @@ const installDocs = await readFile(join(root, "docs/install.md"), "utf8");
 const onboardingDocs = await readFile(join(root, "docs/onboarding.md"), "utf8");
 
 const version = cliPackage.version;
-const npmTarballUrl = `https://registry.npmjs.org/@abitat/cli/-/cli-${version}.tgz`;
+const npmTarballUrl = `https://registry.npmjs.org/@abitat_reece/cli/-/cli-${version}.tgz`;
 
 for (const expected of [
   "class Abitat < Formula",
@@ -57,4 +57,4 @@ for (const expected of [
   }
 }
 
-console.log(`validated Homebrew formula for @abitat/cli ${version}`);
+console.log(`validated Homebrew formula for @abitat_reece/cli ${version}`);

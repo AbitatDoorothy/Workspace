@@ -4,7 +4,7 @@ import {
   runEventIngestRequestSchema,
   type RunEventIngestRequest,
   type RunEventType
-} from "@abitat/shared";
+} from "@abitat_reece/shared";
 
 export interface RunEventRecord {
   id: string;

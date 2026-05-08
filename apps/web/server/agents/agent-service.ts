@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { runtimeSchema, type HostTool, type Runtime } from "@abitat/shared";
+import { runtimeSchema, type HostTool, type Runtime } from "@abitat_reece/shared";
 
 interface AgentCreateInput {
   projectId: string;

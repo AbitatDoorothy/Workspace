@@ -1,4 +1,4 @@
-import { hostPairingRequestSchema } from "@abitat/shared";
+import { hostPairingRequestSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 
 import { hostService } from "../../../../server/hosts";

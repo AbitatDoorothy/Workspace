@@ -1,4 +1,4 @@
-import type { HostTool } from "@abitat/shared";
+import type { HostTool } from "@abitat_reece/shared";
 
 import { AppShell, Icon } from "./components/app-shell";
 import { PairIphonePanel } from "./components/pair-iphone-panel";

@@ -1,4 +1,4 @@
-import type { RunEventType } from "@abitat/shared";
+import type { RunEventType } from "@abitat_reece/shared";
 
 export interface RunEventView {
   id: string;

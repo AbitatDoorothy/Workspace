@@ -1,4 +1,4 @@
-import type { RunEventIngestRequest } from "@abitat/shared";
+import type { RunEventIngestRequest } from "@abitat_reece/shared";
 import { describe, expect, it } from "vitest";
 
 import { runConversationRuntime } from "../src/cli/conversation-runtime";

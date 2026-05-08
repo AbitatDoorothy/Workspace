@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import type { ConversationMessageRole } from "@abitat/shared";
+import type { ConversationMessageRole } from "@abitat_reece/shared";
 
 import { prisma } from "../db/client";
 import {

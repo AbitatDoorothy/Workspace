@@ -5,7 +5,7 @@ import type {
   PhonePairingCompleteRequest,
   PhonePairingCompleteResponse,
   PhonePairingStartResponse
-} from "@abitat/shared";
+} from "@abitat_reece/shared";
 
 interface MachineRecord {
   id: string;

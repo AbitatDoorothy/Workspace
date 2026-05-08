@@ -1,4 +1,4 @@
-import { remoteControlSessionCreateRequestSchema } from "@abitat/shared";
+import { remoteControlSessionCreateRequestSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 
 import { requireMobileActor } from "../../../../server/mobile/request-auth";

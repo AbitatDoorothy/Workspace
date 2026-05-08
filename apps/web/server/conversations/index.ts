@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import type { ConversationStatus, ConversationType, Runtime } from "@abitat/shared";
+import type { ConversationStatus, ConversationType, Runtime } from "@abitat_reece/shared";
 
 import { prisma } from "../db/client";
 import { todoStore } from "../todos";

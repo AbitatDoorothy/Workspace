@@ -1,4 +1,4 @@
-import { codexModelOptionsResponseSchema } from "@abitat/shared";
+import { codexModelOptionsResponseSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 
 import { codexAppService } from "../../../../../server/codex-app";

@@ -5,7 +5,7 @@ import { packageInfo } from "../src/index";
 describe("packageInfo", () => {
   it("identifies the shared Phase 0 package", () => {
     expect(packageInfo).toEqual({
-      name: "@abitat/shared",
+      name: "@abitat_reece/shared",
       phase: "Phase 0"
     });
   });

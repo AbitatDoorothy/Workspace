@@ -1,4 +1,4 @@
-import { approvalRequestSchema } from "@abitat/shared";
+import { approvalRequestSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 

@@ -8,7 +8,7 @@ import type {
   RemoteControlStatus,
   RunEventIngestRequest,
   ToolScanUploadRequest
-} from "@abitat/shared";
+} from "@abitat_reece/shared";
 
 interface RemoteControlSessionSummary {
   id: string;

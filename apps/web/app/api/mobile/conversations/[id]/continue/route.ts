@@ -1,4 +1,4 @@
-import { codexModelIdSchema, codexReasoningEffortSchema } from "@abitat/shared";
+import { codexModelIdSchema, codexReasoningEffortSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 

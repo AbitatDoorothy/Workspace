@@ -3,7 +3,7 @@
 - [ ] Fresh Mac has no Abitat CLI or host daemon config.
 - [ ] `brew tap Abitat/abitat` succeeds.
 - [ ] `brew install abitat` installs an `abitat` executable.
-- [ ] `npm install -g @abitat/cli` installs an `abitat` executable and the packaged host daemon dependency.
+- [ ] `npm install -g @abitat_reece/cli` installs an `abitat` executable and the packaged host daemon dependency.
 - [ ] `abitat doctor` reports that login is missing.
 - [ ] `abitat iphone` opens hosted browser login.
 - [ ] New user registers or logs in at `https://workspace.abitat.io`.

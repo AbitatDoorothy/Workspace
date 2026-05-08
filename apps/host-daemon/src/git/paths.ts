@@ -1,5 +1,5 @@
 import { resolve, sep } from "node:path";
-import type { ConversationType } from "@abitat/shared";
+import type { ConversationType } from "@abitat_reece/shared";
 
 interface BranchNameInput {
   conversationId: string;

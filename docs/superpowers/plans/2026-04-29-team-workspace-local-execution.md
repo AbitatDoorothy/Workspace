@@ -748,7 +748,7 @@ Verification:
 
 ```bash
 pnpm db:generate
-pnpm --filter @abitat/shared test
+pnpm --filter @abitat_reece/shared test
 pnpm --filter web test -- conversation-service.test.ts
 pnpm typecheck
 ```

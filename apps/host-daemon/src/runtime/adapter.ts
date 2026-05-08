@@ -1,4 +1,4 @@
-import type { RunEventType, Runtime } from "@abitat/shared";
+import type { RunEventType, Runtime } from "@abitat_reece/shared";
 
 export interface RuntimeEvent {
   type: Extract<RunEventType, "error" | "status" | "stdout" | "stderr" | "summary">;

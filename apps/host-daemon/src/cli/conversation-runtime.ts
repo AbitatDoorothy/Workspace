@@ -1,4 +1,4 @@
-import type { RunEventIngestRequest } from "@abitat/shared";
+import type { RunEventIngestRequest } from "@abitat_reece/shared";
 
 import type { RuntimeAdapter, RuntimeEvent } from "../runtime/adapter.js";
 

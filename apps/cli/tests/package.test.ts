@@ -13,7 +13,7 @@ describe("cli package", () => {
 
     expect(pkg.private).toBe(false);
     expect(pkg.bin?.abitat).toBe("dist/index.js");
-    expect(pkg.dependencies?.["@abitat/host-daemon"]).toBe("workspace:*");
+    expect(pkg.dependencies?.["@abitat_reece/host-daemon"]).toBe("workspace:*");
     expect(pkg.files).toEqual(["dist", "README.md"]);
     expect(pkg.engines?.node).toBe(">=22");
   });
@@ -29,7 +29,7 @@ describe("cli package", () => {
       private?: boolean;
     };
 
-    expect(pkg.name).toBe("@abitat/host-daemon");
+    expect(pkg.name).toBe("@abitat_reece/host-daemon");
     expect(pkg.private).toBe(false);
     expect(pkg.bin?.["abitat-host"]).toBe("dist/cli/index.js");
     expect(pkg.exports?.["./cli"]).toBeTruthy();
@@ -46,7 +46,7 @@ describe("cli package", () => {
       private?: boolean;
     };
 
-    expect(pkg.name).toBe("@abitat/shared");
+    expect(pkg.name).toBe("@abitat_reece/shared");
     expect(pkg.private).toBe(false);
     expect(pkg.exports?.["."]).toBeTruthy();
     expect(pkg.files).toEqual(["dist"]);

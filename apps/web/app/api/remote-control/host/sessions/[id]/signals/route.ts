@@ -1,4 +1,4 @@
-import { remoteControlSignalTypeSchema } from "@abitat/shared";
+import { remoteControlSignalTypeSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 

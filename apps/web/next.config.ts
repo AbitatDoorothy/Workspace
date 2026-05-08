@@ -4,7 +4,7 @@ import { allowedDevOriginsFromEnv } from "./lib/allowed-dev-origins";
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: allowedDevOriginsFromEnv(),
-  transpilePackages: ["@abitat/shared"]
+  transpilePackages: ["@abitat_reece/shared"]
 };
 
 export default nextConfig;

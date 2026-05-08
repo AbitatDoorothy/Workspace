@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-import type { RemoteControlStatus } from "@abitat/shared";
+import type { RemoteControlStatus } from "@abitat_reece/shared";
 
 export interface RemoteControlSessionSummary {
   id: string;

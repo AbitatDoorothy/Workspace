@@ -1,4 +1,4 @@
-import { daemonJobPollRequestSchema } from "@abitat/shared";
+import { daemonJobPollRequestSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 
 import { conversationQueueService } from "../../../../../server/conversations";

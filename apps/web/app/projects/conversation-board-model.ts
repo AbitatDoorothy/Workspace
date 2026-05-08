@@ -1,4 +1,4 @@
-import type { ConversationStatus, ConversationType } from "@abitat/shared";
+import type { ConversationStatus, ConversationType } from "@abitat_reece/shared";
 
 export type ConversationLabel = "in_process" | "complete";
 export const conversationDragMimeType = "application/x-abitat-conversation";

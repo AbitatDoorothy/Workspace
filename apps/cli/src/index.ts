@@ -37,7 +37,7 @@ interface ResolveStartupProcessOptions {
 }
 
 const DEFAULT_CODEX_APP_SERVER_URL = "ws://127.0.0.1:47777";
-const HOST_DAEMON_CLI_EXPORT = "@abitat/host-daemon/cli";
+const HOST_DAEMON_CLI_EXPORT = "@abitat_reece/host-daemon/cli";
 
 export function parseCommand(args: string[]): AbitatCommand {
   const command = args[0];

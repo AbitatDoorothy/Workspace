@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const packageInfo = {
-  name: "@abitat/shared",
+  name: "@abitat_reece/shared",
   phase: "Phase 0"
 } as const;
 

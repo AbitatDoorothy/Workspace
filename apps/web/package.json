@@ -9,15 +9,15 @@
     "db:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
     "db:seed": "prisma db seed --schema prisma/schema.prisma",
     "db:validate": "prisma validate --schema prisma/schema.prisma",
-    "predev": "pnpm --filter @abitat/shared build",
+    "predev": "pnpm --filter @abitat_reece/shared build",
     "dev": "tsx server.ts",
     "lint": "eslint .",
-    "pretest": "pnpm --filter @abitat/shared build",
+    "pretest": "pnpm --filter @abitat_reece/shared build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@abitat/shared": "workspace:*",
+    "@abitat_reece/shared": "workspace:*",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@xterm/xterm": "^6.0.0",

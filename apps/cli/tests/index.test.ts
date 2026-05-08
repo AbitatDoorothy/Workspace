@@ -19,8 +19,8 @@ describe("abitat cli", () => {
   it("detects scoped npm package entrypoints with URL encoding", () => {
     expect(
       isCliEntrypoint(
-        "file:///tmp/user/node_modules/%40abitat/cli/dist/index.js",
-        "/tmp/user/node_modules/@abitat/cli/dist/index.js"
+        "file:///tmp/user/node_modules/%40abitat_reece/cli/dist/index.js",
+        "/tmp/user/node_modules/@abitat_reece/cli/dist/index.js"
       )
     ).toBe(true);
   });
@@ -176,14 +176,14 @@ describe("abitat cli", () => {
         },
         {
           resolvePackageExport: () =>
-            "file:///opt/abitat/node_modules/@abitat/host-daemon/dist/cli/index.js",
+            "file:///opt/abitat/node_modules/@abitat_reece/host-daemon/dist/cli/index.js",
           nodePath: "/usr/local/bin/node"
         }
       )
     ).toEqual({
       name: "host-daemon",
       command: "/usr/local/bin/node",
-      args: ["/opt/abitat/node_modules/@abitat/host-daemon/dist/cli/index.js", "start"],
+      args: ["/opt/abitat/node_modules/@abitat_reece/host-daemon/dist/cli/index.js", "start"],
       env: {
         ABITAT_API_URL: "https://workspace.abitat.io",
         ABITAT_HOST_TOKEN: "host_secret",

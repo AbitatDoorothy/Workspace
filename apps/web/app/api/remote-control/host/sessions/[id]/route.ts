@@ -1,4 +1,4 @@
-import { remoteControlStatusSchema } from "@abitat/shared";
+import { remoteControlStatusSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 

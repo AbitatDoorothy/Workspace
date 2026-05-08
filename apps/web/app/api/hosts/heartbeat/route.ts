@@ -1,4 +1,4 @@
-import { hostHeartbeatRequestSchema } from "@abitat/shared";
+import { hostHeartbeatRequestSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 
 import { conversationQueueService } from "../../../../server/conversations";

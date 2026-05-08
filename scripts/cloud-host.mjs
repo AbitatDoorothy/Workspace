@@ -30,7 +30,7 @@ runWithRetry(
   "pnpm",
   [
     "--filter",
-    "@abitat/host-daemon",
+    "@abitat_reece/host-daemon",
     "exec",
     "tsx",
     "src/cli/index.ts",
@@ -46,7 +46,7 @@ runWithRetry(
 
 const daemon = spawn(
   "pnpm",
-  ["--filter", "@abitat/host-daemon", "exec", "tsx", "src/cli/index.ts", "start"],
+  ["--filter", "@abitat_reece/host-daemon", "exec", "tsx", "src/cli/index.ts", "start"],
   {
     env: { ...process.env, ABITAT_API_URL: apiUrl, ABITAT_CLI_RUNTIME_MODE: cliRuntimeMode },
     stdio: "inherit"

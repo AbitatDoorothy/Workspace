@@ -2,7 +2,7 @@ import {
   codexModelIdSchema,
   codexReasoningEffortSchema,
   conversationCreateRequestSchema
-} from "@abitat/shared";
+} from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 

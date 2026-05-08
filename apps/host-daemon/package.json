@@ -1,5 +1,5 @@
 {
-  "name": "@abitat/host-daemon",
+  "name": "@abitat_reece/host-daemon",
   "private": false,
   "version": "0.1.0",
   "type": "module",
@@ -21,16 +21,16 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "predev": "pnpm --filter @abitat/shared build",
+    "predev": "pnpm --filter @abitat_reece/shared build",
     "dev": "tsx src/cli/index.ts start",
     "dev:mock": "tsx src/cli/index.ts start --mock",
     "lint": "eslint .",
-    "pretest": "pnpm --filter @abitat/shared build",
+    "pretest": "pnpm --filter @abitat_reece/shared build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@abitat/shared": "workspace:*",
+    "@abitat_reece/shared": "workspace:*",
     "node-pty": "^1.1.0",
     "ws": "^8.20.0"
   },

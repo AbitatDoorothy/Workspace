@@ -1,4 +1,4 @@
-import type { Runtime } from "@abitat/shared";
+import type { Runtime } from "@abitat_reece/shared";
 
 import type { RuntimeAdapter } from "./adapter.js";
 import {

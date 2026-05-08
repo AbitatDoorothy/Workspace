@@ -4,7 +4,7 @@ import type {
   HostHeartbeatRequest,
   HostPairingRequest,
   ToolScanUploadRequest
-} from "@abitat/shared";
+} from "@abitat_reece/shared";
 
 export const DEMO_PAIRING_CODE = "ABITAT-123456";
 

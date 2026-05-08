@@ -20,7 +20,7 @@ brew install abitat
 The npm package remains available as an alternate install path:
 
 ```sh
-npm install -g @abitat/cli
+npm install -g @abitat_reece/cli
 ```
 
 Start the Mac host:
@@ -35,7 +35,7 @@ This command:
 2. Stores a CLI session in `~/Library/Application Support/Abitat/config.json`.
 3. Registers the Mac host to the signed-in account.
 4. Starts the local Codex app server.
-5. Starts the packaged `@abitat/host-daemon` dependency with hosted API credentials.
+5. Starts the packaged `@abitat_reece/host-daemon` dependency with hosted API credentials.
 6. Opens the hosted dashboard for iPhone pairing.
 
 ## iPhone
@@ -62,6 +62,6 @@ pnpm smoke:public-install
 pnpm test:homebrew
 ```
 
-This builds and packs `@abitat/shared`, `@abitat/host-daemon`, and `@abitat/cli`, installs them into a clean temporary npm project, verifies `abitat doctor`, and verifies that the CLI can resolve the packaged host daemon entrypoint.
+This builds and packs `@abitat_reece/shared`, `@abitat_reece/host-daemon`, and `@abitat_reece/cli`, installs them into a clean temporary npm project, verifies `abitat doctor`, and verifies that the CLI can resolve the packaged host daemon entrypoint.
 
-The Homebrew formula lives at `Formula/abitat.rb`. Release it by copying that file to the `Abitat/homebrew-abitat` tap repository, then update the formula URL and SHA when publishing a new `@abitat/cli` version.
+The Homebrew formula lives at `Formula/abitat.rb`. Release it by copying that file to the `Abitat/homebrew-abitat` tap repository, then update the formula URL and SHA when publishing a new `@abitat_reece/cli` version.

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import type { RemoteControlStatus, RemoteControlSignal } from "@abitat/shared";
+import type { RemoteControlStatus, RemoteControlSignal } from "@abitat_reece/shared";
 
 export interface RemoteControlSessionRecord {
   id: string;

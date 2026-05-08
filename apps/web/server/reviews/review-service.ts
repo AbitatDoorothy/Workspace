@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { approvalRequestSchema } from "@abitat/shared";
+import { approvalRequestSchema } from "@abitat_reece/shared";
 import { z } from "zod";
 
 import { assertWorkspaceMember } from "../auth/role-checks";

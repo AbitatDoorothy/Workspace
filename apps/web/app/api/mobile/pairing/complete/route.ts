@@ -1,4 +1,4 @@
-import { phonePairingCompleteRequestSchema } from "@abitat/shared";
+import { phonePairingCompleteRequestSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 
 import { mobileService } from "../../../../../server/mobile";

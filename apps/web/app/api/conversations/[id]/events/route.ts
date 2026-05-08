@@ -1,4 +1,4 @@
-import { runEventIngestRequestSchema, type RunEventType } from "@abitat/shared";
+import { runEventIngestRequestSchema, type RunEventType } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 
 import { requireHostToken } from "../../../../../server/hosts/request-auth";

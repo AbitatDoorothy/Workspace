@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { HostTool, ToolName } from "@abitat/shared";
+import type { HostTool, ToolName } from "@abitat_reece/shared";
 
 const execFileAsync = promisify(execFile);
 const VERSION_ARGS: Record<ToolName, string[]> = {

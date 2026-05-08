@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import type { Runtime } from "@abitat/shared";
+import type { Runtime } from "@abitat_reece/shared";
 
 import { prisma } from "../db/client";
 import { createAgentService, type AgentRecord } from "./agent-service";

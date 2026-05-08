@@ -36,7 +36,7 @@ Direct phone-to-Mac networking is not required. The Mac daemon connects outbound
 
 ## File Structure
 
-- Create `apps/cli/package.json`: npm package definition for `@abitat/cli` with `bin.abitat`.
+- Create `apps/cli/package.json`: npm package definition for `@abitat_reece/cli` with `bin.abitat`.
 - Create `apps/cli/src/index.ts`: command dispatcher for `abitat login`, `abitat iphone`, `abitat doctor`, `abitat logout`.
 - Create `apps/cli/src/auth.ts`: browser/device login flow and local credential storage.
 - Create `apps/cli/src/doctor.ts`: environment checks for macOS, Codex binary, network, and host token.
@@ -92,7 +92,7 @@ describe("abitat cli", () => {
 Run:
 
 ```bash
-pnpm --filter @abitat/cli test
+pnpm --filter @abitat_reece/cli test
 ```
 
 Expected: FAIL because `apps/cli` does not exist.
@@ -103,7 +103,7 @@ Create `apps/cli/package.json`:
 
 ```json
 {
-  "name": "@abitat/cli",
+  "name": "@abitat_reece/cli",
   "private": false,
   "version": "0.1.0",
   "type": "module",
@@ -117,7 +117,7 @@ Create `apps/cli/package.json`:
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@abitat/shared": "workspace:*"
+    "@abitat_reece/shared": "workspace:*"
   },
   "devDependencies": {
     "tsx": "4.21.0",
@@ -151,8 +151,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 Run:
 
 ```bash
-pnpm --filter @abitat/cli test
-pnpm --filter @abitat/cli typecheck
+pnpm --filter @abitat_reece/cli test
+pnpm --filter @abitat_reece/cli typecheck
 ```
 
 Expected: PASS.
@@ -254,7 +254,7 @@ Run:
 
 ```bash
 pnpm --filter web exec vitest run tests/cli-device-login-service.test.ts
-pnpm --filter @abitat/cli test
+pnpm --filter @abitat_reece/cli test
 ```
 
 Expected: PASS.
@@ -379,7 +379,7 @@ it("builds the hosted iphone startup plan", () => {
 Run:
 
 ```bash
-pnpm --filter @abitat/cli test
+pnpm --filter @abitat_reece/cli test
 ```
 
 Expected: FAIL because `createIphoneStartupPlan()` does not exist.
@@ -413,9 +413,9 @@ Keep `pnpm iphone` and `scripts/dev-iphone.mjs` unchanged for local development.
 Run:
 
 ```bash
-pnpm --filter @abitat/cli test
+pnpm --filter @abitat_reece/cli test
 pnpm --filter host-daemon test
-pnpm --filter @abitat/cli typecheck
+pnpm --filter @abitat_reece/cli typecheck
 pnpm --filter host-daemon typecheck
 ```
 
@@ -544,7 +544,7 @@ Expected: PASS.
 
 ```json
 {
-  "name": "@abitat/cli",
+  "name": "@abitat_reece/cli",
   "bin": {
     "abitat": "dist/index.js"
   },
@@ -579,7 +579,7 @@ Initial formula can install the npm tarball or a built standalone archive:
 class Abitat < Formula
   desc "Remote Codex control from Mac and iPhone"
   homepage "https://workspace.abitat.io"
-  url "https://registry.npmjs.org/@abitat/cli/-/cli-0.1.0.tgz"
+  url "https://registry.npmjs.org/@abitat_reece/cli/-/cli-0.1.0.tgz"
   sha256 "<release-sha>"
   depends_on "node"
 
@@ -599,8 +599,8 @@ end
 Run:
 
 ```bash
-pnpm --filter @abitat/cli build
-pnpm --filter @abitat/cli test
+pnpm --filter @abitat_reece/cli build
+pnpm --filter @abitat_reece/cli test
 ```
 
 Expected: PASS.
@@ -682,8 +682,8 @@ pnpm --filter web lint
 pnpm --filter web typecheck
 pnpm --filter host-daemon test
 pnpm --filter host-daemon typecheck
-pnpm --filter @abitat/cli test
-pnpm --filter @abitat/cli typecheck
+pnpm --filter @abitat_reece/cli test
+pnpm --filter @abitat_reece/cli typecheck
 pnpm exec prettier --check <changed files>
 git diff --check
 ```

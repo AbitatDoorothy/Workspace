@@ -7,7 +7,7 @@ import type {
   CodexReasoningEffort,
   ConversationStatus,
   ConversationType
-} from "@abitat/shared";
+} from "@abitat_reece/shared";
 
 import { mobileActivityLog } from "../mobile/mobile-activity-log";
 import { createCodexAppClient } from "./codex-app-client";

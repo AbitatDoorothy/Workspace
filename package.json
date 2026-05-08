@@ -14,8 +14,8 @@
     "db:migrate:dev": "pnpm --filter web db:migrate:dev",
     "db:seed": "pnpm --filter web db:seed",
     "db:validate": "pnpm --filter web db:validate",
-    "dev": "pnpm --parallel --filter web --filter @abitat/host-daemon run dev",
-    "dev:daemon": "pnpm --filter @abitat/host-daemon dev",
+    "dev": "pnpm --parallel --filter web --filter @abitat_reece/host-daemon run dev",
+    "dev:daemon": "pnpm --filter @abitat_reece/host-daemon dev",
     "dev:iphone": "node scripts/dev-iphone.mjs",
     "dev:web": "pnpm --filter web dev",
     "format": "prettier --check .",
@@ -23,8 +23,8 @@
     "lint": "pnpm -r lint",
     "smoke:public-install": "node scripts/public-install-smoke.mjs",
     "test:homebrew": "node scripts/validate-homebrew-formula.mjs",
-    "test": "pnpm --filter @abitat/shared build && pnpm -r test",
-    "typecheck": "pnpm --filter @abitat/shared build && pnpm db:generate && pnpm -r typecheck"
+    "test": "pnpm --filter @abitat_reece/shared build && pnpm -r test",
+    "typecheck": "pnpm --filter @abitat_reece/shared build && pnpm db:generate && pnpm -r typecheck"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

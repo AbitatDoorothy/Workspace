@@ -7,7 +7,7 @@ import {
   type ConversationType,
   type DaemonJob,
   type Runtime
-} from "@abitat/shared";
+} from "@abitat_reece/shared";
 import { z } from "zod";
 
 import { assertWorkspaceMember } from "../auth/role-checks";
