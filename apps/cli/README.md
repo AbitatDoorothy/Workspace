@@ -5,13 +5,20 @@
 ## Install
 
 ```sh
-npm install -g @abitat/cli
+brew tap Abitat/abitat
+brew install abitat
 ```
 
-Homebrew packaging is planned for the public release:
+If the formula is accepted into Homebrew core, this becomes:
 
 ```sh
 brew install abitat
+```
+
+The npm package is also available:
+
+```sh
+npm install -g @abitat/cli
 ```
 
 ## Use

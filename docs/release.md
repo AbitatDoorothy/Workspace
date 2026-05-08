@@ -24,7 +24,35 @@ Run the local release smoke first:
 
 ```sh
 pnpm smoke:public-install
+pnpm test:homebrew
 ```
+
+## Homebrew
+
+The formula source lives at `Formula/abitat.rb` and installs the published `@abitat/cli` npm tarball with `node@22`. It also declares Python as a build dependency because the packaged host daemon includes the native `node-pty` dependency.
+
+For the first public Homebrew release:
+
+1. Create or use a public GitHub organization named `Abitat`.
+2. Create a public tap repository named `Abitat/homebrew-abitat`.
+3. Copy `Formula/abitat.rb` into that repository.
+4. Publish the npm packages listed above.
+5. Download the published `@abitat/cli` tarball and update the formula `sha256` if it differs from the local `pnpm pack` output.
+6. Test the tap locally:
+
+```sh
+brew install --build-from-source ./Formula/abitat.rb
+abitat doctor
+```
+
+Users can then install with:
+
+```sh
+brew tap Abitat/abitat
+brew install abitat
+```
+
+If the formula is later accepted into Homebrew core, users can install with `brew install abitat`.
 
 ## Hosted Web
 
@@ -39,7 +67,8 @@ Ship a TestFlight or App Store build with the API URL defaulting to `https://wor
 After release, a new user can:
 
 ```sh
-npm install -g @abitat/cli
+brew tap Abitat/abitat
+brew install abitat
 abitat iphone
 ```
 

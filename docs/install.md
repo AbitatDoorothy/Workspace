@@ -4,16 +4,23 @@ Abitat’s public hosted flow uses `workspace.abitat.io` as the control plane. T
 
 ## Mac
 
-Install the CLI after the public npm packages have been published:
+Install the CLI with Homebrew:
 
 ```sh
-npm install -g @abitat/cli
+brew tap Abitat/abitat
+brew install abitat
 ```
 
-After the Homebrew tap is released, the equivalent install command can be:
+After the formula is accepted into Homebrew core, users can skip the tap step:
 
 ```sh
 brew install abitat
+```
+
+The npm package remains available as an alternate install path:
+
+```sh
+npm install -g @abitat/cli
 ```
 
 Start the Mac host:
@@ -52,6 +59,9 @@ Before publishing, run:
 
 ```sh
 pnpm smoke:public-install
+pnpm test:homebrew
 ```
 
 This builds and packs `@abitat/shared`, `@abitat/host-daemon`, and `@abitat/cli`, installs them into a clean temporary npm project, verifies `abitat doctor`, and verifies that the CLI can resolve the packaged host daemon entrypoint.
+
+The Homebrew formula lives at `Formula/abitat.rb`. Release it by copying that file to the `Abitat/homebrew-abitat` tap repository, then update the formula URL and SHA when publishing a new `@abitat/cli` version.
