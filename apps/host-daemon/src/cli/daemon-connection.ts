@@ -13,6 +13,15 @@ export interface DaemonConnection {
 }
 
 export function resolveDaemonConnection(input: ResolveDaemonConnectionInput): DaemonConnection {
+  if (input.env.ABITAT_MACHINE_ID && input.env.ABITAT_HOST_TOKEN) {
+    return {
+      apiUrl: input.env.ABITAT_API_URL ?? input.config?.apiUrl ?? "http://localhost:3000",
+      hostToken: input.env.ABITAT_HOST_TOKEN,
+      machineId: input.env.ABITAT_MACHINE_ID,
+      paired: true
+    };
+  }
+
   if (input.config) {
     return {
       apiUrl: input.config.apiUrl,

@@ -37,7 +37,10 @@ try {
   );
 
   const doctor = await run("node", ["node_modules/@abitat_reece/cli/dist/index.js", "doctor"], {
-    cwd: installDir
+    cwd: installDir,
+    env: {
+      ABITAT_CLI_CONFIG_PATH: join(installDir, "abitat-cli-config.json")
+    }
   });
   if (!doctor.stdout.includes("Not logged in. Run `abitat login`.")) {
     throw new Error(`Unexpected abitat doctor output: ${doctor.stdout}`);
@@ -82,7 +85,7 @@ function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: process.env,
+      env: { ...process.env, ...options.env },
       stdio: options.quiet ? ["ignore", "pipe", "pipe"] : ["ignore", "pipe", "pipe"]
     });
     let stdout = "";

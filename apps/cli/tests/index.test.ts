@@ -131,6 +131,7 @@ describe("abitat cli", () => {
         },
         fetchFn,
         homeDir,
+        isEndpointListening: async () => false,
         openUrl: (url) => openedUrls.push(url),
         output: (line) => output.push(line),
         platform: "darwin",
@@ -158,6 +159,47 @@ describe("abitat cli", () => {
     ]);
     expect(output).toContain("Mac host registered as machine_1");
     expect(output).toContain("Open the iPhone app and pair from https://workspace.abitat.io");
+    await rm(homeDir, { force: true, recursive: true });
+  });
+
+  it("reuses an already running Codex app server instead of starting a duplicate", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "abitat-cli-index-iphone-reuse-"));
+    const output: string[] = [];
+    const startedProcesses: Array<{ name: string }> = [];
+
+    await saveCliSession(
+      {
+        apiUrl: "https://workspace.abitat.io",
+        cliToken: "cli_secret",
+        userId: "user_1"
+      },
+      sessionConfigPath(homeDir)
+    );
+
+    const fetchFn = async () =>
+      Response.json({
+        machineId: "machine_1",
+        workspaceId: "workspace_1",
+        hostToken: "host_secret"
+      });
+
+    await expect(
+      runCli(["iphone"], {
+        env: {
+          CODEX_APP_SERVER_URL: "ws://127.0.0.1:47777"
+        },
+        fetchFn,
+        homeDir,
+        isEndpointListening: async (url) => url === "ws://127.0.0.1:47777",
+        openUrl: () => {},
+        output: (line) => output.push(line),
+        platform: "darwin",
+        startProcess: (process) => startedProcesses.push(process)
+      })
+    ).resolves.toBe(0);
+
+    expect(startedProcesses.map((process) => process.name)).toEqual(["host-daemon"]);
+    expect(output).toContain("Using existing Codex app server at ws://127.0.0.1:47777");
     await rm(homeDir, { force: true, recursive: true });
   });
 

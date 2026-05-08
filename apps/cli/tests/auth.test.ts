@@ -108,4 +108,56 @@ describe("CLI auth storage", () => {
     });
     await rm(homeDir, { force: true, recursive: true });
   });
+
+  it("keeps polling through temporary hosted tunnel failures", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "abitat-cli-login-retry-"));
+    const configPath = sessionConfigPath(homeDir);
+    let pollAttempts = 0;
+
+    const fetchFn = async (url: string) => {
+      if (url.endsWith("/api/cli/device-login/start")) {
+        return Response.json(
+          {
+            code: "ABITAT-LOGIN",
+            deviceLoginId: "cli_login_1",
+            expiresAt: "2026-05-07T12:10:00.000Z",
+            verificationPath: "/login?cliCode=ABITAT-LOGIN"
+          },
+          { status: 201 }
+        );
+      }
+
+      pollAttempts += 1;
+      if (pollAttempts === 1) {
+        return Response.json({ error: "Tunnel unavailable" }, { status: 503 });
+      }
+      if (pollAttempts === 2) {
+        throw new TypeError("fetch failed");
+      }
+
+      return Response.json({
+        status: "approved",
+        userId: "user_1",
+        cliToken: "cli_secret"
+      });
+    };
+
+    await expect(
+      runLoginCommand({
+        apiUrl: "https://workspace.abitat.io",
+        configPath,
+        fetchFn,
+        maxPolls: 4,
+        openUrl: () => {},
+        pollIntervalMs: 0
+      })
+    ).resolves.toEqual({
+      apiUrl: "https://workspace.abitat.io",
+      cliToken: "cli_secret",
+      userId: "user_1"
+    });
+
+    expect(pollAttempts).toBe(3);
+    await rm(homeDir, { force: true, recursive: true });
+  });
 });

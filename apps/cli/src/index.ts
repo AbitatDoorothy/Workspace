@@ -2,6 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
+import { connect } from "node:net";
 import { homedir, hostname } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +25,7 @@ interface RunCliInput {
   env?: Partial<Record<string, string | undefined>>;
   fetchFn?: FetchFn;
   homeDir?: string;
+  isEndpointListening?: (url: string) => Promise<boolean>;
   openUrl?: (url: string) => void;
   output?: (line: string) => void;
   platform?: string;
@@ -51,6 +53,7 @@ export function parseCommand(args: string[]): AbitatCommand {
 export async function runCli(args: string[], input: RunCliInput = {}) {
   const parsed = parseCommand(args);
   const env = input.env ?? process.env;
+  const isEndpointListening = input.isEndpointListening ?? isTcpEndpointListening;
   const output = input.output ?? console.log;
   const openUrl = input.openUrl ?? openUrlInBrowser;
   const homeDir = input.homeDir ?? homedir();
@@ -104,6 +107,12 @@ export async function runCli(args: string[], input: RunCliInput = {}) {
   });
 
   for (const process of result.startupPlan) {
+    const existingServerUrl = codexAppServerListenUrl(process);
+    if (existingServerUrl && (await isEndpointListening(existingServerUrl))) {
+      output(`Using existing Codex app server at ${existingServerUrl}`);
+      continue;
+    }
+
     (input.startProcess ?? startProcess)(process);
   }
 
@@ -111,6 +120,41 @@ export async function runCli(args: string[], input: RunCliInput = {}) {
   output(`Mac host registered as ${result.registration.machineId}`);
   output(`Open the iPhone app and pair from ${session.apiUrl}`);
   return 0;
+}
+
+function codexAppServerListenUrl(process: StartupProcess) {
+  if (process.name !== "codex-app-server") {
+    return null;
+  }
+
+  const listenIndex = process.args.indexOf("--listen");
+  return listenIndex >= 0 ? (process.args[listenIndex + 1] ?? null) : null;
+}
+
+function isTcpEndpointListening(url: string, timeoutMs = 250) {
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+
+    const endpoint = new URL(url);
+    const socket = connect({
+      host: endpoint.hostname,
+      port: Number(endpoint.port || (endpoint.protocol === "wss:" ? 443 : 80))
+    });
+
+    const finish = (listening: boolean) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      socket.destroy();
+      resolve(listening);
+    };
+
+    socket.setTimeout(timeoutMs, () => finish(false));
+    socket.on("connect", () => finish(true));
+    socket.on("error", () => finish(false));
+  });
 }
 
 function startProcess(process: StartupProcess) {

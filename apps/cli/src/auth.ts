@@ -139,13 +139,25 @@ async function pollDeviceLogin(apiUrl: string, deviceLoginId: string, fetchFn: F
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ deviceLoginId })
-  });
+  }).catch(() => null);
+
+  if (!response) {
+    return { status: "pending" as const };
+  }
 
   if (!response.ok) {
+    if (isTransientPollStatus(response.status)) {
+      return { status: "pending" as const };
+    }
+
     throw new Error(`Unable to poll CLI login (${response.status})`);
   }
 
   return parsePollResponse(await response.json());
+}
+
+function isTransientPollStatus(status: number) {
+  return status === 429 || status === 502 || status === 503 || status === 504;
 }
 
 function parseStartResponse(value: unknown): DeviceLoginStartResponse {
