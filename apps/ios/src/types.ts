@@ -77,6 +77,22 @@ export interface ConversationAttachment {
   size: number;
 }
 
+export type CodexReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export interface CodexMobileModelSettings {
+  model: string;
+  effort: CodexReasoningEffort;
+}
+
+export interface CodexModelOption {
+  id: string;
+  displayName: string;
+  description: string;
+  supportedReasoningEfforts: CodexReasoningEffort[];
+  defaultReasoningEffort: CodexReasoningEffort;
+  isDefault: boolean;
+}
+
 export interface CodexCompletionSummary {
   conversationId: string;
   failed: boolean;
@@ -84,6 +100,7 @@ export interface CodexCompletionSummary {
   latestTurnCompletedAt: string | null;
   latestTurnId: string | null;
   projectId: string;
+  projectName?: string;
   prompt: string;
   source: "codex_app";
   status: string;

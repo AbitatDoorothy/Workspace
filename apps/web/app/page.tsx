@@ -3,8 +3,9 @@ import type { HostTool } from "@abitat/shared";
 import { AppShell, Icon } from "./components/app-shell";
 import { PairIphonePanel } from "./components/pair-iphone-panel";
 import { appInfo } from "../lib/app-info";
+import { getServerAccountContext } from "../server/auth/request-session";
 import { getHostPairingCode } from "../server/hosts/host-service";
-import { hostService } from "../server/hosts";
+import { prisma } from "../server/db/client";
 
 export default async function Home({
   searchParams
@@ -16,7 +17,8 @@ export default async function Home({
   }>;
 }) {
   const pairing = getPhonePairingFromSearchParams(await searchParams);
-  const host = await getHost();
+  const account = await getServerAccountContext();
+  const host = await getHost(account.hostMachineId);
   const tools = Array.isArray(host?.installedToolsJson)
     ? (host.installedToolsJson as HostTool[])
     : [];
@@ -92,7 +94,7 @@ export default async function Home({
               <PairIphonePanel
                 hostMachineId={host.id}
                 initialPairing={pairing}
-                workspaceId={host.workspaceId}
+                workspaceId={account.workspaceId}
               />
             ) : null}
 
@@ -172,9 +174,9 @@ function getPhonePairingFromSearchParams(searchParams: {
   };
 }
 
-async function getHost() {
+async function getHost(hostMachineId: string) {
   try {
-    return await hostService.getDemoHost();
+    return await prisma.machine.findUnique({ where: { id: hostMachineId } });
   } catch {
     return null;
   }

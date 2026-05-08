@@ -4,7 +4,7 @@
 2. Create `.env` files from `.env.example` if needed.
 3. Start or migrate the database with `pnpm db:migrate:dev` and `pnpm db:seed`.
 4. Start the web app and host daemon with `pnpm dev`.
-5. Pair the host, when needed, with `pnpm --filter host-daemon dev pair --code ABITAT-123456`.
+5. Pair the host, when needed, with `pnpm --filter @abitat/host-daemon dev pair --code ABITAT-123456`.
 6. Open `http://localhost:3000`, create or use the demo project and agent, then start a conversation.
 7. To run only one side while debugging, use `pnpm dev:web` or `pnpm dev:daemon`.
 8. Review the diff, approve commit/push, and watch the conversation move to `pushed`.

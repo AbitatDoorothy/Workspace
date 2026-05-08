@@ -5,6 +5,7 @@ import WebSocket from "ws";
 
 import type {
   CodexAppClient,
+  CodexAppModelOption,
   CodexAppResponseItem,
   CodexAppStartTurnOptions,
   CodexAppThread,
@@ -69,6 +70,27 @@ export function createCodexAppClient(options: CodexAppClientOptions = {}): Codex
       } while (cursor);
 
       return threadIds;
+    },
+
+    async listModels() {
+      const models: CodexAppModelOption[] = [];
+      let cursor: string | null | undefined = null;
+
+      do {
+        const response: {
+          data: CodexAppRawModel[];
+          nextCursor: string | null;
+        } = await callCodexApp(serverUrl, codexBinaryPath, "model/list", {
+          cursor,
+          includeHidden: false,
+          limit: 200
+        });
+
+        models.push(...response.data.flatMap(normalizeCodexModel));
+        cursor = response.nextCursor;
+      } while (cursor);
+
+      return models;
     },
 
     listThreads(params: CodexAppThreadListParams = {}) {
@@ -252,10 +274,95 @@ function turnStartParams(
   return {
     ...(options.approvalPolicy ? { approvalPolicy: options.approvalPolicy } : {}),
     ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.effort ? { effort: options.effort } : {}),
     input,
+    ...(options.model ? { model: options.model } : {}),
     ...(options.sandboxPolicy ? { sandboxPolicy: options.sandboxPolicy } : {}),
     threadId
   };
+}
+
+interface CodexAppRawModel {
+  defaultReasoningEffort?: unknown;
+  description?: unknown;
+  displayName?: unknown;
+  hidden?: unknown;
+  id?: unknown;
+  isDefault?: unknown;
+  model?: unknown;
+  supportedReasoningEfforts?: unknown;
+}
+
+type CodexAppReasoningEffort = CodexAppModelOption["defaultReasoningEffort"];
+
+function normalizeCodexModel(raw: CodexAppRawModel): CodexAppModelOption[] {
+  if (raw.hidden) {
+    return [];
+  }
+
+  const id = stringValue(raw.id) || stringValue(raw.model);
+  if (!id) {
+    return [];
+  }
+
+  const defaultReasoningEffort = reasoningEffort(raw.defaultReasoningEffort) ?? "medium";
+  const supportedReasoningEfforts = uniqueReasoningEfforts(raw.supportedReasoningEfforts);
+
+  return [
+    {
+      defaultReasoningEffort,
+      description: stringValue(raw.description),
+      displayName: stringValue(raw.displayName) || id,
+      id,
+      isDefault: raw.isDefault === true,
+      supportedReasoningEfforts:
+        supportedReasoningEfforts.length > 0 ? supportedReasoningEfforts : [defaultReasoningEffort]
+    }
+  ];
+}
+
+function uniqueReasoningEfforts(input: unknown): CodexAppReasoningEffort[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const efforts: CodexAppReasoningEffort[] = [];
+
+  for (const item of input) {
+    if (typeof item === "string") {
+      const effort = reasoningEffort(item);
+      if (effort) {
+        efforts.push(effort);
+      }
+      continue;
+    }
+
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const effort = reasoningEffort((item as { reasoningEffort?: unknown }).reasoningEffort);
+    if (effort) {
+      efforts.push(effort);
+    }
+  }
+
+  return [...new Set(efforts)];
+}
+
+function reasoningEffort(input: unknown): CodexAppReasoningEffort | null {
+  return input === "none" ||
+    input === "minimal" ||
+    input === "low" ||
+    input === "medium" ||
+    input === "high" ||
+    input === "xhigh"
+    ? input
+    : null;
+}
+
+function stringValue(input: unknown) {
+  return typeof input === "string" ? input.trim() : "";
 }
 
 function isTurnInProgress(turn: CodexAppTurn) {

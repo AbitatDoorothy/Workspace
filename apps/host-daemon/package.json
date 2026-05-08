@@ -1,10 +1,23 @@
 {
-  "name": "host-daemon",
-  "private": true,
+  "name": "@abitat/host-daemon",
+  "private": false,
   "version": "0.1.0",
   "type": "module",
+  "description": "Mac host daemon for Abitat Workspace remote Codex control",
   "bin": {
-    "abitat-host": "./dist/cli/index.js"
+    "abitat-host": "dist/cli/index.js"
+  },
+  "exports": {
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "import": "./dist/cli/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

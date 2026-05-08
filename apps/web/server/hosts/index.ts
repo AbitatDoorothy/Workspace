@@ -8,6 +8,11 @@ export const hostService = createHostService(createPrismaHostDb(prisma));
 function createPrismaHostDb(db: PrismaClient): HostDb {
   return {
     machine: {
+      create(args) {
+        return db.machine.create({
+          data: args.data as Prisma.MachineUncheckedCreateInput
+        });
+      },
       findFirst(args) {
         return db.machine.findFirst(args ?? undefined);
       },

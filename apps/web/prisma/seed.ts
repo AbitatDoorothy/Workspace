@@ -1,15 +1,21 @@
 import { prisma } from "../server/db/client";
+import { hashPassword } from "../server/auth/passwords";
 
 async function main() {
+  const demoPasswordHash = await hashPassword(process.env.ABITAT_DEMO_PASSWORD ?? "abitat-local");
+
   await prisma.user.upsert({
     where: { email: "demo@abitat.local" },
     update: {
-      displayName: "Demo User"
+      displayName: "Demo User",
+      passwordHash: demoPasswordHash,
+      passwordUpdatedAt: new Date()
     },
     create: {
       id: "user_demo",
       email: "demo@abitat.local",
-      displayName: "Demo User"
+      displayName: "Demo User",
+      passwordHash: demoPasswordHash
     }
   });
 

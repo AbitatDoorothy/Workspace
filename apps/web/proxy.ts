@@ -10,10 +10,15 @@ import {
 const PUBLIC_PATHS = new Set([
   "/login",
   "/api/login",
+  "/register",
+  "/api/register",
   "/api/logout",
+  "/api/cli/device-login/start",
+  "/api/cli/device-login/poll",
   "/api/mobile/pairing/complete"
 ]);
 const HOST_API_PATHS = new Set([
+  "/api/hosts/register",
   "/api/hosts/pair",
   "/api/hosts/heartbeat",
   "/api/hosts/tools",

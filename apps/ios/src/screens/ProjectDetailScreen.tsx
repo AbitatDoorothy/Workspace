@@ -3,22 +3,27 @@ import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import type { ApiClient } from "../api/client";
 import { Button, Header, StatusPill } from "../components/Controls";
+import { CodexModelControls } from "../components/CodexModelControls";
 import { rememberRunningConversation } from "../notifications/thread-completion-notifications";
 import { Screen } from "../components/Screen";
 import { colors, sharedStyles } from "../theme";
-import type { ConversationSummary, ProjectSummary } from "../types";
+import type { CodexMobileModelSettings, ConversationSummary, ProjectSummary } from "../types";
 
 interface ProjectDetailScreenProps {
   api: ApiClient;
+  modelSettings: CodexMobileModelSettings;
   onBack(): void;
   onConversation(conversation: ConversationSummary): void;
+  onModelSettingsChange(next: CodexMobileModelSettings): void;
   project: ProjectSummary;
 }
 
 export function ProjectDetailScreen({
   api,
+  modelSettings,
   onBack,
   onConversation,
+  onModelSettingsChange,
   project
 }: ProjectDetailScreenProps) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -59,6 +64,8 @@ export function ProjectDetailScreen({
     try {
       const started = await api.createConversation(project.id, {
         clientMessageId: `ios-${Date.now()}`,
+        effort: modelSettings.effort,
+        model: modelSettings.model,
         prompt
       });
       rememberRunningConversation(started.conversationId);
@@ -107,6 +114,7 @@ export function ProjectDetailScreen({
           style={[sharedStyles.input, { minHeight: 96, paddingTop: 12, textAlignVertical: "top" }]}
           value={prompt}
         />
+        <CodexModelControls api={api} onChange={onModelSettingsChange} value={modelSettings} />
         <View style={{ marginTop: 12 }}>
           <Button disabled={isStarting || prompt.trim().length === 0} onPress={startConversation}>
             {isStarting ? "Starting" : "Start Codex"}

@@ -12,8 +12,13 @@ interface MachineRecord {
   id: string;
   workspaceId: string;
   name: string;
+  type: string;
   status: string;
   pairingTokenHash: string | null;
+  ownerUserId?: string | null;
+  platform?: string | null;
+  deviceKind?: string | null;
+  capabilitiesJson?: unknown;
   installedToolsJson?: unknown;
   lastSeenAt?: Date | null;
 }
@@ -28,6 +33,7 @@ interface MachineUpdateData {
 
 export interface HostDb {
   machine: {
+    create(args: { data: MachineRecord }): Promise<MachineRecord>;
     findFirst(args?: unknown): Promise<MachineRecord | null>;
     findUnique(args: { where: { id: string } }): Promise<MachineRecord | null>;
     update(args: { where: { id: string }; data: MachineUpdateData }): Promise<MachineRecord>;
@@ -42,10 +48,70 @@ export function getHostPairingCode(env: Partial<Record<string, string | undefine
   return env.ABITAT_PAIRING_CODE?.trim() || DEMO_PAIRING_CODE;
 }
 
-export function createHostService(db: HostDb, options: { pairingCode?: string } = {}) {
+interface RegisterHostInput {
+  userId: string;
+  workspaceId: string;
+  machineName: string;
+  platform?: string;
+}
+
+interface HostServiceOptions {
+  idGenerator?: (prefix: string) => string;
+  pairingCode?: string;
+  tokenGenerator?: () => string;
+}
+
+export function createHostService(db: HostDb, options: HostServiceOptions = {}) {
   const pairingCode = options.pairingCode ?? getHostPairingCode();
+  const idGenerator =
+    options.idGenerator ?? ((prefix: string) => `${prefix}_${randomBytes(8).toString("hex")}`);
+  const tokenGenerator =
+    options.tokenGenerator ?? (() => `host_${randomBytes(24).toString("hex")}`);
 
   return {
+    async registerHost(input: RegisterHostInput) {
+      const hostToken = tokenGenerator();
+      const existing = await db.machine.findFirst({
+        where: {
+          ownerUserId: input.userId,
+          workspaceId: input.workspaceId,
+          type: "host"
+        }
+      });
+
+      const data = {
+        name: input.machineName,
+        status: "online",
+        ownerUserId: input.userId,
+        platform: input.platform ?? "darwin",
+        deviceKind: "host",
+        capabilitiesJson: ["codex", "claude", "screen_capture", "input_control"],
+        pairingTokenHash: hashHostToken(hostToken),
+        lastSeenAt: new Date()
+      };
+
+      const machine = existing
+        ? await db.machine.update({
+            where: { id: existing.id },
+            data
+          })
+        : await db.machine.create({
+            data: {
+              id: idGenerator("machine"),
+              workspaceId: input.workspaceId,
+              type: "host",
+              installedToolsJson: [],
+              ...data
+            }
+          });
+
+      return {
+        machineId: machine.id,
+        workspaceId: machine.workspaceId,
+        hostToken
+      };
+    },
+
     async pairHost(input: HostPairingRequest) {
       if (input.pairingCode !== pairingCode) {
         throw new Error("Invalid pairing code");
@@ -62,7 +128,7 @@ export function createHostService(db: HostDb, options: { pairingCode?: string } 
         throw new Error("No host machine is available for pairing");
       }
 
-      const hostToken = `host_${randomBytes(24).toString("hex")}`;
+      const hostToken = tokenGenerator();
       await db.machine.update({
         where: { id: machine.id },
         data: {

@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { POST } from "../app/api/projects/route";
 import { PROJECT_DRAFT_COOKIE_NAME, getProjectDraft } from "../server/projects/project-drafts";
+
+vi.mock("../server/auth/request-session", () => ({
+  getRequestAccountContext: async () => ({
+    hostMachineId: "machine_demo",
+    userId: "user_demo",
+    workspaceId: "workspace_demo"
+  })
+}));
 
 describe("projects route", () => {
   it("keeps form validation failures in the create project popup", async () => {

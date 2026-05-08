@@ -2,6 +2,7 @@ import { conversationCreateRequestSchema } from "@abitat/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getRequestAccountContext } from "../../../server/auth/request-session";
 import { createBrowserRedirectUrl } from "../../../server/auth/session";
 import { conversationQueueService } from "../../../server/conversations";
 import { runEventService } from "../../../server/run-events";
@@ -18,7 +19,12 @@ const conversationRequestSchema = conversationCreateRequestSchema.extend({
 export async function POST(request: Request) {
   try {
     const body = await parseRequest(request);
-    const input = conversationRequestSchema.parse(body);
+    const account = await getRequestAccountContext(request);
+    const input = {
+      ...conversationRequestSchema.parse(body),
+      workspaceId: account.workspaceId,
+      createdByUserId: account.userId
+    };
     const todoTask = input.todoTitle ? todoStore.startCodexTask(input.todoTitle) : null;
     const conversationInput = {
       ...input,

@@ -4,9 +4,10 @@ import { sanitizeRedirectPath } from "../../server/auth/session";
 export default async function LoginPage({
   searchParams
 }: {
-  searchParams: Promise<{ next?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
-  const nextPath = sanitizeRedirectPath((await searchParams).next);
+  const params = await searchParams;
+  const nextPath = sanitizeRedirectPath(params.next);
 
   return (
     <main className="login-shell">
@@ -26,16 +27,21 @@ export default async function LoginPage({
         <form action="/api/login" className="login-form" method="post">
           {nextPath !== "/" ? <input name="next" type="hidden" value={nextPath} /> : null}
           <label>
-            Password
-            <input
-              autoComplete="current-password"
-              autoFocus
-              name="password"
-              required
-              type="password"
-            />
+            Email
+            <input autoComplete="email" autoFocus name="email" required type="email" />
           </label>
+          <label>
+            Password
+            <input autoComplete="current-password" name="password" required type="password" />
+          </label>
+          {params.error ? <p className="form-error">Email or password is incorrect.</p> : null}
           <button type="submit">Log in</button>
+          <a
+            className="login-secondary-link"
+            href={`/register${nextPath !== "/" ? `?next=${encodeURIComponent(nextPath)}` : ""}`}
+          >
+            Create an account
+          </a>
         </form>
       </section>
     </main>

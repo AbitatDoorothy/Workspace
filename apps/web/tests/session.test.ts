@@ -6,27 +6,34 @@ import {
   createPublicRedirectUrl,
   isSecureRequest,
   sanitizeRedirectPath,
-  verifyLoginPassword,
   verifySessionToken
 } from "../server/auth/session";
+import { hashPassword, verifyPassword } from "../server/auth/passwords";
 
 describe("auth session", () => {
-  it("creates a signed session token that verifies with the same secret", async () => {
-    const token = await createSessionToken("secret", 60_000, 1_800_000_000_000);
+  it("creates a signed session token containing the authenticated user id", async () => {
+    const token = await createSessionToken("user_123", "secret", 60_000, 1_800_000_000_000);
 
-    await expect(verifySessionToken(token, "secret", 1_700_000_000_000)).resolves.toBe(true);
+    await expect(verifySessionToken(token, "secret", 1_700_000_000_000)).resolves.toEqual({
+      userId: "user_123"
+    });
   });
 
   it("rejects tampered or expired session tokens", async () => {
-    const token = await createSessionToken("secret", 60_000, 1_800_000_000_000);
+    const token = await createSessionToken("user_123", "secret", 60_000, 1_800_000_000_000);
 
     await expect(verifySessionToken(`${token}x`, "secret", 1_700_000_000_000)).resolves.toBe(false);
     await expect(verifySessionToken(token, "secret", 1_800_000_060_001)).resolves.toBe(false);
   });
 
-  it("verifies the configured login password without trimming real characters", () => {
-    expect(verifyLoginPassword("correct horse", "correct horse")).toBe(true);
-    expect(verifyLoginPassword("correct horse ", "correct horse")).toBe(false);
+  it("hashes and verifies account passwords without storing plaintext", async () => {
+    const hash = await hashPassword("correct horse battery staple", {
+      salt: Buffer.from("0123456789abcdef0123456789abcdef")
+    });
+
+    expect(hash).not.toContain("correct horse");
+    await expect(verifyPassword("correct horse battery staple", hash)).resolves.toBe(true);
+    await expect(verifyPassword("wrong password", hash)).resolves.toBe(false);
   });
 
   it("builds redirects from forwarded public hosts instead of the local origin", () => {

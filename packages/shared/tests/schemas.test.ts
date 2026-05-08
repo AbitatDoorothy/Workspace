@@ -7,6 +7,9 @@ import {
   conversationMessageCreateRequestSchema,
   conversationMessageRoleSchema,
   conversationTypeSchema,
+  codexMobileModelSettingsSchema,
+  codexModelOptionsResponseSchema,
+  codexReasoningEffortSchema,
   daemonJobSchema,
   daemonJobPollRequestSchema,
   daemonJobAckRequestSchema,
@@ -390,6 +393,55 @@ describe("shared schema validation", () => {
       sourceDeviceId: "machine_phone",
       clientMessageId: "local-message-1",
       metadata: {}
+    });
+  });
+
+  it("validates Codex mobile model settings and dynamic model options", () => {
+    expect(codexReasoningEffortSchema.safeParse("xhigh").success).toBe(true);
+    expect(codexReasoningEffortSchema.safeParse("extreme").success).toBe(false);
+
+    expect(
+      codexMobileModelSettingsSchema.parse({
+        model: "gpt-5.3-codex",
+        effort: "high"
+      })
+    ).toEqual({
+      model: "gpt-5.3-codex",
+      effort: "high"
+    });
+
+    expect(codexMobileModelSettingsSchema.safeParse({ model: "", effort: "high" }).success).toBe(
+      false
+    );
+    expect(
+      codexMobileModelSettingsSchema.safeParse({ model: "gpt-5.3-codex", effort: "extreme" })
+        .success
+    ).toBe(false);
+
+    expect(
+      codexModelOptionsResponseSchema.parse({
+        models: [
+          {
+            id: "gpt-5.3-codex",
+            displayName: "GPT-5.3 Codex",
+            description: "Best for agentic coding.",
+            supportedReasoningEfforts: ["minimal", "low", "medium", "high", "xhigh"],
+            defaultReasoningEffort: "medium",
+            isDefault: true
+          }
+        ]
+      })
+    ).toEqual({
+      models: [
+        {
+          id: "gpt-5.3-codex",
+          displayName: "GPT-5.3 Codex",
+          description: "Best for agentic coding.",
+          supportedReasoningEfforts: ["minimal", "low", "medium", "high", "xhigh"],
+          defaultReasoningEffort: "medium",
+          isDefault: true
+        }
+      ]
     });
   });
 

@@ -1,5 +1,6 @@
 import { AppShell, Icon } from "../../../../components/app-shell";
 import { ConversationSummaryPanel } from "../../../../conversations/conversation-summary-panel";
+import { getServerAccountContext } from "../../../../../server/auth/request-session";
 import {
   codexAppService,
   isCodexConversationId,
@@ -22,9 +23,10 @@ export default async function ProjectConversationPage({
     return <CodexAppConversationHistory projectId={projectId} conversationId={conversationId} />;
   }
 
+  const account = await getServerAccountContext();
   const [project, conversation, events] = await Promise.all([
-    getProject(projectId),
-    getConversation(projectId, conversationId),
+    getProject(projectId, account.workspaceId),
+    getConversation(projectId, conversationId, account.workspaceId),
     getEvents(conversationId)
   ]);
 
@@ -128,18 +130,18 @@ async function CodexAppConversationHistory({
   );
 }
 
-async function getProject(projectId: string) {
+async function getProject(projectId: string, workspaceId: string) {
   try {
-    const projects = await projectService.listProjects("workspace_demo");
+    const projects = await projectService.listProjects(workspaceId);
     return projects.find((project) => project.id === projectId) ?? null;
   } catch {
     return null;
   }
 }
 
-async function getConversation(projectId: string, conversationId: string) {
+async function getConversation(projectId: string, conversationId: string, workspaceId: string) {
   try {
-    const conversations = await conversationQueueService.listConversations("workspace_demo");
+    const conversations = await conversationQueueService.listConversations(workspaceId);
     return (
       conversations.find(
         (conversation) => conversation.id === conversationId && conversation.projectId === projectId

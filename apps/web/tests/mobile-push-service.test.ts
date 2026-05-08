@@ -46,6 +46,7 @@ describe("mobile push service", () => {
         failed: false,
         hostMachineId: "machine_demo",
         projectId: "codex_project_project_1",
+        projectName: "Abitat_Workspace",
         prompt: "Fix the notifications",
         source: "codex_app",
         turnId: "turn_1",
@@ -56,7 +57,7 @@ describe("mobile push service", () => {
     expect(sent).toEqual([
       [
         expect.objectContaining({
-          body: "Fix the notifications",
+          body: "Project: Abitat_Workspace",
           data: expect.objectContaining({
             conversationId: "codex_thread_thread_1",
             projectId: "codex_project_project_1",
@@ -117,6 +118,7 @@ describe("mobile push service", () => {
         failed: false,
         hostMachineId: "machine_demo",
         projectId: "codex_project_project_1",
+        projectName: "Abitat_Workspace",
         prompt: "Fix the notifications",
         source: "codex_app",
         turnId: "turn_1",
@@ -166,6 +168,7 @@ describe("mobile push service", () => {
       failed: false,
       hostMachineId: "machine_demo",
       projectId: "codex_project_project_1",
+      projectName: "Abitat_Workspace",
       prompt: "Fix the notifications",
       source: "codex_app",
       turnId: "turn_1",
@@ -201,7 +204,7 @@ describe("mobile push service", () => {
     await expect(
       transport.send([
         {
-          body: "Fix notifications",
+          body: "Project: Abitat_Workspace",
           data: expect.objectContaining({
             conversationId: "codex_thread_thread_1",
             projectId: "codex_project_project_1",
@@ -459,6 +462,7 @@ function completionState(input: Partial<CodexCompletionState> = {}): CodexComple
     latestTurnCompletedAt: input.latestTurnCompletedAt ?? null,
     latestTurnId: input.latestTurnId ?? "turn_1",
     projectId: "codex_project_project_1",
+    projectName: "Abitat_Workspace",
     prompt: "Fix notifications",
     source: "codex_app",
     status: input.status ?? "approved",

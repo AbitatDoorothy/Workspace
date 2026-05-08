@@ -1,4 +1,8 @@
-import { conversationCreateRequestSchema } from "@abitat/shared";
+import {
+  codexModelIdSchema,
+  codexReasoningEffortSchema,
+  conversationCreateRequestSchema
+} from "@abitat/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -21,7 +25,18 @@ const createRequestSchema = conversationCreateRequestSchema
     type: true
   })
   .extend({
-    clientMessageId: z.string().min(1).optional()
+    clientMessageId: z.string().min(1).optional(),
+    effort: codexReasoningEffortSchema.optional(),
+    model: codexModelIdSchema.optional()
+  })
+  .superRefine((input, ctx) => {
+    if (Boolean(input.model) !== Boolean(input.effort)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Codex model and effort must be provided together",
+        path: input.model ? ["effort"] : ["model"]
+      });
+    }
   });
 
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
@@ -99,6 +114,8 @@ export async function POST(request: Request, context: { params: Promise<{ projec
 
     if (isCodexProjectId(projectId)) {
       const conversation = await codexAppService.startConversation(projectId, {
+        modelSettings:
+          input.model && input.effort ? { effort: input.effort, model: input.model } : undefined,
         prompt: input.prompt
       });
       mobileActivityLog.record("mobile_codex_conversation_started", {

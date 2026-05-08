@@ -1,4 +1,5 @@
 import { AppShell, Icon } from "../../components/app-shell";
+import { getServerAccountContext } from "../../../server/auth/request-session";
 import { conversationQueueService } from "../../../server/conversations";
 import { codexAppService, isCodexProjectId } from "../../../server/codex-app";
 import { projectService } from "../../../server/projects";
@@ -11,9 +12,10 @@ export const dynamic = "force-dynamic";
 
 export default async function ProjectPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
+  const account = await getServerAccountContext();
   const [project, conversations, notStartedTodos] = await Promise.all([
-    getProject(projectId),
-    getProjectConversations(projectId),
+    getProject(projectId, account.workspaceId),
+    getProjectConversations(projectId, account.workspaceId),
     getNotStartedTodos()
   ]);
 
@@ -75,6 +77,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
               <StartCodexDialog
                 projectId={project.id}
                 todoTasks={notStartedTodos}
+                userId={account.userId}
                 workspaceId={project.workspaceId}
               />
             )}
@@ -102,19 +105,23 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
           </article>
         </section>
 
-        <ConversationBoard conversations={boardConversations} projectId={project.id} />
+        <ConversationBoard
+          conversations={boardConversations}
+          projectId={project.id}
+          userId={account.userId}
+        />
       </section>
     </AppShell>
   );
 }
 
-async function getProject(projectId: string) {
+async function getProject(projectId: string, workspaceId: string) {
   try {
     if (isCodexProjectId(projectId)) {
       return await codexAppService.getProject(projectId);
     }
 
-    const projects = await projectService.listProjects("workspace_demo");
+    const projects = await projectService.listProjects(workspaceId);
     const project = projects.find((candidate) => candidate.id === projectId);
     return project ? { ...project, source: "abitat" as const } : null;
   } catch {
@@ -122,13 +129,13 @@ async function getProject(projectId: string) {
   }
 }
 
-async function getProjectConversations(projectId: string) {
+async function getProjectConversations(projectId: string, workspaceId: string) {
   try {
     if (isCodexProjectId(projectId)) {
       return await codexAppService.listProjectConversations(projectId);
     }
 
-    const conversations = await conversationQueueService.listConversations("workspace_demo");
+    const conversations = await conversationQueueService.listConversations(workspaceId);
     return conversations
       .filter((conversation) => conversation.projectId === projectId)
       .map((conversation) => ({

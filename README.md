@@ -45,7 +45,7 @@ pnpm dev:daemon
 Run the host daemon in mock mode:
 
 ```bash
-pnpm --filter host-daemon dev:mock
+pnpm --filter @abitat/host-daemon dev:mock
 ```
 
 Run checks:

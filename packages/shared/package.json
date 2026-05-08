@@ -1,8 +1,14 @@
 {
   "name": "@abitat/shared",
-  "private": true,
+  "private": false,
   "version": "0.1.0",
   "type": "module",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

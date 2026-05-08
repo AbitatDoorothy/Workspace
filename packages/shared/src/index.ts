@@ -27,6 +27,34 @@ export const conversationStatusSchema = z.enum([
   "failed",
   "cancelled"
 ]);
+export const codexReasoningEffortSchema = z.enum([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh"
+]);
+export const codexModelIdSchema = z.string().trim().min(1).max(120);
+export const codexMobileModelSettingsSchema = z
+  .object({
+    model: codexModelIdSchema,
+    effort: codexReasoningEffortSchema
+  })
+  .strict();
+export const codexModelOptionSchema = z
+  .object({
+    id: codexModelIdSchema,
+    displayName: z.string().trim().min(1),
+    description: z.string().default(""),
+    supportedReasoningEfforts: z.array(codexReasoningEffortSchema).min(1),
+    defaultReasoningEffort: codexReasoningEffortSchema,
+    isDefault: z.boolean().default(false)
+  })
+  .strict();
+export const codexModelOptionsResponseSchema = z.object({
+  models: z.array(codexModelOptionSchema)
+});
 export const runEventTypeSchema = z.enum([
   "status",
   "stdout",
@@ -374,6 +402,10 @@ export type DeviceKind = z.infer<typeof deviceKindSchema>;
 export type Runtime = z.infer<typeof runtimeSchema>;
 export type ConversationType = z.infer<typeof conversationTypeSchema>;
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
+export type CodexReasoningEffort = z.infer<typeof codexReasoningEffortSchema>;
+export type CodexMobileModelSettings = z.infer<typeof codexMobileModelSettingsSchema>;
+export type CodexModelOption = z.infer<typeof codexModelOptionSchema>;
+export type CodexModelOptionsResponse = z.infer<typeof codexModelOptionsResponseSchema>;
 export type RunEventType = z.infer<typeof runEventTypeSchema>;
 export type DaemonJobType = z.infer<typeof daemonJobTypeSchema>;
 export type ToolName = z.infer<typeof toolNameSchema>;

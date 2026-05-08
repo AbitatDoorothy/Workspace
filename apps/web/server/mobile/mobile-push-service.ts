@@ -40,6 +40,7 @@ interface SendCodexThreadDoneInput {
   failed: boolean;
   hostMachineId: string;
   projectId: string;
+  projectName: string;
   prompt: string;
   source: "codex_app";
   turnId: string;
@@ -82,7 +83,7 @@ export function createMobilePushService(
           const sound = soundPicker();
 
           return {
-            body: input.prompt.trim() || "Untitled Codex thread",
+            body: `Project: ${input.projectName.trim() || "Unknown project"}`,
             data: {
               conversationId: input.conversationId,
               projectId: input.projectId,

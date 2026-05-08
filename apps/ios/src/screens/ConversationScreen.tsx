@@ -15,16 +15,24 @@ import {
 } from "react-native";
 
 import type { ApiClient } from "../api/client";
+import { CodexModelControls } from "../components/CodexModelControls";
 import { Button, StatusPill } from "../components/Controls";
 import { rememberRunningConversation } from "../notifications/thread-completion-notifications";
 import { FixedScreen } from "../components/Screen";
 import { colors, sharedStyles } from "../theme";
-import type { ConversationAttachment, ConversationMessage, ConversationSummary } from "../types";
+import type {
+  CodexMobileModelSettings,
+  ConversationAttachment,
+  ConversationMessage,
+  ConversationSummary
+} from "../types";
 
 interface ConversationScreenProps {
   api: ApiClient;
   conversation: ConversationSummary;
+  modelSettings: CodexMobileModelSettings;
   onBack(): void;
+  onModelSettingsChange(next: CodexMobileModelSettings): void;
 }
 
 interface PendingAttachment {
@@ -40,7 +48,13 @@ interface SendConversationInput {
   prompt: string;
 }
 
-export function ConversationScreen({ api, conversation, onBack }: ConversationScreenProps) {
+export function ConversationScreen({
+  api,
+  conversation,
+  modelSettings,
+  onBack,
+  onModelSettingsChange
+}: ConversationScreenProps) {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -186,6 +200,8 @@ export function ConversationScreen({ api, conversation, onBack }: ConversationSc
           path: attachment.path
         })),
         clientMessageId,
+        effort: modelSettings.effort,
+        model: modelSettings.model,
         prompt: submittedPrompt
       });
       setStatus(continued.status);
@@ -392,6 +408,7 @@ export function ConversationScreen({ api, conversation, onBack }: ConversationSc
         {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
 
         <View style={styles.composerShell}>
+          <CodexModelControls api={api} onChange={onModelSettingsChange} value={modelSettings} />
           {attachments.length > 0 ? (
             <View style={styles.attachmentList}>
               {attachments.map((attachment) => (

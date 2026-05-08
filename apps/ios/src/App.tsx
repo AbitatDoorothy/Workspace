@@ -74,6 +74,8 @@ export default function App() {
             setConversation(nextConversation);
             setRoute("conversation");
           }}
+          modelSettings={store.modelSettings}
+          onModelSettingsChange={store.saveModelSettings}
           project={project}
         />
       ) : null}
@@ -81,7 +83,9 @@ export default function App() {
         <ConversationScreen
           api={store.api}
           conversation={conversation}
+          modelSettings={store.modelSettings}
           onBack={() => setRoute(project ? "project" : "projects")}
+          onModelSettingsChange={store.saveModelSettings}
         />
       ) : null}
       {route === "settings" ? (

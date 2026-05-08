@@ -17,12 +17,30 @@ export function ProjectsScreen({ api, onProject }: ProjectsScreenProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api
-      .listProjects()
-      .then(setProjects)
-      .catch((caught) =>
-        setError(caught instanceof Error ? caught.message : "Unable to load projects")
-      );
+    let cancelled = false;
+
+    async function loadProjects() {
+      try {
+        const nextProjects = await api.listProjects();
+
+        if (!cancelled) {
+          setProjects(nextProjects);
+          setError(null);
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : "Unable to load projects");
+        }
+      }
+    }
+
+    void loadProjects();
+    const timer = setInterval(loadProjects, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [api]);
 
   return (

@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 
 import { AppShell, Icon } from "../components/app-shell";
+import { getServerAccountContext } from "../../server/auth/request-session";
 import { codexAppService } from "../../server/codex-app";
 import { projectService } from "../../server/projects";
 import { PROJECT_DRAFT_COOKIE_NAME, getProjectDraft } from "../../server/projects/project-drafts";
@@ -11,9 +12,10 @@ export default async function ProjectsPage({
 }: {
   searchParams: Promise<{ projectDraftId?: string }>;
 }) {
+  const account = await getServerAccountContext();
   const [{ projectDraftId }, projects, cookieStore] = await Promise.all([
     searchParams,
-    getProjects(),
+    getProjects(account.workspaceId),
     cookies()
   ]);
   const projectDraft = getProjectDraft(
@@ -31,7 +33,11 @@ export default async function ProjectsPage({
             <p>Connect local folders on this Mac.</p>
           </div>
           <div className="nav-actions">
-            <CreateProjectDialog draft={projectDraft} workspaceId="workspace_demo" />
+            <CreateProjectDialog
+              draft={projectDraft}
+              userId={account.userId}
+              workspaceId={account.workspaceId}
+            />
           </div>
         </div>
 
@@ -73,9 +79,9 @@ export default async function ProjectsPage({
   );
 }
 
-async function getProjects() {
+async function getProjects(workspaceId: string) {
   const [localProjects, codexProjects] = await Promise.allSettled([
-    projectService.listProjects("workspace_demo"),
+    projectService.listProjects(workspaceId),
     codexAppService.listProjects()
   ]);
 

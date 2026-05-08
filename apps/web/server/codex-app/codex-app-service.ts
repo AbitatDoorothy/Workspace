@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { basename, normalize } from "node:path";
 
-import type { ConversationStatus, ConversationType } from "@abitat/shared";
+import type {
+  CodexMobileModelSettings,
+  CodexModelOption,
+  CodexReasoningEffort,
+  ConversationStatus,
+  ConversationType
+} from "@abitat/shared";
 
 import { mobileActivityLog } from "../mobile/mobile-activity-log";
 import { createCodexAppClient } from "./codex-app-client";
@@ -121,6 +127,8 @@ export interface CodexAppThreadListResponse {
   backwardsCursor: string | null;
 }
 
+export type CodexAppModelOption = CodexModelOption;
+
 export type CodexAppResponseItem = {
   type: "message";
   role: "assistant" | "user";
@@ -134,12 +142,15 @@ export type CodexAppResponseItem = {
 export interface CodexAppStartTurnOptions {
   approvalPolicy?: "never";
   cwd?: string | null;
+  effort?: CodexReasoningEffort;
+  model?: string;
   sandboxPolicy?: { type: "dangerFullAccess" };
 }
 
 export interface CodexAppClient {
   injectItems(threadId: string, items: CodexAppResponseItem[]): Promise<void>;
   listLoadedThreads(): Promise<string[]>;
+  listModels(): Promise<CodexModelOption[]>;
   listThreads(params?: CodexAppThreadListParams): Promise<CodexAppThreadListResponse>;
   readThread(threadId: string, includeTurns?: boolean): Promise<CodexAppThread>;
   resumeThread(params: {
@@ -207,6 +218,7 @@ export interface CodexCompletionState {
   latestTurnCompletedAt: string | null;
   latestTurnId: string | null;
   projectId: string;
+  projectName: string;
   prompt: string;
   source: "codex_app";
   status: ConversationStatus;
@@ -224,6 +236,7 @@ interface CodexAppServiceOptions {
 
 interface StartConversationInput {
   attachments?: CodexAppAttachmentInput[];
+  modelSettings?: CodexMobileModelSettings;
   prompt: string;
 }
 
@@ -269,6 +282,27 @@ export function createCodexAppService(
   const modelContextSyncedTurnIds = new Map<string, string>();
 
   async function listAllThreads(params: CodexAppThreadListParams = {}) {
+    const requestedStateDbMode = params.useStateDbOnly;
+    const threads = await listAllThreadsOnce({
+      ...params,
+      useStateDbOnly: requestedStateDbMode ?? true
+    });
+
+    if (threads.length > 0 || requestedStateDbMode !== undefined) {
+      return threads;
+    }
+
+    activityLog?.record("codex_app_thread_list_state_db_empty", {
+      mode: "full_thread_list"
+    });
+
+    return listAllThreadsOnce({
+      ...params,
+      useStateDbOnly: false
+    });
+  }
+
+  async function listAllThreadsOnce(params: CodexAppThreadListParams) {
     const threads: CodexAppThread[] = [];
     let cursor: string | null | undefined = params.cursor ?? null;
 
@@ -277,7 +311,6 @@ export function createCodexAppService(
         archived: false,
         limit: 200,
         sortDirection: "desc",
-        useStateDbOnly: true,
         ...params,
         cursor
       });
@@ -354,6 +387,10 @@ export function createCodexAppService(
 
     listProjects,
 
+    listModelOptions() {
+      return client.listModels();
+    },
+
     async listCompletionStates(): Promise<CodexCompletionState[]> {
       const threads = await readThreadsWithTurns(await listAllThreads());
 
@@ -388,7 +425,8 @@ export function createCodexAppService(
       try {
         const started = await client.startTurn(thread.id, userInput(prompt, input.attachments), {
           ...PHONE_FULL_ACCESS_TURN_OPTIONS,
-          cwd
+          cwd,
+          ...turnModelSettings(input.modelSettings)
         });
         rememberModelContextSyncedTurn(thread.id, started.turn.id);
       } catch (error) {
@@ -418,12 +456,6 @@ export function createCodexAppService(
         resumed = true;
       };
 
-      if (thread.status.type === "systemError") {
-        throw new Error(
-          "Codex app thread is in a system error state. Open it on the Mac and resolve the error, or start a new Codex thread from the phone."
-        );
-      }
-
       if (thread.status.type !== "active") {
         await resumeThread();
       }
@@ -435,7 +467,8 @@ export function createCodexAppService(
       try {
         const started = await client.startTurn(threadId, turnInput, {
           ...PHONE_FULL_ACCESS_TURN_OPTIONS,
-          cwd: thread.cwd
+          cwd: thread.cwd,
+          ...turnModelSettings(input.modelSettings)
         });
         rememberModelContextSyncedTurn(threadId, started.turn.id);
       } catch (error) {
@@ -452,7 +485,8 @@ export function createCodexAppService(
         try {
           const started = await client.startTurn(threadId, turnInput, {
             ...PHONE_FULL_ACCESS_TURN_OPTIONS,
-            cwd: thread.cwd
+            cwd: thread.cwd,
+            ...turnModelSettings(input.modelSettings)
           });
           rememberModelContextSyncedTurn(threadId, started.turn.id);
         } catch (retryError) {
@@ -728,10 +762,7 @@ function codexThreadToCompletionState(
 ): CodexCompletionState {
   const latestTurn = thread.turns.at(-1) ?? null;
   const status = codexThreadToConversationStatus(thread);
-  const failed =
-    thread.status.type === "systemError" ||
-    Boolean(latestTurn?.error) ||
-    Boolean(latestTurn && isTurnInterrupted(latestTurn));
+  const failed = Boolean(latestTurn?.error) || Boolean(latestTurn && isTurnInterrupted(latestTurn));
   const latestTurnCompletedAt = latestTurnCompletedAtIso(thread, latestTurn);
   const latestTurnFinished = Boolean(latestTurn && isTurnTerminal(latestTurn));
 
@@ -746,6 +777,7 @@ function codexThreadToCompletionState(
     latestTurnCompletedAt,
     latestTurnId: latestTurn?.id ?? null,
     projectId: externalCodexProjectId(thread.cwd),
+    projectName: projectNameFromCwd(thread.cwd),
     prompt: codexThreadTitle(thread),
     source: "codex_app",
     status,
@@ -818,12 +850,16 @@ function turnStatusType(turn: CodexAppTurn) {
 function codexThreadToConversationStatus(thread: CodexAppThread): ConversationStatus {
   const latestTurn = thread.turns.at(-1) ?? null;
 
-  if (thread.status.type === "systemError" || Boolean(latestTurn?.error)) {
+  if (latestTurn?.error) {
     return "failed";
   }
 
   if (latestTurn && isTurnInterrupted(latestTurn)) {
     return "cancelled";
+  }
+
+  if (thread.status.type === "systemError") {
+    return latestTurn && isTurnCompleted(latestTurn) ? "approved" : "running";
   }
 
   if (thread.status.type === "active") {
@@ -855,6 +891,15 @@ function hasActiveFlag(status: CodexAppThreadStatus, flag: string) {
 
 function codexThreadTitle(thread: CodexAppThread) {
   return thread.name?.trim() || thread.preview.trim() || "Untitled Codex thread";
+}
+
+function turnModelSettings(modelSettings: CodexMobileModelSettings | undefined) {
+  return modelSettings
+    ? {
+        effort: modelSettings.effort,
+        model: modelSettings.model
+      }
+    : {};
 }
 
 function projectNameFromCwd(cwd: string) {

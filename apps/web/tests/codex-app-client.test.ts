@@ -153,6 +153,8 @@ describe("Codex app client", () => {
       [{ text: "hello from phone", text_elements: [], type: "text" }],
       {
         approvalPolicy: "never",
+        effort: "high",
+        model: "gpt-5.3-codex",
         sandboxPolicy: { type: "dangerFullAccess" },
         cwd: "/Users/reece/Desktop/Abitat_Workspace"
       }
@@ -162,11 +164,91 @@ describe("Codex app client", () => {
     expect(rawTurnParams).toEqual({
       approvalPolicy: "never",
       cwd: "/Users/reece/Desktop/Abitat_Workspace",
+      effort: "high",
       input: [{ text: "hello from phone", text_elements: [], type: "text" }],
+      model: "gpt-5.3-codex",
       sandboxPolicy: { type: "dangerFullAccess" },
       threadId: "thread_1"
     });
     expect(methods).toEqual(["initialize", "initialized", "turn/start"]);
+  });
+
+  it("lists available Codex models through the app-server protocol", async () => {
+    const modelListRequests: unknown[] = [];
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "model/list") {
+        modelListRequests.push(message.params);
+        sendResult(
+          socket,
+          message.id,
+          modelListRequests.length === 1
+            ? {
+                data: [
+                  {
+                    defaultReasoningEffort: "medium",
+                    description: "Best for agentic coding.",
+                    displayName: "GPT-5.3 Codex",
+                    hidden: false,
+                    id: "gpt-5.3-codex",
+                    isDefault: true,
+                    model: "gpt-5.3-codex",
+                    supportedReasoningEfforts: [
+                      { description: "Minimal", reasoningEffort: "minimal" },
+                      { description: "Medium", reasoningEffort: "medium" },
+                      { description: "High", reasoningEffort: "high" }
+                    ]
+                  }
+                ],
+                nextCursor: "cursor_2"
+              }
+            : {
+                data: [
+                  {
+                    defaultReasoningEffort: "low",
+                    description: "Fast coding model.",
+                    displayName: "GPT-5.4 Mini",
+                    hidden: false,
+                    id: "gpt-5.4-mini",
+                    isDefault: false,
+                    model: "gpt-5.4-mini",
+                    supportedReasoningEfforts: [
+                      { description: "Low", reasoningEffort: "low" },
+                      { description: "Medium", reasoningEffort: "medium" }
+                    ]
+                  }
+                ],
+                nextCursor: null
+              }
+        );
+      }
+    });
+    const client = createCodexAppClient({
+      codexBinaryPath: "/unused",
+      serverUrl
+    });
+
+    await expect(client.listModels()).resolves.toEqual([
+      expect.objectContaining({
+        defaultReasoningEffort: "medium",
+        displayName: "GPT-5.3 Codex",
+        id: "gpt-5.3-codex",
+        supportedReasoningEfforts: ["minimal", "medium", "high"]
+      }),
+      expect.objectContaining({
+        defaultReasoningEffort: "low",
+        displayName: "GPT-5.4 Mini",
+        id: "gpt-5.4-mini",
+        supportedReasoningEfforts: ["low", "medium"]
+      })
+    ]);
+    expect(modelListRequests).toEqual([
+      { cursor: null, includeHidden: false, limit: 200 },
+      { cursor: "cursor_2", includeHidden: false, limit: 200 }
+    ]);
   });
 
   it("lists loaded app-server threads for stale-context detection", async () => {

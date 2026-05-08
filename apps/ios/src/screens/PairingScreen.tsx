@@ -43,7 +43,7 @@ export function PairingScreen({ api, apiUrl, onApiUrlChange, onPaired }: Pairing
       <Header
         eyebrow="Abitat Mobile"
         title="Pair iPhone"
-        subtitle="Enter the short code shown on your Mac dashboard."
+        subtitle="Enter the code from the Mac dashboard signed in to your Abitat account."
       />
 
       <View style={sharedStyles.card}>

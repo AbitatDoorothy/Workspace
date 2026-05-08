@@ -14,6 +14,10 @@ interface TestMachine {
   status: string;
   type: string;
   pairingTokenHash: string | null;
+  ownerUserId?: string | null;
+  platform?: string | null;
+  deviceKind?: string | null;
+  capabilitiesJson?: unknown;
   installedToolsJson: unknown;
   lastSeenAt: Date | null;
 }
@@ -47,6 +51,10 @@ function createHostDb() {
 
   return {
     machine: {
+      create: async ({ data }: { data: TestMachine }) => {
+        machines.set(data.id, data);
+        return data;
+      },
       findFirst: async (args?: { where?: Partial<TestMachine> }) => {
         if (!args?.where) {
           return machines.get("machine_demo") ?? null;
@@ -72,13 +80,14 @@ function createHostDb() {
         machines.set(where.id, next);
         return next;
       }
-    }
+    },
+    state: { machines }
   };
 }
 
 describe("host service", () => {
   it("pairs a demo host and stores only a host token hash", async () => {
-    const service = createHostService(createHostDb());
+    const service = createHostService(createHostDb(), { pairingCode: DEMO_PAIRING_CODE });
 
     const result = await service.pairHost({
       pairingCode: DEMO_PAIRING_CODE,
@@ -93,7 +102,7 @@ describe("host service", () => {
   });
 
   it("rejects an invalid pairing code", async () => {
-    const service = createHostService(createHostDb());
+    const service = createHostService(createHostDb(), { pairingCode: DEMO_PAIRING_CODE });
 
     await expect(
       service.pairHost({
@@ -131,7 +140,7 @@ describe("host service", () => {
 
   it("records heartbeat status and tool scans", async () => {
     const db = createHostDb();
-    const service = createHostService(db);
+    const service = createHostService(db, { pairingCode: DEMO_PAIRING_CODE });
     const paired = await service.pairHost({
       pairingCode: DEMO_PAIRING_CODE,
       machineName: "Reece MacBook Pro",
@@ -166,7 +175,7 @@ describe("host service", () => {
   });
 
   it("can authenticate a paired host token without trusting arbitrary bearer strings", async () => {
-    const service = createHostService(createHostDb());
+    const service = createHostService(createHostDb(), { pairingCode: DEMO_PAIRING_CODE });
     const paired = await service.pairHost({
       pairingCode: DEMO_PAIRING_CODE,
       machineName: "Reece MacBook Pro",
@@ -175,5 +184,32 @@ describe("host service", () => {
 
     await expect(service.verifyAnyHostToken(paired.hostToken)).resolves.toBe(true);
     await expect(service.verifyAnyHostToken("host_not-real")).resolves.toBe(false);
+  });
+
+  it("registers a Mac host to the authenticated account workspace", async () => {
+    const db = createHostDb();
+    const service = createHostService(db, {
+      idGenerator: (prefix) => `${prefix}_1`,
+      tokenGenerator: () => "host_secret"
+    });
+
+    const result = await service.registerHost({
+      userId: "user_1",
+      workspaceId: "workspace_1",
+      machineName: "Reece MacBook Pro",
+      platform: "darwin"
+    });
+
+    expect(result).toEqual({
+      machineId: "machine_1",
+      workspaceId: "workspace_1",
+      hostToken: "host_secret"
+    });
+    expect(db.state.machines.get("machine_1")).toMatchObject({
+      ownerUserId: "user_1",
+      workspaceId: "workspace_1",
+      type: "host",
+      pairingTokenHash: hashHostToken("host_secret")
+    });
   });
 });

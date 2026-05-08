@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { agentService } from "../../../server/agents";
+import { getRequestAccountContext } from "../../../server/auth/request-session";
 import { createBrowserRedirectUrl } from "../../../server/auth/session";
 
 const agentRequestSchema = z.object({
@@ -18,7 +19,12 @@ const agentRequestSchema = z.object({
 export async function POST(request: Request) {
   try {
     const body = await parseRequest(request);
-    const agent = await agentService.createAgent(agentRequestSchema.parse(body));
+    const account = await getRequestAccountContext(request);
+    const input = agentRequestSchema.parse(body);
+    const agent = await agentService.createAgent({
+      ...input,
+      createdByUserId: account.userId
+    });
 
     if (request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
       return NextResponse.redirect(createBrowserRedirectUrl(request, "/projects"), 303);

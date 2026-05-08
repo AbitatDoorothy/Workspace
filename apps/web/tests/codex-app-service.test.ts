@@ -66,7 +66,9 @@ interface FakeCodexAppClient extends CodexAppClient {
   startedTurns: Array<{
     approvalPolicy?: unknown;
     cwd?: string | null;
+    effort?: unknown;
     input: string;
+    model?: unknown;
     sandboxPolicy?: unknown;
     threadId: string;
   }>;
@@ -97,6 +99,7 @@ function createFakeClient(
   threads: CodexAppThread[],
   clientOptions: {
     loadedThreadIds?: string[];
+    emptyStateDbThreadList?: boolean;
     omitTurnsFromList?: boolean;
     rejectUnloadedTurns?: boolean;
     startTurnIds?: string[];
@@ -125,6 +128,26 @@ function createFakeClient(
       loadedThreadRequests += 1;
       return clientOptions.loadedThreadIds ?? [];
     },
+    async listModels() {
+      return [
+        {
+          defaultReasoningEffort: "medium",
+          description: "Best for agentic coding.",
+          displayName: "GPT-5.3 Codex",
+          id: "gpt-5.3-codex",
+          isDefault: true,
+          supportedReasoningEfforts: ["minimal", "medium", "high", "xhigh"]
+        },
+        {
+          defaultReasoningEffort: "low",
+          description: "Fast coding model.",
+          displayName: "GPT-5.4 Mini",
+          id: "gpt-5.4-mini",
+          isDefault: false,
+          supportedReasoningEfforts: ["low", "medium"]
+        }
+      ];
+    },
     operations,
     readThreadRequests,
     resumedThreadRequests,
@@ -134,6 +157,13 @@ function createFakeClient(
     async listThreads(params = {}) {
       const cwd = Array.isArray(params.cwd) ? params.cwd[0] : params.cwd;
       const data = cwd ? threads.filter((thread) => thread.cwd === cwd) : threads;
+      if (clientOptions.emptyStateDbThreadList && params.useStateDbOnly) {
+        return {
+          backwardsCursor: null,
+          data: [],
+          nextCursor: null
+        };
+      }
       return {
         backwardsCursor: null,
         data: clientOptions.omitTurnsFromList
@@ -197,7 +227,9 @@ function createFakeClient(
       startedTurns.push({
         approvalPolicy: options?.approvalPolicy,
         cwd: options?.cwd,
+        effort: options?.effort,
         input: text,
+        model: options?.model,
         sandboxPolicy: options?.sandboxPolicy,
         threadId
       });
@@ -257,6 +289,43 @@ describe("Codex app service", () => {
         source: "codex_app"
       })
     ]);
+  });
+
+  it("falls back to the full Codex app thread list when the state DB list is empty", async () => {
+    const activityLog = createFakeActivityLog();
+    const client = createFakeClient(
+      [
+        createThread({
+          cwd: "/Users/reece/Desktop/Abitat_Workspace",
+          id: "thread_a",
+          preview: "Add phone control"
+        })
+      ],
+      { emptyStateDbThreadList: true }
+    );
+    const service = createCodexAppService(client, {
+      activityLog,
+      workspaceId: "workspace_demo"
+    });
+
+    await expect(service.listProjects()).resolves.toEqual([
+      expect.objectContaining({
+        conversationCount: 1,
+        hostLocalPath: "/Users/reece/Desktop/Abitat_Workspace",
+        name: "Abitat_Workspace",
+        source: "codex_app"
+      })
+    ]);
+    expect(activityLog.events).toEqual(
+      expect.arrayContaining([
+        {
+          details: expect.objectContaining({
+            mode: "full_thread_list"
+          }),
+          event: "codex_app_thread_list_state_db_empty"
+        }
+      ])
+    );
   });
 
   it("lists conversations for a Codex project without using Abitat CLI jobs", async () => {
@@ -422,6 +491,79 @@ describe("Codex app service", () => {
         status: "cancelled"
       })
     );
+  });
+
+  it("does not mark transient Codex app system errors as failed without a failed turn", async () => {
+    const cwd = "/Users/reece/Desktop/Abitat_Workspace";
+    const client = createFakeClient([
+      createThread({
+        cwd,
+        id: "thread_transient_error",
+        preview: "Transient network issue",
+        status: { type: "systemError" },
+        turns: [
+          createTurn({
+            completedAt: null,
+            error: null,
+            id: "turn_in_progress",
+            status: { type: "inProgress" }
+          })
+        ],
+        updatedAt: 1_775_000_050
+      })
+    ]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    const [conversation] = await service.listProjectConversations(externalCodexProjectId(cwd));
+    const [completion] = await service.listCompletionStates();
+
+    expect(conversation).toEqual(
+      expect.objectContaining({
+        id: externalCodexConversationId("thread_transient_error"),
+        status: "running"
+      })
+    );
+    expect(completion).toEqual(
+      expect.objectContaining({
+        conversationId: externalCodexConversationId("thread_transient_error"),
+        failed: false,
+        isComplete: false,
+        latestTurnId: "turn_in_progress",
+        status: "running"
+      })
+    );
+  });
+
+  it("resumes a Codex app system-error thread before starting a phone turn", async () => {
+    const cwd = "/Users/reece/Desktop/Abitat_Workspace";
+    const client = createFakeClient([
+      createThread({
+        cwd,
+        id: "thread_recovered",
+        preview: "Recover after network issue",
+        status: { type: "systemError" },
+        turns: [
+          createTurn({
+            completedAt: 1_775_000_050,
+            error: null,
+            id: "turn_done",
+            status: "completed"
+          })
+        ]
+      })
+    ]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    await expect(
+      service.continueConversation(externalCodexConversationId("thread_recovered"), {
+        prompt: "Continue execution"
+      })
+    ).resolves.toEqual({
+      conversationId: externalCodexConversationId("thread_recovered"),
+      status: "running"
+    });
+
+    expect(client.operations).toEqual(["resume:thread_recovered", "start:thread_recovered"]);
   });
 
   it("flattens Codex app thread history into mobile chat messages", async () => {
@@ -823,9 +965,11 @@ describe("Codex app service", () => {
     const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
 
     const created = await service.startConversation(externalCodexProjectId(cwd), {
+      modelSettings: { effort: "high", model: "gpt-5.3-codex" },
       prompt: "Start from my phone"
     });
     const continued = await service.continueConversation(externalCodexConversationId("thread_a"), {
+      modelSettings: { effort: "xhigh", model: "gpt-5.4-mini" },
       prompt: "Keep going from iPhone"
     });
 
@@ -843,16 +987,44 @@ describe("Codex app service", () => {
       {
         approvalPolicy: "never",
         cwd,
+        effort: "high",
         input: "Start from my phone",
+        model: "gpt-5.3-codex",
         sandboxPolicy: { type: "dangerFullAccess" },
         threadId: "thread_new"
       },
       {
         approvalPolicy: "never",
         cwd,
+        effort: "xhigh",
         input: "Keep going from iPhone",
+        model: "gpt-5.4-mini",
         sandboxPolicy: { type: "dangerFullAccess" },
         threadId: "thread_a"
+      }
+    ]);
+  });
+
+  it("lists Codex model options for mobile controls", async () => {
+    const client = createFakeClient([]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    await expect(service.listModelOptions()).resolves.toEqual([
+      {
+        defaultReasoningEffort: "medium",
+        description: "Best for agentic coding.",
+        displayName: "GPT-5.3 Codex",
+        id: "gpt-5.3-codex",
+        isDefault: true,
+        supportedReasoningEfforts: ["minimal", "medium", "high", "xhigh"]
+      },
+      {
+        defaultReasoningEffort: "low",
+        description: "Fast coding model.",
+        displayName: "GPT-5.4 Mini",
+        id: "gpt-5.4-mini",
+        isDefault: false,
+        supportedReasoningEfforts: ["low", "medium"]
       }
     ]);
   });
@@ -1215,7 +1387,7 @@ describe("Codex app service", () => {
     expect(client.startedTurns).toEqual([]);
   });
 
-  it("rejects continuation when a Codex app thread is in system error", async () => {
+  it("recovers continuation when a Codex app thread is in system error", async () => {
     const cwd = "/Users/reece/Desktop/Abitat_Workspace";
     const client = createFakeClient([
       createThread({
@@ -1231,8 +1403,11 @@ describe("Codex app service", () => {
       service.continueConversation(externalCodexConversationId("thread_a"), {
         prompt: "Keep going"
       })
-    ).rejects.toThrow("Codex app thread is in a system error state");
-    expect(client.startedTurns).toEqual([]);
+    ).resolves.toEqual({
+      conversationId: externalCodexConversationId("thread_a"),
+      status: "running"
+    });
+    expect(client.operations).toEqual(["resume:thread_a", "start:thread_a"]);
   });
 
   it("marks Codex external identifiers and desktop app deep links", () => {

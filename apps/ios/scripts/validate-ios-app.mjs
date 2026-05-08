@@ -6,6 +6,7 @@ const requiredFiles = [
   "index.ts",
   "src/App.tsx",
   "src/api/client.ts",
+  "src/components/CodexModelControls.tsx",
   "src/notifications/thread-completion-notifications.ts",
   "src/state/mobile-store.ts",
   "src/screens/PairingScreen.tsx",
@@ -184,6 +185,21 @@ if (!conversationScreen.includes("{sendButtonLabel(status, isSending)}")) {
 if (conversationScreen.includes('source === "codex_app" && status === "running"')) {
   throw new Error("Expected ConversationScreen not to allow sends into running Codex app turns");
 }
+if (!conversationScreen.includes("CodexModelControls")) {
+  throw new Error("Expected ConversationScreen to expose Codex model controls");
+}
+if (!conversationScreen.includes("modelSettings: CodexMobileModelSettings")) {
+  throw new Error("Expected ConversationScreen to receive persisted Codex model settings");
+}
+if (!conversationScreen.includes("onModelSettingsChange(next: CodexMobileModelSettings): void")) {
+  throw new Error("Expected ConversationScreen to persist changed Codex model settings");
+}
+if (!conversationScreen.includes("model: modelSettings.model")) {
+  throw new Error("Expected ConversationScreen to send the selected Codex model");
+}
+if (!conversationScreen.includes("effort: modelSettings.effort")) {
+  throw new Error("Expected ConversationScreen to send the selected Codex effort");
+}
 const projectDetailScreen = await readFile(
   join(process.cwd(), "src/screens/ProjectDetailScreen.tsx"),
   "utf8"
@@ -202,6 +218,21 @@ if (!projectDetailScreen.includes("onPress={onBack}")) {
 }
 if (!projectDetailScreen.includes("styles.backButton")) {
   throw new Error("Expected ProjectDetailScreen to style the projects back button");
+}
+if (!projectDetailScreen.includes("CodexModelControls")) {
+  throw new Error("Expected ProjectDetailScreen to expose Codex model controls");
+}
+if (!projectDetailScreen.includes("modelSettings: CodexMobileModelSettings")) {
+  throw new Error("Expected ProjectDetailScreen to receive persisted Codex model settings");
+}
+if (!projectDetailScreen.includes("onModelSettingsChange(next: CodexMobileModelSettings): void")) {
+  throw new Error("Expected ProjectDetailScreen to persist changed Codex model settings");
+}
+if (!projectDetailScreen.includes("model: modelSettings.model")) {
+  throw new Error("Expected ProjectDetailScreen to send the selected Codex model");
+}
+if (!projectDetailScreen.includes("effort: modelSettings.effort")) {
+  throw new Error("Expected ProjectDetailScreen to send the selected Codex effort");
 }
 if (
   !conversationScreen.includes("const [isHeaderExpanded, setIsHeaderExpanded] = useState(false)")
@@ -251,6 +282,12 @@ const appScreen = await readFile(join(process.cwd(), "src/App.tsx"), "utf8");
 if (!appScreen.includes("useThreadCompletionNotifications")) {
   throw new Error("Expected App to start the thread completion notification watcher");
 }
+if (!appScreen.includes("modelSettings={store.modelSettings}")) {
+  throw new Error("Expected App to pass persisted Codex model settings to mobile chat screens");
+}
+if (!appScreen.includes("onModelSettingsChange={store.saveModelSettings}")) {
+  throw new Error("Expected App to persist Codex model setting changes from chat screens");
+}
 if (!appScreen.includes('onBack={() => setRoute(project ? "project" : "projects")')) {
   throw new Error("Expected App to route conversation back actions to the project page");
 }
@@ -299,6 +336,45 @@ if (notificationWatcher.includes("wasMessageCreatedAfterSnapshot")) {
 }
 if (notificationWatcher.includes("isNotificationMessageFromCompletedTurn")) {
   throw new Error("Expected notifications to be based on turn completion, not assistant messages");
+}
+
+const apiClient = await readFile(join(process.cwd(), "src/api/client.ts"), "utf8");
+for (const expected of ["listCodexModels", "model?: string", "effort?: CodexReasoningEffort"]) {
+  if (!apiClient.includes(expected)) {
+    throw new Error(`Expected API client to support Codex model control: ${expected}`);
+  }
+}
+
+const mobileStore = await readFile(join(process.cwd(), "src/state/mobile-store.ts"), "utf8");
+for (const expected of ["MODEL_SETTINGS_STORAGE_KEY", "modelSettings", "saveModelSettings"]) {
+  if (!mobileStore.includes(expected)) {
+    throw new Error(`Expected mobile store to persist Codex model settings: ${expected}`);
+  }
+}
+
+const codexModelControls = await readFile(
+  join(process.cwd(), "src/components/CodexModelControls.tsx"),
+  "utf8"
+);
+for (const expected of [
+  "listCodexModels",
+  "supportedReasoningEfforts",
+  "defaultReasoningEffort",
+  "onChange"
+]) {
+  if (!codexModelControls.includes(expected)) {
+    throw new Error(`Expected CodexModelControls to include ${expected}`);
+  }
+}
+
+const codexModelSettings = await readFile(
+  join(process.cwd(), "src/codex-model-settings.ts"),
+  "utf8"
+);
+for (const expected of ["Minimal", "X-High", "DEFAULT_CODEX_MODEL_SETTINGS"]) {
+  if (!codexModelSettings.includes(expected)) {
+    throw new Error(`Expected Codex model settings to include ${expected}`);
+  }
 }
 
 console.log(`validated ${requiredFiles.length} iPhone app files`);

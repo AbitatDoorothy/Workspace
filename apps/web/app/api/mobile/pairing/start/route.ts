@@ -2,12 +2,12 @@ import { phonePairingStartRequestSchema } from "@abitat/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getRequestAccountContext } from "../../../../../server/auth/request-session";
 import { createBrowserRedirectUrl, sanitizeRedirectPath } from "../../../../../server/auth/session";
 import { mobileService } from "../../../../../server/mobile";
 import { mobileActivityLog } from "../../../../../server/mobile/mobile-activity-log";
 
-const requestSchema = phonePairingStartRequestSchema.extend({
-  createdByUserId: z.string().min(1).default("user_demo"),
+const requestSchema = phonePairingStartRequestSchema.partial().extend({
   redirectTo: z.string().min(1).optional()
 });
 
@@ -17,11 +17,16 @@ export async function POST(request: Request) {
       .get("content-type")
       ?.includes("application/x-www-form-urlencoded");
     const input = requestSchema.parse(await parseRequest(request));
-    const pairing = await mobileService.createPhonePairing(input);
+    const account = await getRequestAccountContext(request);
+    const pairing = await mobileService.createPhonePairing({
+      workspaceId: account.workspaceId,
+      hostMachineId: account.hostMachineId,
+      createdByUserId: account.userId
+    });
     mobileActivityLog.record("mobile_pairing_started", {
-      hostMachineId: input.hostMachineId,
+      hostMachineId: account.hostMachineId,
       pairingId: pairing.pairingId,
-      workspaceId: input.workspaceId
+      workspaceId: account.workspaceId
     });
 
     if (isFormRequest) {

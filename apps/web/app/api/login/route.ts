@@ -5,20 +5,21 @@ import {
   SESSION_COOKIE_NAME,
   createBrowserRedirectUrl,
   createSessionToken,
-  getLoginPassword,
   getSessionSecret,
   isSecureRequest,
-  sanitizeRedirectPath,
-  verifyLoginPassword
+  sanitizeRedirectPath
 } from "../../../server/auth/session";
+import { accountService } from "../../../server/auth/accounts";
 
 export async function POST(request: Request) {
   const form = await request.formData();
+  const email = String(form.get("email") ?? "");
   const password = String(form.get("password") ?? "");
   const nextPath = sanitizeRedirectPath(form.get("next"));
   const loginUrl = createBrowserRedirectUrl(request, "/login");
+  const user = await accountService.login({ email, password });
 
-  if (!verifyLoginPassword(password, getLoginPassword())) {
+  if (!user) {
     loginUrl.searchParams.set("error", "1");
     if (nextPath !== "/") {
       loginUrl.searchParams.set("next", nextPath);
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
   }
 
   const response = NextResponse.redirect(createBrowserRedirectUrl(request, nextPath), 303);
-  response.cookies.set(SESSION_COOKIE_NAME, await createSessionToken(getSessionSecret()), {
+  response.cookies.set(SESSION_COOKIE_NAME, await createSessionToken(user.id, getSessionSecret()), {
     httpOnly: true,
     maxAge: DEFAULT_SESSION_TTL_MS / 1000,
     path: "/",

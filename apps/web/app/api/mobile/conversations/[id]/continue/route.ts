@@ -1,3 +1,4 @@
+import { codexModelIdSchema, codexReasoningEffortSchema } from "@abitat/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -26,14 +27,27 @@ const continueRequestSchema = z
     prompt: z.string().trim().optional(),
     content: z.string().trim().optional(),
     clientMessageId: z.string().min(1).optional(),
+    effort: codexReasoningEffortSchema.optional(),
+    model: codexModelIdSchema.optional(),
     metadata: z.record(z.string(), z.unknown()).default({})
   })
   .transform((input) => ({
     attachments: input.attachments,
     prompt: input.prompt ?? input.content ?? "",
     clientMessageId: input.clientMessageId,
-    metadata: input.metadata
+    effort: input.effort,
+    metadata: input.metadata,
+    model: input.model
   }))
+  .superRefine((input, ctx) => {
+    if (Boolean(input.model) !== Boolean(input.effort)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Codex model and effort must be provided together",
+        path: input.model ? ["effort"] : ["model"]
+      });
+    }
+  })
   .refine((input) => input.prompt.length > 0, {
     message: "Prompt is required"
   });
@@ -81,6 +95,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       });
       const conversation = await codexAppService.continueConversation(id, {
         attachments: input.attachments,
+        modelSettings:
+          input.model && input.effort ? { effort: input.effort, model: input.model } : undefined,
         prompt: input.prompt
       });
       mobileActivityLog.record("mobile_codex_conversation_continued", {

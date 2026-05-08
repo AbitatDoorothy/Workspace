@@ -28,7 +28,16 @@ if (apiUrl === publicUrl) {
 
 runWithRetry(
   "pnpm",
-  ["--filter", "host-daemon", "exec", "tsx", "src/cli/index.ts", "pair", "--code", pairingCode],
+  [
+    "--filter",
+    "@abitat/host-daemon",
+    "exec",
+    "tsx",
+    "src/cli/index.ts",
+    "pair",
+    "--code",
+    pairingCode
+  ],
   {
     ABITAT_API_URL: apiUrl
   },
@@ -37,7 +46,7 @@ runWithRetry(
 
 const daemon = spawn(
   "pnpm",
-  ["--filter", "host-daemon", "exec", "tsx", "src/cli/index.ts", "start"],
+  ["--filter", "@abitat/host-daemon", "exec", "tsx", "src/cli/index.ts", "start"],
   {
     env: { ...process.env, ABITAT_API_URL: apiUrl, ABITAT_CLI_RUNTIME_MODE: cliRuntimeMode },
     stdio: "inherit"

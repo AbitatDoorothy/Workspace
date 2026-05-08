@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getRequestAccountContext } from "../../../server/auth/request-session";
 import { createBrowserRedirectUrl, isSecureRequest } from "../../../server/auth/session";
 import { projectService } from "../../../server/projects";
 import {
@@ -24,7 +25,13 @@ export async function POST(request: Request) {
 
   try {
     body = await parseRequest(request);
-    const project = await projectService.createProject(projectRequestSchema.parse(body));
+    const account = await getRequestAccountContext(request);
+    const input = projectRequestSchema.parse(body);
+    const project = await projectService.createProject({
+      ...input,
+      workspaceId: account.workspaceId,
+      createdByUserId: account.userId
+    });
 
     if (isFormRequest) {
       return NextResponse.redirect(createBrowserRedirectUrl(request, "/projects"), 303);

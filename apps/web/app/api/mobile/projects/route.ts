@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { codexAppService } from "../../../../server/codex-app";
 import { mobileService } from "../../../../server/mobile";
+import { mobileActivityLog } from "../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../server/mobile/request-auth";
 
 export async function GET(request: Request) {
@@ -11,6 +12,17 @@ export async function GET(request: Request) {
       mobileService.listProjects(actor),
       codexAppService.listProjects()
     ]);
+    mobileActivityLog.record("mobile_projects_listed", {
+      codexProjectCount: codexProjects.status === "fulfilled" ? codexProjects.value.length : 0,
+      codexProjectError:
+        codexProjects.status === "rejected" ? errorMessage(codexProjects.reason) : null,
+      hostMachineId: actor.hostMachineId,
+      localProjectCount: localProjects.status === "fulfilled" ? localProjects.value.length : 0,
+      localProjectError:
+        localProjects.status === "rejected" ? errorMessage(localProjects.reason) : null,
+      machineId: actor.machineId,
+      workspaceId: actor.workspaceId
+    });
 
     return NextResponse.json({
       projects: [
@@ -24,4 +36,8 @@ export async function GET(request: Request) {
       { status: error instanceof Error && error.message === "Invalid mobile token" ? 401 : 400 }
     );
   }
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }

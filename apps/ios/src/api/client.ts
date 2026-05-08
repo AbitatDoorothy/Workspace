@@ -1,5 +1,7 @@
 import type {
   CodexCompletionSummary,
+  CodexModelOption,
+  CodexReasoningEffort,
   ConversationAttachment,
   ConversationMessage,
   ConversationSummary,
@@ -21,18 +23,26 @@ export interface ApiClient {
     conversationId: string,
     input: {
       attachments?: Pick<ConversationAttachment, "kind" | "name" | "path">[];
-      prompt: string;
       clientMessageId: string;
+      effort?: CodexReasoningEffort;
+      model?: string;
+      prompt: string;
     }
   ): Promise<{ conversationId: string; status: string }>;
   createConversation(
     projectId: string,
-    input: { prompt: string; clientMessageId: string }
+    input: {
+      clientMessageId: string;
+      effort?: CodexReasoningEffort;
+      model?: string;
+      prompt: string;
+    }
   ): Promise<{ conversationId: string; status: string }>;
   createRemoteSession(hostMachineId: string): Promise<RemoteControlSession>;
   endRemoteSession(sessionId: string): Promise<RemoteControlSession>;
   listConversations(projectId: string): Promise<ConversationSummary[]>;
   listCompletionStates(): Promise<CodexCompletionSummary[]>;
+  listCodexModels(): Promise<CodexModelOption[]>;
   listMessages(
     conversationId: string,
     afterSequence?: number,
@@ -98,6 +108,8 @@ export function createApiClient(pairing: PairingState): ApiClient {
       get(pairing, "/api/mobile/codex/completions").then(
         (body) => body.completions as CodexCompletionSummary[]
       ),
+    listCodexModels: () =>
+      get(pairing, "/api/mobile/codex/models").then((body) => body.models as CodexModelOption[]),
     listMessages: (conversationId, afterSequence, options) =>
       get(pairing, mobileMessagesPath(conversationId, afterSequence, options)).then(
         (body) => body.messages as ConversationMessage[]

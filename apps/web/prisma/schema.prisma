@@ -83,6 +83,8 @@ model User {
   id                    String         @id @default(cuid())
   email                 String         @unique
   displayName           String
+  passwordHash          String         @default("")
+  passwordUpdatedAt     DateTime       @default(now())
   ownedWorkspaces       Workspace[]    @relation("WorkspaceOwner")
   memberships           WorkspaceMember[]
   ownedMachines         Machine[]      @relation("MachineOwner")
@@ -178,6 +180,19 @@ model DevicePairing {
   @@index([hostMachineId])
   @@index([createdByUserId])
   @@index([expiresAt])
+}
+
+model CliDeviceLogin {
+  id           String    @id @default(cuid())
+  codeHash     String    @unique
+  userId       String?
+  cliTokenHash String?
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
 }
 
 model Project {

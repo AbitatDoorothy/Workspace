@@ -28,7 +28,10 @@ export function PairIphonePanel({
 
       <div className="phone-pair-copy">
         <h2>Pair iPhone</h2>
-        <p>Connect a phone to this Mac for project access, synced chat, and remote control.</p>
+        <p>
+          Create a code from this signed-in Mac account, then enter it on the iPhone to connect the
+          phone to this workspace.
+        </p>
       </div>
 
       {initialPairing ? (

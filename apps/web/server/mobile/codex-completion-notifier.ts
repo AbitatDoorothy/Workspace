@@ -8,6 +8,7 @@ export interface CodexCompletionState {
   latestTurnCompletedAt: string | null;
   latestTurnId: string | null;
   projectId: string;
+  projectName: string;
   prompt: string;
   source: "codex_app";
   status: ConversationStatus;
@@ -25,6 +26,7 @@ interface CodexCompletionNotifierPushService {
     failed: boolean;
     hostMachineId: string;
     projectId: string;
+    projectName: string;
     prompt: string;
     source: "codex_app";
     turnId: string;
@@ -134,6 +136,7 @@ export function createCodexCompletionNotifier(options: CodexCompletionNotifierOp
       failed: state.failed,
       hostMachineId,
       projectId: state.projectId,
+      projectName: state.projectName,
       prompt: state.prompt,
       source: state.source,
       turnId: state.latestTurnId ?? "unknown",

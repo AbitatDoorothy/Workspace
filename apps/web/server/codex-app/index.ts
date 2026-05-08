@@ -13,6 +13,7 @@ export {
   type CodexAppClient,
   type CodexAppConversationSummary,
   type CodexAppMessage,
+  type CodexAppModelOption,
   type CodexAppProjectSummary,
   type CodexAppThread,
   type CodexCompletionState
