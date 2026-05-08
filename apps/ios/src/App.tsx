@@ -1,5 +1,7 @@
+import { Ionicons } from "@expo/vector-icons";
+import type { ComponentProps } from "react";
 import { useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 
 import { PairingScreen } from "./screens/PairingScreen";
 import { WorkspaceScreen } from "./screens/WorkspaceScreen";
@@ -12,11 +14,41 @@ import { useMobileStore } from "./state/mobile-store";
 import { colors } from "./theme";
 import type { ConversationSummary, ProjectSummary, RouteName } from "./types";
 
+type RootRouteName = Extract<RouteName, "workspace" | "projects" | "settings">;
+type IoniconName = ComponentProps<typeof Ionicons>["name"];
+
+const NAV_ITEMS: Array<{
+  activeIcon: IoniconName;
+  icon: IoniconName;
+  label: string;
+  route: RootRouteName;
+}> = [
+  {
+    activeIcon: "laptop",
+    icon: "laptop-outline",
+    label: "Workspace",
+    route: "workspace"
+  },
+  {
+    activeIcon: "folder",
+    icon: "folder-outline",
+    label: "Projects",
+    route: "projects"
+  },
+  {
+    activeIcon: "settings",
+    icon: "settings-outline",
+    label: "Settings",
+    route: "settings"
+  }
+];
+
 export default function App() {
   const store = useMobileStore();
   const [route, setRoute] = useState<RouteName>("workspace");
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
+  const shouldShowBottomNav = route !== "conversation";
   useThreadCompletionNotifications(store.api, store.isPaired);
 
   if (store.isRestoring) {
@@ -74,8 +106,6 @@ export default function App() {
             setConversation(nextConversation);
             setRoute("conversation");
           }}
-          modelSettings={store.modelSettings}
-          onModelSettingsChange={store.saveModelSettings}
           project={project}
         />
       ) : null}
@@ -98,35 +128,59 @@ export default function App() {
         />
       ) : null}
 
-      <View
-        style={{
-          backgroundColor: colors.surface,
-          borderColor: colors.border,
-          borderTopWidth: 1,
-          flexDirection: "row",
-          paddingBottom: 18,
-          paddingTop: 8
-        }}
-      >
-        {(["workspace", "projects", "settings"] as RouteName[]).map((item) => (
-          <Pressable
-            key={item}
-            onPress={() => setRoute(item)}
-            style={{ alignItems: "center", flex: 1 }}
-          >
-            <Text
-              style={{
-                color: route === item ? colors.primary : colors.muted,
-                fontSize: 12,
-                fontWeight: "800",
-                textTransform: "capitalize"
-              }}
-            >
-              {item}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      {shouldShowBottomNav ? (
+        <View style={styles.bottomNav}>
+          {NAV_ITEMS.map((item) => {
+            const isActive = route === item.route;
+
+            return (
+              <Pressable
+                accessibilityLabel={item.label}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isActive }}
+                key={item.route}
+                onPress={() => setRoute(item.route)}
+                style={({ pressed }) => [
+                  styles.bottomNavItem,
+                  isActive && styles.bottomNavItemActive,
+                  pressed && styles.bottomNavItemPressed
+                ]}
+              >
+                <Ionicons
+                  color={isActive ? colors.primary : colors.muted}
+                  name={isActive ? item.activeIcon : item.icon}
+                  size={26}
+                />
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  bottomNav: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    paddingBottom: 18,
+    paddingHorizontal: 22,
+    paddingTop: 8
+  },
+  bottomNavItem: {
+    alignItems: "center",
+    borderRadius: 8,
+    flex: 1,
+    justifyContent: "center",
+    minHeight: 44
+  },
+  bottomNavItemActive: {
+    backgroundColor: colors.primarySoft
+  },
+  bottomNavItemPressed: {
+    opacity: 0.72
+  }
+});

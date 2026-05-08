@@ -32,6 +32,7 @@ export interface ApiClient {
   createConversation(
     projectId: string,
     input: {
+      attachments?: Pick<ConversationAttachment, "kind" | "name" | "path">[];
       clientMessageId: string;
       effort?: CodexReasoningEffort;
       model?: string;

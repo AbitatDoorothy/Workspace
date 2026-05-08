@@ -30,6 +30,9 @@ if (!packageJson.dependencies?.["expo-notifications"]) {
 if (!packageJson.dependencies?.["expo-constants"]) {
   throw new Error("Expected abitat-ios to depend on expo-constants for push registration");
 }
+if (!packageJson.dependencies?.["@expo/vector-icons"]) {
+  throw new Error("Expected abitat-ios to depend on @expo/vector-icons for bottom navigation");
+}
 for (const dependency of ["expo-document-picker", "expo-file-system", "expo-image-picker"]) {
   if (!packageJson.dependencies?.[dependency]) {
     throw new Error(`Expected abitat-ios to depend on ${dependency} for mobile attachments`);
@@ -232,6 +235,17 @@ if (!conversationScreen.includes("model: modelSettings.model")) {
 if (!conversationScreen.includes("effort: modelSettings.effort")) {
   throw new Error("Expected ConversationScreen to send the selected Codex effort");
 }
+for (const expected of [
+  "activeConversation",
+  "isDraftConversation(activeConversation)",
+  "api.createConversation(conversationForSend.projectId",
+  "setActiveConversation",
+  "attachments: uploadedConversationAttachments"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected ConversationScreen to start draft threads from chat: ${expected}`);
+  }
+}
 const projectDetailScreen = await readFile(
   join(process.cwd(), "src/screens/ProjectDetailScreen.tsx"),
   "utf8"
@@ -251,23 +265,29 @@ if (!projectDetailScreen.includes("onPress={onBack}")) {
 if (!projectDetailScreen.includes("styles.backButton")) {
   throw new Error("Expected ProjectDetailScreen to style the projects back button");
 }
-if (!projectDetailScreen.includes("CodexModelControls")) {
-  throw new Error("Expected ProjectDetailScreen to expose Codex model controls");
+if (!projectDetailScreen.includes('accessibilityLabel="New Thread"')) {
+  throw new Error("Expected ProjectDetailScreen to expose a New Thread button");
 }
-if (projectDetailScreen.includes('variant="compact"')) {
-  throw new Error("Expected ProjectDetailScreen to keep the expanded model controls");
+if (!projectDetailScreen.includes("function startNewThread()")) {
+  throw new Error("Expected ProjectDetailScreen to enter a draft chat before starting Codex");
 }
-if (!projectDetailScreen.includes("modelSettings: CodexMobileModelSettings")) {
-  throw new Error("Expected ProjectDetailScreen to receive persisted Codex model settings");
+for (const removed of [
+  "CodexModelControls",
+  "TextInput",
+  "modelSettings: CodexMobileModelSettings",
+  "onModelSettingsChange(next: CodexMobileModelSettings): void",
+  "model: modelSettings.model",
+  "effort: modelSettings.effort",
+  "Start Codex"
+]) {
+  if (projectDetailScreen.includes(removed)) {
+    throw new Error(`Expected ProjectDetailScreen to remove pre-chat start controls: ${removed}`);
+  }
 }
-if (!projectDetailScreen.includes("onModelSettingsChange(next: CodexMobileModelSettings): void")) {
-  throw new Error("Expected ProjectDetailScreen to persist changed Codex model settings");
-}
-if (!projectDetailScreen.includes("model: modelSettings.model")) {
-  throw new Error("Expected ProjectDetailScreen to send the selected Codex model");
-}
-if (!projectDetailScreen.includes("effort: modelSettings.effort")) {
-  throw new Error("Expected ProjectDetailScreen to send the selected Codex effort");
+for (const expected of ['status: "draft"', 'prompt: ""', 'mobileOpenState: "phone_active"']) {
+  if (!projectDetailScreen.includes(expected)) {
+    throw new Error(`Expected ProjectDetailScreen draft conversation to include ${expected}`);
+  }
 }
 if (
   !conversationScreen.includes("const [isHeaderExpanded, setIsHeaderExpanded] = useState(false)")
@@ -297,6 +317,17 @@ if (!conversationScreen.includes("styles.composerRow")) {
 }
 if (!conversationScreen.includes("styles.composerInput")) {
   throw new Error("Expected ConversationScreen message input to flex within the composer row");
+}
+for (const expected of [
+  "COMPOSER_INPUT_MIN_HEIGHT",
+  "COMPOSER_INPUT_MAX_HEIGHT",
+  "scrollEnabled",
+  "minHeight: COMPOSER_INPUT_MIN_HEIGHT",
+  "maxHeight: COMPOSER_INPUT_MAX_HEIGHT"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected ConversationScreen composer input to constrain growth: ${expected}`);
+  }
 }
 for (const expected of [
   "createOptimisticMessage",
@@ -344,6 +375,35 @@ if (!appScreen.includes('onBack={() => setRoute(project ? "project" : "projects"
 }
 if (!appScreen.includes('onBack={() => setRoute("projects")}')) {
   throw new Error("Expected App to route project back actions to the projects page");
+}
+if (!appScreen.includes('import { Ionicons } from "@expo/vector-icons";')) {
+  throw new Error("Expected App bottom navigation to render Expo Ionicons");
+}
+for (const expected of [
+  'route: "workspace"',
+  'label: "Workspace"',
+  'icon: "laptop-outline"',
+  'route: "projects"',
+  'label: "Projects"',
+  'icon: "folder-outline"',
+  'route: "settings"',
+  'label: "Settings"',
+  'icon: "settings-outline"',
+  'accessibilityRole="tab"',
+  "accessibilityState={{ selected: isActive }}"
+]) {
+  if (!appScreen.includes(expected)) {
+    throw new Error(`Expected App bottom navigation to include ${expected}`);
+  }
+}
+if (appScreen.includes("{item}</Text>") || appScreen.includes("textTransform")) {
+  throw new Error("Expected App bottom navigation to use icon-only buttons");
+}
+if (!appScreen.includes('const shouldShowBottomNav = route !== "conversation";')) {
+  throw new Error("Expected App to hide bottom navigation on the chat interface");
+}
+if (!appScreen.includes("{shouldShowBottomNav ? (")) {
+  throw new Error("Expected App bottom navigation rendering to be route-gated");
 }
 
 const notificationWatcher = await readFile(

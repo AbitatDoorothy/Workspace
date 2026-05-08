@@ -52,6 +52,8 @@ interface SendConversationInput {
 const MESSAGE_POLL_INTERVAL_MS = 1800;
 const STATUS_POLL_INTERVAL_MS = 2500;
 const FULL_MESSAGE_REFRESH_INTERVAL_MS = 12000;
+const COMPOSER_INPUT_MIN_HEIGHT = 48;
+const COMPOSER_INPUT_MAX_HEIGHT = 132;
 
 export function ConversationScreen({
   api,
@@ -60,6 +62,7 @@ export function ConversationScreen({
   onBack,
   onModelSettingsChange
 }: ConversationScreenProps) {
+  const [activeConversation, setActiveConversation] = useState(conversation);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -112,6 +115,7 @@ export function ConversationScreen({
   }, [lastSequence]);
 
   useEffect(() => {
+    setActiveConversation(conversation);
     setError(null);
     setMessages([]);
     setPrompt("");
@@ -128,6 +132,10 @@ export function ConversationScreen({
   }, [conversation]);
 
   useEffect(() => {
+    if (isDraftConversation(activeConversation)) {
+      return;
+    }
+
     let cancelled = false;
 
     async function refreshMessages(afterSequence?: number) {
@@ -141,7 +149,7 @@ export function ConversationScreen({
 
       messageRefreshInFlightRef.current = true;
       try {
-        const nextMessages = await api.listMessages(conversation.id, afterSequence, {
+        const nextMessages = await api.listMessages(activeConversation.id, afterSequence, {
           includeRuntime: false
         });
         if (!cancelled) {
@@ -173,12 +181,12 @@ export function ConversationScreen({
 
     async function refreshStatus() {
       try {
-        const latestConversations = await api.listConversations(conversation.projectId);
+        const latestConversations = await api.listConversations(activeConversation.projectId);
         const latestConversation = latestConversations.find(
-          (candidate) => candidate.id === conversation.id
+          (candidate) => candidate.id === activeConversation.id
         );
         if (!cancelled) {
-          const nextStatus = latestConversation?.status ?? conversation.status;
+          const nextStatus = latestConversation?.status ?? activeConversation.status;
           const nextUpdatedAt = latestConversation?.updatedAt ?? null;
           const previousStatus = latestStatusRef.current;
           const previousUpdatedAt = latestConversationUpdatedAtRef.current;
@@ -222,7 +230,7 @@ export function ConversationScreen({
       clearInterval(statusTimer);
       appStateSubscription.remove();
     };
-  }, [api, conversation.id, conversation.projectId, conversation.status]);
+  }, [api, activeConversation.id, activeConversation.projectId, activeConversation.status]);
 
   useEffect(() => {
     pendingAutoScrollRef.current = true;
@@ -234,6 +242,8 @@ export function ConversationScreen({
   }, [latestMessageId]);
 
   async function sendConversation(input: SendConversationInput) {
+    const conversationForSend = activeConversation;
+    const isStartingDraftConversation = isDraftConversation(conversationForSend);
     const queuedAttachments = input.attachments ?? [];
     const submittedPrompt = promptForSend(input.prompt, queuedAttachments);
     const clientMessageId = `ios-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -241,7 +251,7 @@ export function ConversationScreen({
     const optimisticMessage = createOptimisticMessage({
       attachmentNames: queuedAttachments.map((attachment) => attachment.name),
       clientMessageId,
-      conversationId: conversation.id,
+      conversationId: conversationForSend.id,
       createdAt: new Date().toISOString(),
       prompt: submittedPrompt,
       sequence: afterSequence + 1
@@ -257,22 +267,67 @@ export function ConversationScreen({
       const uploadedAttachments = await Promise.all(
         queuedAttachments.map((attachment) => uploadAttachment(api, attachment))
       );
-      const continued = await api.continueConversation(conversation.id, {
-        attachments: uploadedAttachments.map((attachment) => ({
-          kind: attachment.kind,
-          name: attachment.name,
-          path: attachment.path
-        })),
+
+      const uploadedConversationAttachments = uploadedAttachments.map((attachment) => ({
+        kind: attachment.kind,
+        name: attachment.name,
+        path: attachment.path
+      }));
+
+      if (isStartingDraftConversation) {
+        const started = await api.createConversation(conversationForSend.projectId, {
+          attachments: uploadedConversationAttachments,
+          clientMessageId,
+          effort: modelSettings.effort,
+          model: modelSettings.model,
+          prompt: submittedPrompt
+        });
+        const nextConversation = {
+          ...conversationForSend,
+          id: started.conversationId,
+          prompt: submittedPrompt,
+          status: started.status,
+          updatedAt: new Date().toISOString()
+        };
+
+        latestStatusRef.current = started.status;
+        latestConversationUpdatedAtRef.current = nextConversation.updatedAt ?? null;
+        setActiveConversation(nextConversation);
+        setStatus(started.status);
+        rememberRunningConversation(started.conversationId);
+        setMessages((current) =>
+          markLocalMessageSent(
+            reassignLocalConversationMessages(
+              current,
+              conversationForSend.id,
+              started.conversationId
+            ),
+            clientMessageId
+          )
+        );
+        try {
+          const next = await api.listMessages(started.conversationId, afterSequence, {
+            includeRuntime: false
+          });
+          setMessages((current) => mergeConversationMessages(current, next));
+        } catch (caught) {
+          setError(caught instanceof Error ? caught.message : "Unable to refresh Codex messages");
+        }
+        return;
+      }
+
+      const continued = await api.continueConversation(conversationForSend.id, {
+        attachments: uploadedConversationAttachments,
         clientMessageId,
         effort: modelSettings.effort,
         model: modelSettings.model,
         prompt: submittedPrompt
       });
       setStatus(continued.status);
-      rememberRunningConversation(conversation.id);
+      rememberRunningConversation(conversationForSend.id);
       setMessages((current) => markLocalMessageSent(current, clientMessageId));
       try {
-        const next = await api.listMessages(conversation.id, afterSequence, {
+        const next = await api.listMessages(conversationForSend.id, afterSequence, {
           includeRuntime: false
         });
         setMessages((current) => mergeConversationMessages(current, next));
@@ -389,7 +444,7 @@ export function ConversationScreen({
           <View style={styles.chatHeaderCopy}>
             <Text style={sharedStyles.label}>Conversation</Text>
             <Text numberOfLines={isHeaderExpanded ? 3 : 1} style={styles.chatHeaderTitle}>
-              {conversation.prompt || "Codex"}
+              {activeConversation.prompt || "New Thread"}
             </Text>
             {isHeaderExpanded ? (
               <Text style={sharedStyles.subtitle}>
@@ -529,6 +584,7 @@ export function ConversationScreen({
               onChangeText={setPrompt}
               placeholder="Continue this Codex thread"
               placeholderTextColor={colors.muted}
+              scrollEnabled
               style={[sharedStyles.input, styles.composerInput]}
               value={prompt}
             />
@@ -619,7 +675,9 @@ const styles = StyleSheet.create({
   },
   composerInput: {
     flex: 1,
-    minHeight: 70,
+    maxHeight: COMPOSER_INPUT_MAX_HEIGHT,
+    minHeight: COMPOSER_INPUT_MIN_HEIGHT,
+    paddingBottom: 12,
     paddingTop: 12,
     textAlignVertical: "top"
   },
@@ -703,6 +761,10 @@ function canSendPrompt(prompt: string, attachments: PendingAttachment[]) {
 
 function canAcceptConversationInput(status: string) {
   return !["awaiting_approval", "committing", "preparing", "queued", "running"].includes(status);
+}
+
+function isDraftConversation(conversation: ConversationSummary) {
+  return conversation.status === "draft" || conversation.id.startsWith("draft:");
 }
 
 function shouldForceMessageRefreshAfterStatusPoll(input: {
@@ -808,6 +870,18 @@ function markLocalMessageSent(messages: ConversationMessage[], clientMessageId: 
             localStatus: "sent"
           }
         }
+      : message
+  );
+}
+
+function reassignLocalConversationMessages(
+  messages: ConversationMessage[],
+  fromConversationId: string,
+  toConversationId: string
+) {
+  return messages.map((message) =>
+    message.conversationId === fromConversationId
+      ? { ...message, conversationId: toConversationId }
       : message
   );
 }

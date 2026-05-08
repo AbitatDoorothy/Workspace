@@ -4,13 +4,20 @@ import { Pressable, Text, View } from "react-native";
 import { colors, sharedStyles } from "../theme";
 
 interface ButtonProps {
+  accessibilityLabel?: string;
   children: ReactNode;
   disabled?: boolean;
   onPress(): void;
   variant?: "primary" | "secondary" | "danger";
 }
 
-export function Button({ children, disabled, onPress, variant = "primary" }: ButtonProps) {
+export function Button({
+  accessibilityLabel,
+  children,
+  disabled,
+  onPress,
+  variant = "primary"
+}: ButtonProps) {
   const baseStyle =
     variant === "primary" ? sharedStyles.primaryButton : sharedStyles.secondaryButton;
   const dangerStyle =
@@ -23,6 +30,8 @@ export function Button({ children, disabled, onPress, variant = "primary" }: But
 
   return (
     <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
       disabled={disabled}
       onPress={onPress}
       style={[baseStyle, dangerStyle, disabled && { opacity: 0.5 }]}

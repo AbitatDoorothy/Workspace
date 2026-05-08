@@ -112,6 +112,7 @@ describe("mobile Codex model routes", () => {
     const response = await CREATE_CONVERSATION(
       new Request("http://127.0.0.1:3000/api/mobile/projects/codex_project_demo/conversations", {
         body: JSON.stringify({
+          attachments: [{ kind: "file", name: "notes.md", path: "/tmp/notes.md" }],
           clientMessageId: "ios-message-1",
           effort: "high",
           model: "gpt-5.3-codex",
@@ -128,6 +129,7 @@ describe("mobile Codex model routes", () => {
 
     expect(response.status).toBe(201);
     expect(startConversation).toHaveBeenCalledWith("codex_project_demo", {
+      attachments: [{ kind: "file", name: "notes.md", path: "/tmp/notes.md" }],
       modelSettings: { effort: "high", model: "gpt-5.3-codex" },
       prompt: "Start from iPhone"
     });

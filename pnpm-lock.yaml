@@ -76,6 +76,9 @@ importers:
       '@abitat/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@expo/vector-icons':
+        specifier: 15.1.1
+        version: 15.1.1(expo-font@55.0.6(expo@55.0.19)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.5))(react@19.2.5))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.5))(react@19.2.5)
       expo:
         specifier: ^55.0.19
         version: 55.0.19(@babel/core@7.29.0)(@expo/dom-webview@55.0.5)(react-dom@19.2.5(react@19.2.5))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.5))(react@19.2.5)(typescript@6.0.3)

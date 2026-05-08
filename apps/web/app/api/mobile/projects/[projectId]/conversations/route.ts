@@ -25,6 +25,15 @@ const createRequestSchema = conversationCreateRequestSchema
     type: true
   })
   .extend({
+    attachments: z
+      .array(
+        z.object({
+          kind: z.enum(["file", "image"]),
+          name: z.string().trim().min(1),
+          path: z.string().trim().min(1)
+        })
+      )
+      .default([]),
     clientMessageId: z.string().min(1).optional(),
     effort: codexReasoningEffortSchema.optional(),
     model: codexModelIdSchema.optional()
@@ -120,6 +129,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
 
     if (isCodexProjectId(projectId)) {
       const conversation = await codexAppService.startConversation(projectId, {
+        attachments: input.attachments,
         modelSettings:
           input.model && input.effort ? { effort: input.effort, model: input.model } : undefined,
         prompt: input.prompt
@@ -155,7 +165,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
         role: "user",
         sourceDeviceId: actor.machineId,
         clientMessageId: input.clientMessageId,
-        metadata: { client: "ios", action: "start" }
+        metadata: { attachments: input.attachments, client: "ios", action: "start" }
       });
       await runEventService.appendAuditEvent(conversation.id, {
         content: input.prompt,

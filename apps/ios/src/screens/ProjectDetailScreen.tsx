@@ -1,35 +1,27 @@
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { ApiClient } from "../api/client";
 import { Button, Header, StatusPill } from "../components/Controls";
-import { CodexModelControls } from "../components/CodexModelControls";
-import { rememberRunningConversation } from "../notifications/thread-completion-notifications";
 import { Screen } from "../components/Screen";
 import { colors, sharedStyles } from "../theme";
-import type { CodexMobileModelSettings, ConversationSummary, ProjectSummary } from "../types";
+import type { ConversationSummary, ProjectSummary } from "../types";
 
 interface ProjectDetailScreenProps {
   api: ApiClient;
-  modelSettings: CodexMobileModelSettings;
   onBack(): void;
   onConversation(conversation: ConversationSummary): void;
-  onModelSettingsChange(next: CodexMobileModelSettings): void;
   project: ProjectSummary;
 }
 
 export function ProjectDetailScreen({
   api,
-  modelSettings,
   onBack,
   onConversation,
-  onModelSettingsChange,
   project
 }: ProjectDetailScreenProps) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [isStarting, setIsStarting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,33 +49,18 @@ export function ProjectDetailScreen({
     };
   }, [api, project.id]);
 
-  async function startConversation() {
-    setError(null);
-    setIsStarting(true);
-
-    try {
-      const started = await api.createConversation(project.id, {
-        clientMessageId: `ios-${Date.now()}`,
-        effort: modelSettings.effort,
-        model: modelSettings.model,
-        prompt
-      });
-      rememberRunningConversation(started.conversationId);
-      onConversation({
-        id: started.conversationId,
-        projectId: project.id,
-        prompt,
-        mobileOpenState: "phone_active",
-        source: project.source,
-        status: started.status,
-        type: "feature",
-        workspaceId: project.workspaceId
-      });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to start Codex");
-    } finally {
-      setIsStarting(false);
-    }
+  function startNewThread() {
+    onConversation({
+      id: `draft:${project.id}:${Date.now()}`,
+      mobileOpenState: "phone_active",
+      projectId: project.id,
+      prompt: "",
+      source: project.source,
+      status: "draft",
+      type: "feature",
+      workspaceId: project.workspaceId,
+      worktreePath: project.hostLocalPath ?? null
+    });
   }
 
   return (
@@ -105,21 +82,9 @@ export function ProjectDetailScreen({
       />
 
       <View style={sharedStyles.card}>
-        <Text style={sharedStyles.label}>Prompt</Text>
-        <TextInput
-          multiline
-          onChangeText={setPrompt}
-          placeholder="Ask Codex to work in this Mac project"
-          placeholderTextColor={colors.muted}
-          style={[sharedStyles.input, { minHeight: 96, paddingTop: 12, textAlignVertical: "top" }]}
-          value={prompt}
-        />
-        <CodexModelControls api={api} onChange={onModelSettingsChange} value={modelSettings} />
-        <View style={{ marginTop: 12 }}>
-          <Button disabled={isStarting || prompt.trim().length === 0} onPress={startConversation}>
-            {isStarting ? "Starting" : "Start Codex"}
-          </Button>
-        </View>
+        <Button accessibilityLabel="New Thread" onPress={startNewThread}>
+          New Thread
+        </Button>
       </View>
 
       <Text style={sharedStyles.label}>Conversations</Text>
