@@ -58,11 +58,14 @@ export async function GET(request: Request, context: { params: Promise<{ project
       mobileActivityLog.record("mobile_conversations_listed", {
         conversationCount: conversations.length,
         durationMs: Date.now() - startedAt,
+        latestConversationId: conversations[0]?.id ?? null,
+        latestConversationStatus: conversations[0]?.status ?? null,
+        latestConversationUpdatedAt: conversations[0]?.updatedAt?.toISOString() ?? null,
         projectId,
         source: "codex_app",
         ...actorDetails
       });
-      return NextResponse.json({ conversations });
+      return mobileJson({ conversations });
     }
 
     const conversations = (await conversationQueueService.listConversations(actor.workspaceId))
@@ -71,12 +74,15 @@ export async function GET(request: Request, context: { params: Promise<{ project
     mobileActivityLog.record("mobile_conversations_listed", {
       conversationCount: conversations.length,
       durationMs: Date.now() - startedAt,
+      latestConversationId: conversations[0]?.id ?? null,
+      latestConversationStatus: conversations[0]?.status ?? null,
+      latestConversationUpdatedAt: conversations[0]?.createdAt?.toISOString() ?? null,
       projectId,
       source: "abitat",
       ...actorDetails
     });
 
-    return NextResponse.json({ conversations });
+    return mobileJson({ conversations });
   } catch (error) {
     mobileActivityLog.record("mobile_conversations_list_failed", {
       durationMs: Date.now() - startedAt,
@@ -127,7 +133,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
         workspaceId: actor.workspaceId
       });
 
-      return NextResponse.json(conversation, { status: 201 });
+      return mobileJson(conversation, { status: 201 });
     }
 
     const userId = actor.userId ?? "user_demo";
@@ -165,7 +171,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       workspaceId: actor.workspaceId
     });
 
-    return NextResponse.json(
+    return mobileJson(
       {
         conversationId: conversation.id,
         status: conversation.status
@@ -184,6 +190,16 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       { status: responseStatus(error) }
     );
   }
+}
+
+function mobileJson(body: unknown, init: ResponseInit = {}) {
+  return NextResponse.json(body, {
+    ...init,
+    headers: {
+      "cache-control": "no-store",
+      ...Object.fromEntries(new Headers(init.headers))
+    }
+  });
 }
 
 function responseStatus(error: unknown) {

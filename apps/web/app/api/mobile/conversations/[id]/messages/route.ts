@@ -50,12 +50,13 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         conversationId,
         durationMs: Date.now() - startedAt,
         messageCount: messages.length,
+        ...messageSequenceStats(messages),
         source: "codex_app",
         ...actorDetails,
         ...requestDetails
       });
 
-      return NextResponse.json({ messages });
+      return mobileJson({ messages });
     }
 
     await assertMobileConversation(actor.workspaceId, id);
@@ -75,12 +76,13 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       conversationId,
       durationMs: Date.now() - startedAt,
       messageCount: serializedMessages.length,
+      ...messageSequenceStats(serializedMessages),
       source: "abitat",
       ...actorDetails,
       ...requestDetails
     });
 
-    return NextResponse.json({ messages: serializedMessages });
+    return mobileJson({ messages: serializedMessages });
   } catch (error) {
     mobileActivityLog.record("mobile_messages_load_failed", {
       conversationId,
@@ -94,6 +96,34 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       { status: error instanceof Error && error.message === "Invalid mobile token" ? 401 : 400 }
     );
   }
+}
+
+function mobileJson(body: unknown, init: ResponseInit = {}) {
+  return NextResponse.json(body, {
+    ...init,
+    headers: {
+      "cache-control": "no-store",
+      ...Object.fromEntries(new Headers(init.headers))
+    }
+  });
+}
+
+function messageSequenceStats(messages: Array<{ sequence: number }>) {
+  const sequences = messages
+    .map((message) => message.sequence)
+    .filter((sequence) => Number.isFinite(sequence));
+
+  if (sequences.length === 0) {
+    return {
+      maxSequence: null,
+      minSequence: null
+    };
+  }
+
+  return {
+    maxSequence: Math.max(...sequences),
+    minSequence: Math.min(...sequences)
+  };
 }
 
 async function backfillMessagesFromRunEvents(conversationId: string) {
@@ -157,7 +187,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         sourceDeviceId: actor.machineId
       };
 
-      return NextResponse.json({ message }, { status: 201 });
+      return mobileJson({ message }, { status: 201 });
     }
 
     await assertMobileConversation(actor.workspaceId, id);
@@ -167,7 +197,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       sourceDeviceId: input.sourceDeviceId ?? actor.machineId
     });
 
-    return NextResponse.json({ message: serializeMessage(message) }, { status: 201 });
+    return mobileJson({ message: serializeMessage(message) }, { status: 201 });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to append mobile message" },

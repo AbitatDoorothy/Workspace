@@ -4,6 +4,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import {
+  AppState,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -48,6 +49,10 @@ interface SendConversationInput {
   prompt: string;
 }
 
+const MESSAGE_POLL_INTERVAL_MS = 1800;
+const STATUS_POLL_INTERVAL_MS = 2500;
+const FULL_MESSAGE_REFRESH_INTERVAL_MS = 12000;
+
 export function ConversationScreen({
   api,
   conversation,
@@ -75,6 +80,11 @@ export function ConversationScreen({
   const latestMessageId = messages.length > 0 ? messages[messages.length - 1]?.id : "";
   const pendingAutoScrollRef = useRef(true);
   const latestSequenceRef = useRef(0);
+  const latestConversationUpdatedAtRef = useRef<string | null>(conversation.updatedAt ?? null);
+  const latestStatusRef = useRef(conversation.status);
+  const lastFullMessageRefreshAtRef = useRef(0);
+  const messageRefreshInFlightRef = useRef(false);
+  const pendingFullMessageRefreshRef = useRef(false);
   const sendingCountRef = useRef(0);
   const canSendNow = canAcceptConversationInput(status) && !isSending;
 
@@ -102,14 +112,42 @@ export function ConversationScreen({
   }, [lastSequence]);
 
   useEffect(() => {
+    setError(null);
+    setMessages([]);
+    setPrompt("");
+    setAttachments([]);
+    setStatus(conversation.status);
+    setIsHeaderExpanded(false);
+    pendingAutoScrollRef.current = true;
+    latestSequenceRef.current = 0;
+    latestConversationUpdatedAtRef.current = conversation.updatedAt ?? null;
+    latestStatusRef.current = conversation.status;
+    lastFullMessageRefreshAtRef.current = 0;
+    messageRefreshInFlightRef.current = false;
+    pendingFullMessageRefreshRef.current = false;
+  }, [conversation]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function refreshMessages(afterSequence?: number) {
+      const isFullRefresh = typeof afterSequence !== "number";
+      if (messageRefreshInFlightRef.current) {
+        if (isFullRefresh) {
+          pendingFullMessageRefreshRef.current = true;
+        }
+        return;
+      }
+
+      messageRefreshInFlightRef.current = true;
       try {
         const nextMessages = await api.listMessages(conversation.id, afterSequence, {
           includeRuntime: false
         });
         if (!cancelled) {
+          if (isFullRefresh) {
+            lastFullMessageRefreshAtRef.current = Date.now();
+          }
           setError(null);
           setMessages((current) => mergeConversationMessages(current, nextMessages));
         }
@@ -117,7 +155,20 @@ export function ConversationScreen({
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : "Unable to load messages");
         }
+      } finally {
+        messageRefreshInFlightRef.current = false;
+        if (!cancelled && pendingFullMessageRefreshRef.current) {
+          pendingFullMessageRefreshRef.current = false;
+          void refreshMessages();
+        }
       }
+    }
+
+    function refreshMessagesForPoll() {
+      const shouldFullRefresh =
+        Date.now() - lastFullMessageRefreshAtRef.current >= FULL_MESSAGE_REFRESH_INTERVAL_MS;
+
+      void refreshMessages(shouldFullRefresh ? undefined : latestSequenceRef.current);
     }
 
     async function refreshStatus() {
@@ -127,7 +178,25 @@ export function ConversationScreen({
           (candidate) => candidate.id === conversation.id
         );
         if (!cancelled) {
-          setStatus(latestConversation?.status ?? conversation.status);
+          const nextStatus = latestConversation?.status ?? conversation.status;
+          const nextUpdatedAt = latestConversation?.updatedAt ?? null;
+          const previousStatus = latestStatusRef.current;
+          const previousUpdatedAt = latestConversationUpdatedAtRef.current;
+
+          latestStatusRef.current = nextStatus;
+          latestConversationUpdatedAtRef.current = nextUpdatedAt;
+          setStatus(nextStatus);
+
+          if (
+            shouldForceMessageRefreshAfterStatusPoll({
+              nextStatus,
+              nextUpdatedAt,
+              previousStatus,
+              previousUpdatedAt
+            })
+          ) {
+            void refreshMessages();
+          }
         }
       } catch (caught) {
         if (!cancelled) {
@@ -138,27 +207,22 @@ export function ConversationScreen({
 
     void refreshMessages();
     void refreshStatus();
-    const messageTimer = setInterval(() => {
-      void refreshMessages(latestSequenceRef.current);
-    }, 1800);
-    const statusTimer = setInterval(refreshStatus, 2500);
+    const messageTimer = setInterval(refreshMessagesForPoll, MESSAGE_POLL_INTERVAL_MS);
+    const statusTimer = setInterval(refreshStatus, STATUS_POLL_INTERVAL_MS);
+    const appStateSubscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        void refreshMessages();
+        void refreshStatus();
+      }
+    });
+
     return () => {
       cancelled = true;
       clearInterval(messageTimer);
       clearInterval(statusTimer);
+      appStateSubscription.remove();
     };
   }, [api, conversation.id, conversation.projectId, conversation.status]);
-
-  useEffect(() => {
-    setError(null);
-    setMessages([]);
-    setPrompt("");
-    setAttachments([]);
-    setStatus(conversation.status);
-    setIsHeaderExpanded(false);
-    pendingAutoScrollRef.current = true;
-    latestSequenceRef.current = 0;
-  }, [conversation]);
 
   useEffect(() => {
     pendingAutoScrollRef.current = true;
@@ -634,6 +698,25 @@ function canAcceptConversationInput(status: string) {
   return !["awaiting_approval", "committing", "preparing", "queued", "running"].includes(status);
 }
 
+function shouldForceMessageRefreshAfterStatusPoll(input: {
+  nextStatus: string;
+  nextUpdatedAt: string | null;
+  previousStatus: string;
+  previousUpdatedAt: string | null;
+}) {
+  if (input.nextUpdatedAt && input.nextUpdatedAt !== input.previousUpdatedAt) {
+    return true;
+  }
+
+  return (
+    isConversationBusyStatus(input.previousStatus) && !isConversationBusyStatus(input.nextStatus)
+  );
+}
+
+function isConversationBusyStatus(status: string) {
+  return ["awaiting_approval", "committing", "preparing", "queued", "running"].includes(status);
+}
+
 function sendButtonLabel(status: string, isSending: boolean) {
   if (isSending) {
     return "Sending";
@@ -757,7 +840,7 @@ export function mergeConversationMessages(
       continue;
     }
 
-    byId.set(message.id, message);
+    byId.set(messageMergeKey(message), message);
   }
 
   return [...byId.values()].sort((left, right) => {
@@ -767,6 +850,28 @@ export function mergeConversationMessages(
 
     return left.createdAt.localeCompare(right.createdAt);
   });
+}
+
+function messageMergeKey(message: ConversationMessage) {
+  const metadata = message.metadata ?? {};
+  const codexThreadId = metadata.codexThreadId;
+  const codexTurnId = metadata.codexTurnId;
+  const codexItemId = metadata.codexItemId;
+
+  if (
+    typeof codexThreadId === "string" &&
+    typeof codexTurnId === "string" &&
+    typeof codexItemId === "string"
+  ) {
+    const codexItemType =
+      typeof metadata.codexItemType === "string" ? metadata.codexItemType : message.role;
+    const occurrence =
+      typeof metadata.codexItemOccurrence === "number" ? metadata.codexItemOccurrence : 1;
+
+    return `codex:${codexThreadId}:${codexTurnId}:${codexItemId}:${codexItemType}:${occurrence}`;
+  }
+
+  return message.id;
 }
 
 function isLocalMessage(message: ConversationMessage) {

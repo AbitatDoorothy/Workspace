@@ -691,7 +691,258 @@ describe("Codex app service", () => {
     expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
   });
 
-  it("reuses cached Codex history when polling for messages after the thread has not changed", async () => {
+  it("returns current Codex messages when a stale runtime-including cursor is beyond the visible history", async () => {
+    const thread = createThread({
+      cwd: "/Users/reece/Desktop/Abitat_Workspace",
+      id: "thread_a",
+      turns: [
+        createTurn({
+          completedAt: 1_775_000_006,
+          id: "turn_a",
+          items: [
+            {
+              content: [{ text: "Initial prompt", text_elements: [], type: "text" }],
+              id: "item_user_a",
+              type: "userMessage"
+            },
+            ...Array.from({ length: 10 }, (_, index) => ({
+              aggregatedOutput: `runtime ${index}`,
+              command: "pnpm test",
+              commandActions: [],
+              cwd: "/Users/reece/Desktop/Abitat_Workspace",
+              durationMs: 10,
+              exitCode: 0,
+              id: `item_command_${index}`,
+              processId: null,
+              source: "localShell",
+              status: "completed",
+              type: "commandExecution" as const
+            })),
+            {
+              id: "item_agent_a",
+              memoryCitation: null,
+              phase: null,
+              text: "Initial reply",
+              type: "agentMessage"
+            }
+          ],
+          status: "completed"
+        })
+      ],
+      updatedAt: 1_775_000_010
+    });
+    const client = createFakeClient([thread]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+    const initialMessages = await service.listMessages(externalCodexConversationId("thread_a"), {
+      includeRuntime: false
+    });
+    const staleCursor = Math.max(...initialMessages.map((message) => message.sequence));
+
+    thread.turns[0] = createTurn({
+      completedAt: 1_775_000_006,
+      id: "turn_a",
+      items: [
+        {
+          content: [{ text: "Initial prompt", text_elements: [], type: "text" }],
+          id: "item_user_a",
+          type: "userMessage"
+        },
+        {
+          id: "item_agent_a",
+          memoryCitation: null,
+          phase: null,
+          text: "Initial reply",
+          type: "agentMessage"
+        }
+      ],
+      status: "completed"
+    });
+    thread.turns.push(
+      createTurn({
+        completedAt: 1_775_000_020,
+        id: "turn_b",
+        items: [
+          {
+            content: [{ text: "Desktop prompt after compaction", text_elements: [], type: "text" }],
+            id: "item_user_b",
+            type: "userMessage"
+          },
+          {
+            id: "item_agent_b",
+            memoryCitation: null,
+            phase: null,
+            text: "Desktop reply after compaction",
+            type: "agentMessage"
+          }
+        ],
+        status: "completed"
+      })
+    );
+    thread.updatedAt = 1_775_000_030;
+
+    const messages = await service.listMessages(externalCodexConversationId("thread_a"), {
+      afterSequence: staleCursor,
+      includeRuntime: false
+    });
+
+    expect(messages.map((message) => message.content)).toContain("Desktop prompt after compaction");
+    expect(messages.map((message) => message.content)).toContain("Desktop reply after compaction");
+  });
+
+  it("keeps Codex message ids stable when runtime messages before them disappear", async () => {
+    const thread = createThread({
+      cwd: "/Users/reece/Desktop/Abitat_Workspace",
+      id: "thread_a",
+      turns: [
+        createTurn({
+          completedAt: 1_775_000_006,
+          id: "turn_a",
+          items: [
+            {
+              content: [{ text: "Initial prompt", text_elements: [], type: "text" }],
+              id: "item_user_a",
+              type: "userMessage"
+            },
+            {
+              aggregatedOutput: "runtime output",
+              command: "pnpm test",
+              commandActions: [],
+              cwd: "/Users/reece/Desktop/Abitat_Workspace",
+              durationMs: 10,
+              exitCode: 0,
+              id: "item_command",
+              processId: null,
+              source: "localShell",
+              status: "completed",
+              type: "commandExecution"
+            },
+            {
+              id: "item_agent_a",
+              memoryCitation: null,
+              phase: null,
+              text: "Initial reply",
+              type: "agentMessage"
+            }
+          ],
+          status: "completed"
+        })
+      ],
+      updatedAt: 1_775_000_010
+    });
+    const client = createFakeClient([thread]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+    const initialMessages = await service.listMessages(externalCodexConversationId("thread_a"), {
+      includeRuntime: false
+    });
+
+    thread.turns[0] = createTurn({
+      completedAt: 1_775_000_006,
+      id: "turn_a",
+      items: [
+        {
+          content: [{ text: "Initial prompt", text_elements: [], type: "text" }],
+          id: "item_user_a",
+          type: "userMessage"
+        },
+        {
+          id: "item_agent_a",
+          memoryCitation: null,
+          phase: null,
+          text: "Initial reply",
+          type: "agentMessage"
+        }
+      ],
+      status: "completed"
+    });
+    thread.updatedAt = 1_775_000_030;
+
+    const compactedMessages = await service.listMessages(externalCodexConversationId("thread_a"), {
+      includeRuntime: false
+    });
+
+    expect(compactedMessages.find((message) => message.content === "Initial reply")?.id).toBe(
+      initialMessages.find((message) => message.content === "Initial reply")?.id
+    );
+  });
+
+  it("refreshes Codex messages from idle threads even when summary metadata does not change", async () => {
+    const thread = createThread({
+      cwd: "/Users/reece/Desktop/Abitat_Workspace",
+      id: "thread_a",
+      turns: [
+        createTurn({
+          completedAt: 1_775_000_006,
+          id: "turn_a",
+          items: [
+            {
+              content: [{ text: "Initial desktop prompt", text_elements: [], type: "text" }],
+              id: "item_user_a",
+              type: "userMessage"
+            },
+            {
+              id: "item_agent_a",
+              memoryCitation: null,
+              phase: null,
+              text: "Initial desktop reply",
+              type: "agentMessage"
+            }
+          ],
+          status: "completed"
+        })
+      ],
+      updatedAt: 1_775_000_010
+    });
+    const client = createFakeClient([thread]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    await service.listMessages(externalCodexConversationId("thread_a"), {
+      includeRuntime: false
+    });
+    thread.turns.push(
+      createTurn({
+        completedAt: 1_775_000_020,
+        id: "turn_b",
+        items: [
+          {
+            content: [
+              { text: "Desktop prompt after cached idle state", text_elements: [], type: "text" }
+            ],
+            id: "item_user_b",
+            type: "userMessage"
+          },
+          {
+            id: "item_agent_b",
+            memoryCitation: null,
+            phase: null,
+            text: "Desktop reply after cached idle state",
+            type: "agentMessage"
+          }
+        ],
+        status: "completed"
+      })
+    );
+
+    const incrementalMessages = await service.listMessages(
+      externalCodexConversationId("thread_a"),
+      {
+        afterSequence: 2,
+        includeRuntime: false
+      }
+    );
+    const fullMessages = await service.listMessages(externalCodexConversationId("thread_a"), {
+      includeRuntime: false
+    });
+
+    expect(incrementalMessages.map((message) => message.content)).toEqual([
+      "Desktop prompt after cached idle state",
+      "Desktop reply after cached idle state"
+    ]);
+    expect(fullMessages.map((message) => message.content)).toContain(
+      "Desktop prompt after cached idle state"
+    );
+  });
+
+  it("reads fresh Codex history when polling for messages", async () => {
     const client = createFakeClient([
       createThread({
         cwd: "/Users/reece/Desktop/Abitat_Workspace",
@@ -731,7 +982,191 @@ describe("Codex app service", () => {
 
     expect(client.readThreadRequests).toEqual([
       { includeTurns: true, threadId: "thread_a" },
-      { includeTurns: false, threadId: "thread_a" }
+      { includeTurns: true, threadId: "thread_a" }
+    ]);
+  });
+
+  it("updates cached Codex messages from background completion reads", async () => {
+    const thread = createThread({
+      cwd: "/Users/reece/Desktop/Abitat_Workspace",
+      id: "thread_a",
+      turns: [
+        createTurn({
+          completedAt: 1_775_000_006,
+          id: "turn_a",
+          items: [
+            {
+              content: [{ text: "Initial desktop message", text_elements: [], type: "text" }],
+              id: "item_user_a",
+              type: "userMessage"
+            },
+            {
+              id: "item_agent_a",
+              memoryCitation: null,
+              phase: null,
+              text: "Initial assistant reply",
+              type: "agentMessage"
+            }
+          ],
+          status: "completed"
+        })
+      ],
+      updatedAt: 1_775_000_010
+    });
+    const client = createFakeClient([thread]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    await service.listMessages(externalCodexConversationId("thread_a"));
+    thread.turns.push(
+      createTurn({
+        completedAt: 1_775_000_020,
+        id: "turn_b",
+        items: [
+          {
+            content: [
+              { text: "Desktop message after phone opened", text_elements: [], type: "text" }
+            ],
+            id: "item_user_b",
+            type: "userMessage"
+          },
+          {
+            id: "item_agent_b",
+            memoryCitation: null,
+            phase: null,
+            text: "Desktop reply after phone opened",
+            type: "agentMessage"
+          }
+        ],
+        status: "completed"
+      })
+    );
+
+    await service.listCompletionStates();
+    const messages = await service.listMessages(externalCodexConversationId("thread_a"), {
+      afterSequence: 2,
+      includeRuntime: false
+    });
+
+    expect(messages.map((message) => message.content)).toEqual([
+      "Desktop message after phone opened",
+      "Desktop reply after phone opened"
+    ]);
+  });
+
+  it("updates cached Codex messages from active conversation status reads", async () => {
+    const cwd = "/Users/reece/Desktop/Abitat_Workspace";
+    const thread = createThread({
+      cwd,
+      id: "thread_a",
+      turns: [
+        createTurn({
+          completedAt: 1_775_000_006,
+          id: "turn_a",
+          items: [
+            {
+              content: [{ text: "Initial desktop message", text_elements: [], type: "text" }],
+              id: "item_user_a",
+              type: "userMessage"
+            },
+            {
+              id: "item_agent_a",
+              memoryCitation: null,
+              phase: null,
+              text: "Initial assistant reply",
+              type: "agentMessage"
+            }
+          ],
+          status: "completed"
+        })
+      ],
+      updatedAt: 1_775_000_010
+    });
+    const client = createFakeClient([thread]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    await service.listMessages(externalCodexConversationId("thread_a"));
+    thread.status = { type: "active", activeFlags: [] };
+    thread.turns.push(
+      createTurn({
+        completedAt: null,
+        id: "turn_b",
+        items: [
+          {
+            content: [
+              { text: "Desktop message after phone opened", text_elements: [], type: "text" }
+            ],
+            id: "item_user_b",
+            type: "userMessage"
+          }
+        ],
+        status: { type: "inProgress" }
+      })
+    );
+
+    await service.listProjectConversations(externalCodexProjectId(cwd));
+    const messages = await service.listMessages(externalCodexConversationId("thread_a"), {
+      afterSequence: 2,
+      includeRuntime: false
+    });
+
+    expect(messages.map((message) => message.content)).toEqual([
+      "Desktop message after phone opened"
+    ]);
+  });
+
+  it("refreshes cached Codex messages when a running thread completes without changing updatedAt", async () => {
+    const thread = createThread({
+      cwd: "/Users/reece/Desktop/Abitat_Workspace",
+      id: "thread_a",
+      status: { type: "active", activeFlags: [] },
+      turns: [
+        createTurn({
+          completedAt: null,
+          id: "turn_a",
+          items: [
+            {
+              content: [{ text: "Phone prompt", text_elements: [], type: "text" }],
+              id: "item_user_a",
+              type: "userMessage"
+            }
+          ],
+          status: { type: "inProgress" }
+        })
+      ],
+      updatedAt: 1_775_000_010
+    });
+    const client = createFakeClient([thread]);
+    const service = createCodexAppService(client, { workspaceId: "workspace_demo" });
+
+    await service.listMessages(externalCodexConversationId("thread_a"));
+    thread.status = { type: "idle" };
+    thread.turns[0] = createTurn({
+      completedAt: 1_775_000_020,
+      id: "turn_a",
+      items: [
+        {
+          content: [{ text: "Phone prompt", text_elements: [], type: "text" }],
+          id: "item_user_a",
+          type: "userMessage"
+        },
+        {
+          id: "item_agent_a",
+          memoryCitation: null,
+          phase: null,
+          text: "Reply that should appear immediately",
+          type: "agentMessage"
+        }
+      ],
+      status: "completed"
+    });
+
+    const messages = await service.listMessages(externalCodexConversationId("thread_a"), {
+      afterSequence: 1,
+      includeRuntime: false
+    });
+
+    expect(messages.map((message) => message.content)).toEqual([
+      "Reply that should appear immediately"
     ]);
   });
 

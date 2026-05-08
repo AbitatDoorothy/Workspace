@@ -163,14 +163,32 @@ for (const removedGate of [
 if (!conversationScreen.includes("latestSequenceRef")) {
   throw new Error("Expected ConversationScreen to track the latest synced message sequence");
 }
+if (!conversationScreen.includes("AppState.addEventListener")) {
+  throw new Error(
+    "Expected ConversationScreen to refresh Codex messages when the app returns active"
+  );
+}
+if (!conversationScreen.includes("FULL_MESSAGE_REFRESH_INTERVAL_MS")) {
+  throw new Error("Expected ConversationScreen to periodically recover from stale message cursors");
+}
+if (!conversationScreen.includes("latestConversationUpdatedAtRef")) {
+  throw new Error(
+    "Expected ConversationScreen to refresh messages when desktop updates the thread"
+  );
+}
 if (!conversationScreen.includes("includeRuntime: false")) {
   throw new Error("Expected ConversationScreen to skip runtime output in mobile history requests");
 }
 if (!conversationScreen.includes("const latestConversation = latestConversations.find")) {
   throw new Error("Expected ConversationScreen to refresh conversation status while open");
 }
-if (!conversationScreen.includes("setStatus(latestConversation?.status ?? conversation.status);")) {
+if (!conversationScreen.includes("setStatus(nextStatus);")) {
   throw new Error("Expected ConversationScreen to sync stale running status from the server");
+}
+if (!conversationScreen.includes("shouldForceMessageRefreshAfterStatusPoll")) {
+  throw new Error(
+    "Expected ConversationScreen to force a message refresh from desktop status updates"
+  );
 }
 if (
   !conversationScreen.includes(

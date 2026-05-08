@@ -272,13 +272,6 @@ export function createCodexAppService(
   const activityLog = options.activityLog;
   const workspaceId = options.workspaceId ?? DEFAULT_WORKSPACE_ID;
   const userId = options.userId ?? DEFAULT_USER_ID;
-  const messageCache = new Map<
-    string,
-    {
-      messages: CodexAppMessage[];
-      updatedAt: number;
-    }
-  >();
   const modelContextSyncedTurnIds = new Map<string, string>();
 
   async function listAllThreads(params: CodexAppThreadListParams = {}) {
@@ -403,15 +396,16 @@ export function createCodexAppService(
 
     async listMessages(conversationId: string, options: ListMessagesOptions = {}) {
       const threadId = toCodexThreadId(conversationId);
-      const messages = await cachedThreadMessages(threadId, externalCodexConversationId(threadId));
+      const messages = flattenThreadMessages(
+        await client.readThread(threadId, true),
+        externalCodexConversationId(threadId)
+      );
       const filteredMessages =
         options.includeRuntime === false
           ? messages.filter((message) => message.role !== "runtime")
           : messages;
 
-      return typeof options.afterSequence === "number"
-        ? filteredMessages.filter((message) => message.sequence > options.afterSequence!)
-        : filteredMessages;
+      return messagesAfterSequence(filteredMessages, options.afterSequence, conversationId);
     },
 
     async startConversation(projectId: string, input: StartConversationInput) {
@@ -432,7 +426,6 @@ export function createCodexAppService(
       } catch (error) {
         throw normalizeStartTurnError(error);
       }
-      messageCache.delete(thread.id);
 
       return {
         conversationId: externalCodexConversationId(thread.id),
@@ -493,7 +486,6 @@ export function createCodexAppService(
           throw normalizeStartTurnError(retryError);
         }
       }
-      messageCache.delete(threadId);
 
       return {
         conversationId: externalCodexConversationId(threadId),
@@ -530,23 +522,27 @@ export function createCodexAppService(
     );
   }
 
-  async function cachedThreadMessages(threadId: string, conversationId: string) {
-    const cached = messageCache.get(threadId);
-
-    if (cached) {
-      const threadSummary = await client.readThread(threadId, false);
-      if (threadSummary.updatedAt === cached.updatedAt) {
-        return cached.messages;
-      }
+  function messagesAfterSequence(
+    messages: CodexAppMessage[],
+    afterSequence: number | undefined,
+    conversationId: string
+  ) {
+    if (typeof afterSequence !== "number") {
+      return messages;
     }
 
-    const thread = await client.readThread(threadId, true);
-    const messages = flattenThreadMessages(thread, conversationId);
-    messageCache.set(threadId, {
-      messages,
-      updatedAt: thread.updatedAt
-    });
-    return messages;
+    const maxSequence = messages.reduce((max, message) => Math.max(max, message.sequence), 0);
+    if (messages.length > 0 && afterSequence > maxSequence) {
+      activityLog?.record("codex_app_message_cursor_reset", {
+        afterSequence,
+        conversationId,
+        maxSequence,
+        messageCount: messages.length
+      });
+      return messages;
+    }
+
+    return messages.filter((message) => message.sequence > afterSequence);
   }
 
   async function rejectIfCodexThreadBusy(thread: CodexAppThread) {
@@ -724,23 +720,29 @@ export function flattenThreadMessages(
   conversationId = externalCodexConversationId(thread.id)
 ): CodexAppMessage[] {
   const messages: CodexAppMessage[] = [];
+  const itemOccurrences = new Map<string, number>();
   let sequence = 1;
 
   for (const turn of thread.turns) {
-    for (const item of turn.items) {
+    for (const [itemIndex, item] of turn.items.entries()) {
       const flattened = threadItemToMessageContent(item);
 
       if (!flattened) {
         continue;
       }
+      const codexItemId = item.id ?? `item_${itemIndex}`;
+      const occurrenceKey = `${turn.id}:${codexItemId}`;
+      const occurrence = (itemOccurrences.get(occurrenceKey) ?? 0) + 1;
+      itemOccurrences.set(occurrenceKey, occurrence);
 
       messages.push({
         content: flattened.content,
         conversationId,
         createdAt: itemCreatedAt(thread, turn, sequence),
-        id: `${conversationId}_${sequence}_${item.id ?? "item"}`,
+        id: codexMessageId(conversationId, turn.id, codexItemId, occurrence),
         metadata: {
-          codexItemId: item.id ?? null,
+          codexItemId,
+          codexItemOccurrence: occurrence,
           codexItemType: item.type,
           codexThreadId: thread.id,
           codexTurnId: turn.id
@@ -754,6 +756,16 @@ export function flattenThreadMessages(
   }
 
   return messages;
+}
+
+function codexMessageId(
+  conversationId: string,
+  turnId: string,
+  itemId: string,
+  occurrence: number
+) {
+  const suffix = occurrence > 1 ? `_${occurrence}` : "";
+  return `${conversationId}_${encodeURIComponent(turnId)}_${encodeURIComponent(itemId)}${suffix}`;
 }
 
 function codexThreadToCompletionState(
