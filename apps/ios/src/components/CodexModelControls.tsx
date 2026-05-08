@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActionSheetIOS, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import type { ApiClient } from "../api/client";
 import {
@@ -14,9 +14,15 @@ interface CodexModelControlsProps {
   api: ApiClient;
   onChange(next: CodexMobileModelSettings): void;
   value: CodexMobileModelSettings;
+  variant?: "compact" | "expanded";
 }
 
-export function CodexModelControls({ api, onChange, value }: CodexModelControlsProps) {
+export function CodexModelControls({
+  api,
+  onChange,
+  value,
+  variant = "expanded"
+}: CodexModelControlsProps) {
   const [models, setModels] = useState<CodexModelOption[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,6 +88,68 @@ export function CodexModelControls({ api, onChange, value }: CodexModelControlsP
       model: activeSettings.model,
       effort
     });
+  }
+
+  function openModelMenu() {
+    const cancelButtonIndex = availableModels.length;
+
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        cancelButtonIndex,
+        options: [...availableModels.map((model) => model.displayName), "Cancel"],
+        title: "Model"
+      },
+      (buttonIndex) => {
+        if (buttonIndex < availableModels.length) {
+          selectModel(availableModels[buttonIndex]);
+        }
+      }
+    );
+  }
+
+  function openEffortMenu() {
+    const efforts = activeModel?.supportedReasoningEfforts ?? [activeSettings.effort];
+    const cancelButtonIndex = efforts.length;
+
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        cancelButtonIndex,
+        options: [...efforts.map((effort) => CODEX_REASONING_EFFORT_LABELS[effort]), "Cancel"],
+        title: "Effort"
+      },
+      (buttonIndex) => {
+        if (buttonIndex < efforts.length) {
+          selectEffort(efforts[buttonIndex]);
+        }
+      }
+    );
+  }
+
+  if (variant === "compact") {
+    return (
+      <View style={styles.compactRow}>
+        <Pressable
+          accessibilityLabel="Select Codex model"
+          accessibilityRole="button"
+          onPress={openModelMenu}
+          style={styles.compactButton}
+        >
+          <Text numberOfLines={1} style={styles.compactButtonText}>
+            {activeModel?.displayName ?? activeSettings.model}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityLabel="Select Codex effort"
+          accessibilityRole="button"
+          onPress={openEffortMenu}
+          style={styles.compactButton}
+        >
+          <Text numberOfLines={1} style={styles.compactButtonText}>
+            {CODEX_REASONING_EFFORT_LABELS[activeSettings.effort]}
+          </Text>
+        </Pressable>
+      </View>
+    );
   }
 
   return (
@@ -172,6 +240,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     maxWidth: "68%"
+  },
+  compactButton: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceHigh,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 36,
+    paddingHorizontal: 8,
+    width: 78
+  },
+  compactButtonText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  compactRow: {
+    flexDirection: "row",
+    gap: 8
   },
   effortChip: {
     alignItems: "center",

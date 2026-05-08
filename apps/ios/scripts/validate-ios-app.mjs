@@ -85,6 +85,10 @@ const conversationScreen = await readFile(
   join(process.cwd(), "src/screens/ConversationScreen.tsx"),
   "utf8"
 );
+const codexModelControls = await readFile(
+  join(process.cwd(), "src/components/CodexModelControls.tsx"),
+  "utf8"
+);
 if (!conversationScreen.includes("mergeConversationMessages")) {
   throw new Error("Expected ConversationScreen to merge refreshed messages without duplicates");
 }
@@ -206,6 +210,16 @@ if (conversationScreen.includes('source === "codex_app" && status === "running"'
 if (!conversationScreen.includes("CodexModelControls")) {
   throw new Error("Expected ConversationScreen to expose Codex model controls");
 }
+if (!conversationScreen.includes('variant="compact"')) {
+  throw new Error("Expected ConversationScreen to use compact model controls in the composer");
+}
+if (
+  !conversationScreen.includes("<CodexModelControls") ||
+  conversationScreen.indexOf("<CodexModelControls") >
+    conversationScreen.indexOf('accessibilityLabel="Commit and push with git"')
+) {
+  throw new Error("Expected compact model controls to be declared before the Git action");
+}
 if (!conversationScreen.includes("modelSettings: CodexMobileModelSettings")) {
   throw new Error("Expected ConversationScreen to receive persisted Codex model settings");
 }
@@ -239,6 +253,9 @@ if (!projectDetailScreen.includes("styles.backButton")) {
 }
 if (!projectDetailScreen.includes("CodexModelControls")) {
   throw new Error("Expected ProjectDetailScreen to expose Codex model controls");
+}
+if (projectDetailScreen.includes('variant="compact"')) {
+  throw new Error("Expected ProjectDetailScreen to keep the expanded model controls");
 }
 if (!projectDetailScreen.includes("modelSettings: CodexMobileModelSettings")) {
   throw new Error("Expected ProjectDetailScreen to receive persisted Codex model settings");
@@ -293,6 +310,22 @@ for (const expected of [
 ]) {
   if (!conversationScreen.includes(expected)) {
     throw new Error(`Expected ConversationScreen to include ${expected}`);
+  }
+}
+for (const expected of [
+  "ActionSheetIOS",
+  'variant?: "compact" | "expanded"',
+  'variant === "compact"',
+  'accessibilityLabel="Select Codex model"',
+  'accessibilityLabel="Select Codex effort"',
+  "openModelMenu",
+  "openEffortMenu",
+  "showActionSheetWithOptions",
+  "styles.compactRow",
+  "styles.compactButton"
+]) {
+  if (!codexModelControls.includes(expected)) {
+    throw new Error(`Expected CodexModelControls to include ${expected}`);
   }
 }
 
@@ -370,10 +403,6 @@ for (const expected of ["MODEL_SETTINGS_STORAGE_KEY", "modelSettings", "saveMode
   }
 }
 
-const codexModelControls = await readFile(
-  join(process.cwd(), "src/components/CodexModelControls.tsx"),
-  "utf8"
-);
 for (const expected of [
   "listCodexModels",
   "supportedReasoningEfforts",

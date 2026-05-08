@@ -472,7 +472,6 @@ export function ConversationScreen({
         {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
 
         <View style={styles.composerShell}>
-          <CodexModelControls api={api} onChange={onModelSettingsChange} value={modelSettings} />
           {attachments.length > 0 ? (
             <View style={styles.attachmentList}>
               {attachments.map((attachment) => (
@@ -508,6 +507,12 @@ export function ConversationScreen({
             >
               <Text style={styles.toolButtonText}>File</Text>
             </Pressable>
+            <CodexModelControls
+              api={api}
+              onChange={onModelSettingsChange}
+              value={modelSettings}
+              variant="compact"
+            />
             <Pressable
               accessibilityLabel="Commit and push with git"
               accessibilityRole="button"
@@ -603,7 +608,9 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   },
   composerActions: {
+    alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8
   },
   composerButton: {
