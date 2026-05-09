@@ -76,6 +76,42 @@ describe("abitat iphone", () => {
     ]);
   });
 
+  it("retries host registration through temporary hosted API failures", async () => {
+    let attempts = 0;
+    const fetchFn = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return Response.json({ error: "Database timeout" }, { status: 503 });
+      }
+      if (attempts === 2) {
+        throw new TypeError("fetch failed");
+      }
+
+      return Response.json({
+        machineId: "machine_1",
+        workspaceId: "workspace_1",
+        hostToken: "host_secret"
+      });
+    };
+
+    await expect(
+      registerHost({
+        apiUrl: "https://workspace.abitat.io",
+        cliToken: "cli_secret",
+        machineName: "Reece MacBook Pro",
+        platform: "darwin",
+        fetchFn,
+        retryDelayMs: 0
+      })
+    ).resolves.toEqual({
+      machineId: "machine_1",
+      workspaceId: "workspace_1",
+      hostToken: "host_secret"
+    });
+
+    expect(attempts).toBe(3);
+  });
+
   it("prepares host credentials and startup processes for a logged-in session", async () => {
     const fetchFn = async () =>
       Response.json({

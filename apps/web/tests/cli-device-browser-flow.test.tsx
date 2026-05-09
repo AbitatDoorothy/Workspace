@@ -29,9 +29,17 @@ const register = vi.hoisted(() =>
     }
   }))
 );
+const findDefaultWorkspace = vi.hoisted(() =>
+  vi.fn(async () => ({
+    id: "workspace_1",
+    name: "Reece Workspace",
+    ownerUserId: "user_1"
+  }))
+);
 
 vi.mock("../server/auth/accounts", () => ({
   accountService: {
+    findDefaultWorkspace,
     login,
     register
   }
@@ -46,6 +54,7 @@ vi.mock("../server/auth/cli-device-login-service", () => ({
 describe("CLI device browser flow", () => {
   beforeEach(() => {
     completeLogin.mockClear();
+    findDefaultWorkspace.mockClear();
     login.mockClear();
     register.mockClear();
   });
@@ -77,7 +86,11 @@ describe("CLI device browser flow", () => {
     );
 
     expect(response.status).toBe(303);
-    expect(completeLogin).toHaveBeenCalledWith({ code: "ABITAT-LOGIN", userId: "user_1" });
+    expect(completeLogin).toHaveBeenCalledWith({
+      code: "ABITAT-LOGIN",
+      userId: "user_1",
+      workspaceId: "workspace_1"
+    });
   });
 
   it("approves the CLI login after successful browser registration", async () => {
@@ -96,6 +109,10 @@ describe("CLI device browser flow", () => {
     );
 
     expect(response.status).toBe(303);
-    expect(completeLogin).toHaveBeenCalledWith({ code: "ABITAT-LOGIN", userId: "user_1" });
+    expect(completeLogin).toHaveBeenCalledWith({
+      code: "ABITAT-LOGIN",
+      userId: "user_1",
+      workspaceId: "workspace_1"
+    });
   });
 });

@@ -105,6 +105,44 @@ describe("account service", () => {
     });
   });
 
+  it("retries account lookup when a hosted database call stalls", async () => {
+    const db = createAccountDb();
+    const service = createAccountService(db, { idGenerator: (prefix) => `${prefix}_1` });
+
+    await service.register({
+      email: "reece@example.com",
+      password: "correct horse battery staple",
+      displayName: ""
+    });
+
+    const findUnique = db.user.findUnique;
+    let attempts = 0;
+    db.user.findUnique = async (args) => {
+      attempts += 1;
+      if (attempts === 1) {
+        return new Promise<TestUser | null>(() => undefined);
+      }
+      return findUnique(args);
+    };
+
+    const retryingService = createAccountService(db, {
+      dbOperationRetries: 1,
+      dbOperationTimeoutMs: 1,
+      idGenerator: (prefix) => `${prefix}_1`
+    });
+
+    await expect(
+      retryingService.login({
+        email: "REECE@example.com",
+        password: "correct horse battery staple"
+      })
+    ).resolves.toMatchObject({
+      email: "reece@example.com",
+      id: "user_1"
+    });
+    expect(attempts).toBe(2);
+  });
+
   it("rejects duplicate email registration", async () => {
     const db = createAccountDb();
     const service = createAccountService(db, { idGenerator: (prefix) => `${prefix}_1` });

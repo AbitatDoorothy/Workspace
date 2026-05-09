@@ -17,6 +17,7 @@ const completeLogin = vi.hoisted(() => vi.fn(async () => ({ ok: true as const })
 const getRequestSessionUserId = vi.hoisted(() => vi.fn(async () => "user_1"));
 
 vi.mock("../server/auth/cli-device-login-service", () => ({
+  CLI_DEVICE_LOGIN_DB_TIMEOUT_ERROR_NAME: "DbOperationTimeoutError",
   cliDeviceLoginService: {
     completeLogin,
     pollLogin,
@@ -63,6 +64,24 @@ describe("CLI device login routes", () => {
 
     await expect(response.json()).resolves.toEqual({ status: "pending" });
     expect(pollLogin).toHaveBeenCalledWith("cli_login_1");
+  });
+
+  it("marks hosted CLI login database timeouts as transient", async () => {
+    pollLogin.mockRejectedValueOnce(
+      Object.assign(new Error("cli_device_login_poll_find timed out after 5000ms"), {
+        name: "DbOperationTimeoutError"
+      })
+    );
+    const { POST } = await import("../app/api/cli/device-login/poll/route");
+
+    const response = await POST(
+      new Request("https://workspace.abitat.io/api/cli/device-login/poll", {
+        body: JSON.stringify({ deviceLoginId: "cli_login_1" }),
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(503);
   });
 
   it("completes a hosted CLI login for the current browser session user", async () => {

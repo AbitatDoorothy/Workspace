@@ -12,9 +12,11 @@ export interface RunLoginCommandInput {
   apiUrl: string;
   configPath: string;
   fetchFn?: FetchFn;
+  maxStartAttempts?: number;
   maxPolls?: number;
   openUrl(url: string): void;
   pollIntervalMs?: number;
+  startRetryDelayMs?: number;
 }
 
 interface DeviceLoginStartResponse {
@@ -35,6 +37,9 @@ interface DeviceLoginPendingResponse {
 }
 
 type DeviceLoginPollResponse = DeviceLoginApprovedResponse | DeviceLoginPendingResponse;
+
+const DEFAULT_START_ATTEMPTS = 4;
+const DEFAULT_START_RETRY_DELAY_MS = 1000;
 
 export type FetchFn = (
   url: string,
@@ -97,7 +102,10 @@ export async function deleteCliSession(configPath: string) {
 
 export async function runLoginCommand(input: RunLoginCommandInput): Promise<CliSession> {
   const fetchFn = input.fetchFn ?? fetch;
-  const start = await startDeviceLogin(input.apiUrl, fetchFn);
+  const start = await startDeviceLogin(input.apiUrl, fetchFn, {
+    maxAttempts: input.maxStartAttempts ?? DEFAULT_START_ATTEMPTS,
+    retryDelayMs: input.startRetryDelayMs ?? DEFAULT_START_RETRY_DELAY_MS
+  });
   input.openUrl(new URL(start.verificationPath, input.apiUrl).toString());
 
   const maxPolls = input.maxPolls ?? 120;
@@ -122,16 +130,42 @@ export async function runLoginCommand(input: RunLoginCommandInput): Promise<CliS
   throw new Error("Timed out waiting for browser login approval");
 }
 
-async function startDeviceLogin(apiUrl: string, fetchFn: FetchFn) {
-  const response = await fetchFn(`${trimTrailingSlash(apiUrl)}/api/cli/device-login/start`, {
-    method: "POST"
-  });
+async function startDeviceLogin(
+  apiUrl: string,
+  fetchFn: FetchFn,
+  options: { maxAttempts: number; retryDelayMs: number }
+) {
+  let lastError: unknown;
+  const maxAttempts = Math.max(1, options.maxAttempts);
 
-  if (!response.ok) {
-    throw new Error(`Unable to start CLI login (${response.status})`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetchFn(`${trimTrailingSlash(apiUrl)}/api/cli/device-login/start`, {
+        method: "POST"
+      });
+
+      if (response.ok) {
+        return parseStartResponse(await response.json());
+      }
+
+      const error = new Error(`Unable to start CLI login (${response.status})`);
+      if (!isTransientHostedStatus(response.status) || attempt >= maxAttempts) {
+        throw error;
+      }
+      lastError = error;
+    } catch (error) {
+      if (!isTransientFetchError(error) || attempt >= maxAttempts) {
+        throw error;
+      }
+      lastError = error;
+    }
+
+    if (options.retryDelayMs > 0) {
+      await delay(options.retryDelayMs);
+    }
   }
 
-  return parseStartResponse(await response.json());
+  throw lastError instanceof Error ? lastError : new Error("Unable to start CLI login");
 }
 
 async function pollDeviceLogin(apiUrl: string, deviceLoginId: string, fetchFn: FetchFn) {
@@ -146,7 +180,7 @@ async function pollDeviceLogin(apiUrl: string, deviceLoginId: string, fetchFn: F
   }
 
   if (!response.ok) {
-    if (isTransientPollStatus(response.status)) {
+    if (isTransientHostedStatus(response.status)) {
       return { status: "pending" as const };
     }
 
@@ -156,8 +190,12 @@ async function pollDeviceLogin(apiUrl: string, deviceLoginId: string, fetchFn: F
   return parsePollResponse(await response.json());
 }
 
-function isTransientPollStatus(status: number) {
+function isTransientHostedStatus(status: number) {
   return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+function isTransientFetchError(error: unknown) {
+  return error instanceof TypeError;
 }
 
 function parseStartResponse(value: unknown): DeviceLoginStartResponse {

@@ -19,6 +19,7 @@ const getRequestAccountContext = vi.hoisted(() =>
     workspaceId: "workspace_account"
   }))
 );
+const getRequestSessionUserId = vi.hoisted(() => vi.fn(async () => "user_account"));
 
 vi.mock("../server/mobile", () => ({
   mobileService: {
@@ -33,13 +34,15 @@ vi.mock("../server/mobile/mobile-activity-log", () => ({
 }));
 
 vi.mock("../server/auth/request-session", () => ({
-  getRequestAccountContext
+  getRequestAccountContext,
+  getRequestSessionUserId
 }));
 
 describe("phone pairing start route", () => {
   beforeEach(() => {
     createPhonePairing.mockClear();
     getRequestAccountContext.mockClear();
+    getRequestSessionUserId.mockClear();
   });
 
   it("uses the signed browser session user instead of caller-provided ownership fields", async () => {
@@ -70,6 +73,37 @@ describe("phone pairing start route", () => {
     expect(createPhonePairing).toHaveBeenCalledWith({
       workspaceId: "workspace_account",
       hostMachineId: "machine_account",
+      createdByUserId: "user_account"
+    });
+  });
+
+  it("allows JSON callers to pass the freshly registered host target", async () => {
+    const sessionToken = await createSessionToken(
+      "user_account",
+      "test-secret",
+      60_000,
+      Date.now()
+    );
+    const response = await POST(
+      new Request("http://127.0.0.1:3000/api/mobile/pairing/start", {
+        body: JSON.stringify({
+          workspaceId: "workspace_fresh",
+          hostMachineId: "machine_fresh"
+        }),
+        headers: {
+          cookie: `${SESSION_COOKIE_NAME}=${sessionToken}`,
+          "content-type": "application/json"
+        },
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(201);
+    expect(getRequestAccountContext).not.toHaveBeenCalled();
+    expect(getRequestSessionUserId).toHaveBeenCalled();
+    expect(createPhonePairing).toHaveBeenCalledWith({
+      workspaceId: "workspace_fresh",
+      hostMachineId: "machine_fresh",
       createdByUserId: "user_account"
     });
   });

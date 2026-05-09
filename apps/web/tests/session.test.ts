@@ -1,3 +1,5 @@
+import { createHmac, scryptSync } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -13,10 +15,14 @@ import { hashPassword, verifyPassword } from "../server/auth/passwords";
 describe("auth session", () => {
   it("creates a signed session token containing the authenticated user id", async () => {
     const token = await createSessionToken("user_123", "secret", 60_000, 1_800_000_000_000);
+    const [version, payload, signature] = token.split(".");
 
     await expect(verifySessionToken(token, "secret", 1_700_000_000_000)).resolves.toEqual({
       userId: "user_123"
     });
+    expect(signature).toBe(
+      createHmac("sha256", "secret").update(`${version}.${payload}`).digest("base64url")
+    );
   });
 
   it("rejects tampered or expired session tokens", async () => {
@@ -32,8 +38,29 @@ describe("auth session", () => {
     });
 
     expect(hash).not.toContain("correct horse");
+    expect(hash).toMatch(/^pbkdf2-sha256\$/u);
     await expect(verifyPassword("correct horse battery staple", hash)).resolves.toBe(true);
     await expect(verifyPassword("wrong password", hash)).resolves.toBe(false);
+  });
+
+  it("verifies legacy scrypt account passwords without the Node callback API", async () => {
+    const salt = Buffer.from("abcdef0123456789abcdef0123456789");
+    const derived = scryptSync("correct horse battery staple", salt, 64, {
+      N: 16_384,
+      p: 1,
+      r: 8
+    });
+    const legacyHash = [
+      "scrypt",
+      "16384",
+      "8",
+      "1",
+      salt.toString("base64url"),
+      derived.toString("base64url")
+    ].join("$");
+
+    await expect(verifyPassword("correct horse battery staple", legacyHash)).resolves.toBe(true);
+    await expect(verifyPassword("wrong password", legacyHash)).resolves.toBe(false);
   });
 
   it("builds redirects from forwarded public hosts instead of the local origin", () => {

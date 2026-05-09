@@ -193,6 +193,46 @@ describe("mobile service", () => {
     ).rejects.toThrow("Pairing code has expired");
   });
 
+  it("retries phone pairing completion when a hosted database read stalls", async () => {
+    const db = createMobileDb();
+    const findFirst = db.devicePairing.findFirst;
+    let attempts = 0;
+    const service = createMobileService(db, {
+      codeGenerator: () => "ABITAT-654321",
+      dbOperationRetries: 1,
+      dbOperationTimeoutMs: 1,
+      idGenerator: (prefix) => `${prefix}_test`,
+      tokenGenerator: () => "client_secret",
+      now: () => new Date("2026-05-03T10:00:00.000Z")
+    });
+
+    await service.createPhonePairing({
+      workspaceId: "workspace_demo",
+      hostMachineId: "machine_demo",
+      createdByUserId: "user_demo"
+    });
+    db.devicePairing.findFirst = async (args) => {
+      attempts += 1;
+      if (attempts === 1) {
+        return new Promise<TestPairing | null>(() => undefined);
+      }
+      return findFirst(args);
+    };
+
+    await expect(
+      service.completePhonePairing({
+        code: "ABITAT-654321",
+        deviceName: "Reece iPhone",
+        platform: "ios",
+        appVersion: "1.0.0"
+      })
+    ).resolves.toMatchObject({
+      clientToken: "client_secret",
+      machineId: "machine_test"
+    });
+    expect(attempts).toBe(2);
+  });
+
   it("returns bootstrap and project data scoped to the paired phone workspace", async () => {
     const db = createMobileDb();
     db.state.machines.set("machine_phone", {
@@ -221,6 +261,40 @@ describe("mobile service", () => {
         hostLocalPath: "/Users/reece/Desktop/Test"
       })
     ]);
+  });
+
+  it("retries mobile bootstrap authentication when a hosted database read stalls", async () => {
+    const db = createMobileDb();
+    db.state.machines.set("machine_phone", {
+      id: "machine_phone",
+      workspaceId: "workspace_demo",
+      name: "Reece iPhone",
+      type: "client",
+      status: "online",
+      tokenHash: hashMobileToken("client_secret"),
+      pairedHostMachineId: "machine_demo",
+      deviceKind: "phone",
+      platform: "ios"
+    });
+    const findFirst = db.machine.findFirst;
+    let attempts = 0;
+    db.machine.findFirst = async (args) => {
+      attempts += 1;
+      if (attempts === 1) {
+        return new Promise<TestMachine | null>(() => undefined);
+      }
+      return findFirst(args);
+    };
+    const service = createMobileService(db, {
+      dbOperationRetries: 1,
+      dbOperationTimeoutMs: 1
+    });
+
+    await expect(service.requireMobileActor("client_secret")).resolves.toMatchObject({
+      machineId: "machine_phone",
+      workspaceId: "workspace_demo"
+    });
+    expect(attempts).toBe(2);
   });
 
   it("reports a paired host as online when a recent heartbeat exists even if the stored status is pending", async () => {

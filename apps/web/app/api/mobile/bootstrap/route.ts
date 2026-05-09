@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { isDbOperationTimeout } from "../../../../server/db/operation";
 import { mobileService } from "../../../../server/mobile";
 import { mobileActivityLog } from "../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../server/mobile/request-auth";
@@ -32,7 +33,13 @@ export async function GET(request: Request) {
     });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to load mobile bootstrap" },
-      { status: error instanceof Error && error.message === "Invalid mobile token" ? 401 : 400 }
+      {
+        status: isDbOperationTimeout(error)
+          ? 503
+          : error instanceof Error && error.message === "Invalid mobile token"
+            ? 401
+            : 400
+      }
     );
   }
 }

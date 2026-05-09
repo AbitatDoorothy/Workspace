@@ -2,7 +2,10 @@ import { phonePairingStartRequestSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getRequestAccountContext } from "../../../../../server/auth/request-session";
+import {
+  getRequestAccountContext,
+  getRequestSessionUserId
+} from "../../../../../server/auth/request-session";
 import { createBrowserRedirectUrl, sanitizeRedirectPath } from "../../../../../server/auth/session";
 import { mobileService } from "../../../../../server/mobile";
 import { mobileActivityLog } from "../../../../../server/mobile/mobile-activity-log";
@@ -17,7 +20,14 @@ export async function POST(request: Request) {
       .get("content-type")
       ?.includes("application/x-www-form-urlencoded");
     const input = requestSchema.parse(await parseRequest(request));
-    const account = await getRequestAccountContext(request);
+    const account =
+      !isFormRequest && input.workspaceId && input.hostMachineId
+        ? {
+            userId: await requireRequestSessionUserId(request),
+            workspaceId: input.workspaceId,
+            hostMachineId: input.hostMachineId
+          }
+        : await getRequestAccountContext(request);
     const pairing = await mobileService.createPhonePairing({
       workspaceId: account.workspaceId,
       hostMachineId: account.hostMachineId,
@@ -70,4 +80,12 @@ async function parseRequest(request: Request) {
   }
 
   return request.json();
+}
+
+async function requireRequestSessionUserId(request: Request) {
+  const userId = await getRequestSessionUserId(request);
+  if (!userId) {
+    throw new Error("Authentication required");
+  }
+  return userId;
 }

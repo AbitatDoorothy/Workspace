@@ -1,49 +1,80 @@
-import {
-  randomBytes,
-  scrypt as scryptCallback,
-  timingSafeEqual,
-  type ScryptOptions
-} from "node:crypto";
+import { pbkdf2 } from "@noble/hashes/pbkdf2";
+import { scrypt } from "@noble/hashes/scrypt";
+import { sha256 } from "@noble/hashes/sha2";
 
-const SCRYPT_N = 16_384;
-const SCRYPT_R = 8;
-const SCRYPT_P = 1;
+import { randomHex } from "../crypto";
+
+const LEGACY_SCRYPT_N = 16_384;
+const LEGACY_SCRYPT_R = 8;
+const LEGACY_SCRYPT_P = 1;
+const PBKDF2_ITERATIONS = 120_000;
 const KEY_LENGTH = 64;
 const SALT_LENGTH = 32;
 
 interface HashPasswordOptions {
-  salt?: Buffer;
+  salt?: Uint8Array;
 }
 
 export async function hashPassword(password: string, options: HashPasswordOptions = {}) {
-  const salt = options.salt ?? randomBytes(SALT_LENGTH);
-  const derived = await scrypt(password, salt, KEY_LENGTH, {
-    N: SCRYPT_N,
-    p: SCRYPT_P,
-    r: SCRYPT_R
+  const salt = options.salt ?? decodeHex(randomHex(SALT_LENGTH));
+  const derived = pbkdf2(sha256, password, salt, {
+    c: PBKDF2_ITERATIONS,
+    dkLen: KEY_LENGTH
   });
 
   return [
-    "scrypt",
-    String(SCRYPT_N),
-    String(SCRYPT_R),
-    String(SCRYPT_P),
-    salt.toString("base64url"),
-    derived.toString("base64url")
+    "pbkdf2-sha256",
+    String(PBKDF2_ITERATIONS),
+    String(KEY_LENGTH),
+    encodeBase64Url(salt),
+    encodeBase64Url(derived)
   ].join("$");
 }
 
 export async function verifyPassword(password: string, storedHash: string) {
   const parts = storedHash.split("$");
-  if (parts.length !== 6 || parts[0] !== "scrypt") {
+  switch (parts[0]) {
+    case "pbkdf2-sha256":
+      return verifyPbkdf2Password(password, parts);
+    case "scrypt":
+      return verifyLegacyScryptPassword(password, parts);
+    default:
+      return false;
+  }
+}
+
+async function verifyPbkdf2Password(password: string, parts: string[]) {
+  if (parts.length !== 5) {
     return false;
   }
 
-  const [algorithm, nText, rText, pText, saltText, hashText] = parts;
-  if (algorithm !== "scrypt") {
+  const [, iterationsText, keyLengthText, saltText, hashText] = parts;
+  const iterations = Number(iterationsText);
+  const keyLength = Number(keyLengthText);
+  if (!Number.isInteger(iterations) || !Number.isInteger(keyLength)) {
     return false;
   }
 
+  try {
+    const salt = decodeBase64Url(saltText);
+    const expected = decodeBase64Url(hashText);
+    const actual = pbkdf2(sha256, password, salt, {
+      c: iterations,
+      dkLen: keyLength
+    });
+
+    return timingSafeEqualBytes(expected, actual);
+  } catch {
+    return false;
+  }
+}
+
+async function verifyLegacyScryptPassword(password: string, parts: string[]) {
+  if (parts.length !== 6) {
+    return false;
+  }
+
+  const [, nText, rText, pText, saltText, hashText] = parts;
   const n = Number(nText);
   const r = Number(rText);
   const p = Number(pText);
@@ -52,30 +83,52 @@ export async function verifyPassword(password: string, storedHash: string) {
   }
 
   try {
-    const salt = Buffer.from(saltText, "base64url");
-    const expected = Buffer.from(hashText, "base64url");
-    const actual = await scrypt(password, salt, expected.length, { N: n, p, r });
+    const salt = decodeBase64Url(saltText);
+    const expected = decodeBase64Url(hashText);
+    const actual = scrypt(password, salt, {
+      N: n || LEGACY_SCRYPT_N,
+      dkLen: expected.length,
+      p: p || LEGACY_SCRYPT_P,
+      r: r || LEGACY_SCRYPT_R
+    });
 
-    return expected.length === actual.length && timingSafeEqual(expected, actual);
+    return timingSafeEqualBytes(expected, actual);
   } catch {
     return false;
   }
 }
 
-function scrypt(
-  password: string,
-  salt: Buffer,
-  keyLength: number,
-  options: ScryptOptions
-): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    scryptCallback(password, salt, keyLength, options, (error, derivedKey) => {
-      if (error) {
-        reject(error);
-        return;
-      }
+function timingSafeEqualBytes(expected: Uint8Array, actual: Uint8Array) {
+  if (expected.length !== actual.length) {
+    return false;
+  }
 
-      resolve(derivedKey);
-    });
-  });
+  let difference = 0;
+  for (let index = 0; index < expected.length; index += 1) {
+    difference |= expected[index] ^ actual[index];
+  }
+  return difference === 0;
+}
+
+function encodeBase64Url(bytes: Uint8Array) {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/u, "");
+}
+
+function decodeBase64Url(input: string) {
+  const base64 = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = `${base64}${"=".repeat((4 - (base64.length % 4)) % 4)}`;
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function decodeHex(input: string) {
+  const bytes = new Uint8Array(input.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(input.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
 }

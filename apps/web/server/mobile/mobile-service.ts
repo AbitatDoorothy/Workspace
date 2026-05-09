@@ -1,11 +1,12 @@
-import { createHash, randomBytes } from "node:crypto";
-
 import type {
   MachineStatus,
   PhonePairingCompleteRequest,
   PhonePairingCompleteResponse,
   PhonePairingStartResponse
 } from "@abitat_reece/shared";
+
+import { randomHex, randomId, sha256Hex } from "../crypto";
+import { retryDbOperation, runDbOperation } from "../db/operation";
 
 interface MachineRecord {
   id: string;
@@ -132,6 +133,8 @@ interface ListPushSubscriptionsInput {
 
 interface MobileServiceOptions {
   codeGenerator?: () => string;
+  dbOperationRetries?: number;
+  dbOperationTimeoutMs?: number;
   hostFreshnessMs?: number;
   idGenerator?: (prefix: string) => string;
   now?: () => Date;
@@ -142,7 +145,7 @@ const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_HOST_FRESHNESS_MS = 30_000;
 
 export function hashMobileToken(token: string) {
-  return createHash("sha256").update(token).digest("hex");
+  return sha256Hex(token);
 }
 
 export function hashPairingCode(code: string) {
@@ -152,34 +155,46 @@ export function hashPairingCode(code: string) {
 export function createMobileService(db: MobileDb, options: MobileServiceOptions = {}) {
   const now = options.now ?? (() => new Date());
   const hostFreshnessMs = options.hostFreshnessMs ?? DEFAULT_HOST_FRESHNESS_MS;
-  const idGenerator =
-    options.idGenerator ?? ((prefix: string) => `${prefix}_${randomBytes(8).toString("hex")}`);
-  const tokenGenerator =
-    options.tokenGenerator ?? (() => `client_${randomBytes(24).toString("hex")}`);
+  const idGenerator = options.idGenerator ?? ((prefix: string) => randomId(prefix));
+  const tokenGenerator = options.tokenGenerator ?? (() => `client_${randomHex(24)}`);
   const codeGenerator = options.codeGenerator ?? createPairingCode;
+  const dbOperationRetries = options.dbOperationRetries ?? 2;
+  const dbOperationTimeoutMs = options.dbOperationTimeoutMs ?? 5000;
 
   return {
     async createPhonePairing(input: CreatePhonePairingInput): Promise<PhonePairingStartResponse> {
-      const host = await db.machine.findUnique({ where: { id: input.hostMachineId } });
+      const host = await retryDbOperation(
+        "mobile_pairing_start_find_host",
+        () => db.machine.findUnique({ where: { id: input.hostMachineId } }),
+        {
+          retries: dbOperationRetries,
+          timeoutMs: dbOperationTimeoutMs
+        }
+      );
       if (!host || host.workspaceId !== input.workspaceId || host.type !== "host") {
         throw new Error("Host machine not found");
       }
 
       const createdAt = now();
       const code = codeGenerator();
-      const pairing = await db.devicePairing.create({
-        data: {
-          id: idGenerator("pairing"),
-          workspaceId: input.workspaceId,
-          hostMachineId: input.hostMachineId,
-          createdByUserId: input.createdByUserId,
-          codeHash: hashPairingCode(code),
-          expiresAt: new Date(createdAt.getTime() + (input.ttlMs ?? DEFAULT_PAIRING_TTL_MS)),
-          consumedAt: null,
-          approvedAt: null,
-          createdAt
-        }
-      });
+      const pairing = await runDbOperation(
+        "mobile_pairing_start_create_pairing",
+        () =>
+          db.devicePairing.create({
+            data: {
+              id: idGenerator("pairing"),
+              workspaceId: input.workspaceId,
+              hostMachineId: input.hostMachineId,
+              createdByUserId: input.createdByUserId,
+              codeHash: hashPairingCode(code),
+              expiresAt: new Date(createdAt.getTime() + (input.ttlMs ?? DEFAULT_PAIRING_TTL_MS)),
+              consumedAt: null,
+              approvedAt: null,
+              createdAt
+            }
+          }),
+        dbOperationTimeoutMs
+      );
 
       return {
         pairingId: pairing.id,
@@ -192,9 +207,17 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
     async completePhonePairing(
       input: PhonePairingCompleteRequest
     ): Promise<PhonePairingCompleteResponse> {
-      const pairing = await db.devicePairing.findFirst({
-        where: { codeHash: hashPairingCode(input.code) }
-      });
+      const pairing = await retryDbOperation(
+        "mobile_pairing_complete_find_pairing",
+        () =>
+          db.devicePairing.findFirst({
+            where: { codeHash: hashPairingCode(input.code) }
+          }),
+        {
+          retries: dbOperationRetries,
+          timeoutMs: dbOperationTimeoutMs
+        }
+      );
 
       if (!pairing) {
         throw new Error("Invalid pairing code");
@@ -209,40 +232,57 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
         throw new Error("Pairing code has expired");
       }
 
-      const host = await db.machine.findUnique({ where: { id: pairing.hostMachineId } });
+      const host = await retryDbOperation(
+        "mobile_pairing_complete_find_host",
+        () => db.machine.findUnique({ where: { id: pairing.hostMachineId } }),
+        {
+          retries: dbOperationRetries,
+          timeoutMs: dbOperationTimeoutMs
+        }
+      );
       if (!host) {
         throw new Error("Host machine not found");
       }
 
       const clientToken = tokenGenerator();
-      const phone = await db.machine.create({
-        data: {
-          id: idGenerator("machine"),
-          workspaceId: pairing.workspaceId,
-          name: input.deviceName,
-          type: "client",
-          status: "online",
-          tokenHash: hashMobileToken(clientToken),
-          ownerUserId: pairing.createdByUserId,
-          platform: input.platform,
-          deviceKind: "phone",
-          publicKey: input.publicKey ?? null,
-          pairedHostMachineId: pairing.hostMachineId,
-          capabilitiesJson: {
-            features: ["mobile_chat", "remote_control"],
-            pushSubscriptions: []
-          },
-          lastSeenAt: pairedAt
-        }
-      });
+      const phone = await runDbOperation(
+        "mobile_pairing_complete_create_phone",
+        () =>
+          db.machine.create({
+            data: {
+              id: idGenerator("machine"),
+              workspaceId: pairing.workspaceId,
+              name: input.deviceName,
+              type: "client",
+              status: "online",
+              tokenHash: hashMobileToken(clientToken),
+              ownerUserId: pairing.createdByUserId,
+              platform: input.platform,
+              deviceKind: "phone",
+              publicKey: input.publicKey ?? null,
+              pairedHostMachineId: pairing.hostMachineId,
+              capabilitiesJson: {
+                features: ["mobile_chat", "remote_control"],
+                pushSubscriptions: []
+              },
+              lastSeenAt: pairedAt
+            }
+          }),
+        dbOperationTimeoutMs
+      );
 
-      await db.devicePairing.update({
-        where: { id: pairing.id },
-        data: {
-          consumedAt: pairedAt,
-          approvedAt: pairedAt
-        }
-      });
+      await runDbOperation(
+        "mobile_pairing_complete_update_pairing",
+        () =>
+          db.devicePairing.update({
+            where: { id: pairing.id },
+            data: {
+              consumedAt: pairedAt,
+              approvedAt: pairedAt
+            }
+          }),
+        dbOperationTimeoutMs
+      );
 
       return {
         machineId: phone.id,
@@ -253,30 +293,53 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
     },
 
     async verifyMobileToken(machineId: string, token: string) {
-      const machine = await db.machine.findUnique({ where: { id: machineId } });
+      const machine = await retryDbOperation(
+        "mobile_verify_token_find_machine",
+        () => db.machine.findUnique({ where: { id: machineId } }),
+        {
+          retries: dbOperationRetries,
+          timeoutMs: dbOperationTimeoutMs
+        }
+      );
       return machine?.tokenHash === hashMobileToken(token);
     },
 
     async requireMobileActor(token: string): Promise<MobileActor> {
-      const machine = await db.machine.findFirst({
-        where: {
-          type: "client",
-          deviceKind: "phone",
-          tokenHash: hashMobileToken(token)
+      const machine = await retryDbOperation(
+        "mobile_require_actor_find_phone",
+        () =>
+          db.machine.findFirst({
+            where: {
+              type: "client",
+              deviceKind: "phone",
+              tokenHash: hashMobileToken(token)
+            }
+          }),
+        {
+          retries: dbOperationRetries,
+          timeoutMs: dbOperationTimeoutMs
         }
-      });
+      );
 
       if (!machine) {
         throw new Error("Invalid mobile token");
       }
 
-      await db.machine.update({
-        where: { id: machine.id },
-        data: {
-          status: "online",
-          lastSeenAt: now()
+      await retryDbOperation(
+        "mobile_require_actor_update_phone",
+        () =>
+          db.machine.update({
+            where: { id: machine.id },
+            data: {
+              status: "online",
+              lastSeenAt: now()
+            }
+          }),
+        {
+          retries: dbOperationRetries,
+          timeoutMs: dbOperationTimeoutMs
         }
-      });
+      );
 
       return {
         machineId: machine.id,
@@ -287,10 +350,34 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
     },
 
     async bootstrap(actor: MobileActor) {
+      const hostMachineId = actor.hostMachineId;
       const [workspace, phone, host] = await Promise.all([
-        db.workspace.findUnique({ where: { id: actor.workspaceId } }),
-        db.machine.findUnique({ where: { id: actor.machineId } }),
-        actor.hostMachineId ? db.machine.findUnique({ where: { id: actor.hostMachineId } }) : null
+        retryDbOperation(
+          "mobile_bootstrap_find_workspace",
+          () => db.workspace.findUnique({ where: { id: actor.workspaceId } }),
+          {
+            retries: dbOperationRetries,
+            timeoutMs: dbOperationTimeoutMs
+          }
+        ),
+        retryDbOperation(
+          "mobile_bootstrap_find_phone",
+          () => db.machine.findUnique({ where: { id: actor.machineId } }),
+          {
+            retries: dbOperationRetries,
+            timeoutMs: dbOperationTimeoutMs
+          }
+        ),
+        hostMachineId
+          ? retryDbOperation(
+              "mobile_bootstrap_find_host",
+              () => db.machine.findUnique({ where: { id: hostMachineId } }),
+              {
+                retries: dbOperationRetries,
+                timeoutMs: dbOperationTimeoutMs
+              }
+            )
+          : null
       ]);
 
       if (!workspace || !phone) {

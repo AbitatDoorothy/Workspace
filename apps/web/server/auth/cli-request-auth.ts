@@ -12,6 +12,14 @@ export async function getRequestCliAccountContext(request: Request) {
     throw new Error("Invalid CLI token");
   }
 
+  if ("workspaceId" in actor && actor.workspaceId) {
+    return {
+      userId: actor.userId,
+      workspaceId: actor.workspaceId,
+      hostMachineId: ""
+    };
+  }
+
   return getAccountContextForUserId(actor.userId);
 }
 

@@ -206,6 +206,9 @@ async function readableError(response: Response) {
     const body = JSON.parse(text) as { error?: string };
     return body.error ?? `${response.status} ${response.statusText}`;
   } catch {
+    if (isHtmlError(text)) {
+      return `${response.status} ${response.statusText || "Server error"}`;
+    }
     return text;
   }
 }
@@ -226,6 +229,11 @@ async function readJsonBody(response: Response, path: string) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isHtmlError(text: string) {
+  const preview = text.slice(0, 300).toLowerCase();
+  return preview.includes("<!doctype html") || preview.includes("<html");
 }
 
 function mobileMessagesPath(

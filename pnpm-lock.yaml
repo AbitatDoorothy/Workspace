@@ -122,6 +122,9 @@ importers:
       '@abitat_reece/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@noble/hashes':
+        specifier: 1.8.0
+        version: 1.8.0
       '@opennextjs/cloudflare':
         specifier: ^1.19.8
         version: 1.19.8(next@16.2.6(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(wrangler@4.90.0)

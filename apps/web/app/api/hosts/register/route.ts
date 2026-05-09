@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getRequestCliAccountContext } from "../../../../server/auth/cli-request-auth";
+import { isDbOperationTimeout } from "../../../../server/db/operation";
 import { hostService } from "../../../../server/hosts";
 
 const requestSchema = z.object({
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to register host" },
-      { status: 400 }
+      { status: isDbOperationTimeout(error) ? 503 : 400 }
     );
   }
 }

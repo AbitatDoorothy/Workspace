@@ -1,8 +1,8 @@
-import { randomBytes } from "node:crypto";
-
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+import { randomId } from "../crypto";
 import { prisma } from "../db/client";
+import { retryDbOperation, runDbOperation } from "../db/operation";
 import { hashPassword, verifyPassword } from "./passwords";
 
 interface UserRecord {
@@ -40,6 +40,8 @@ interface AccountDb {
 }
 
 interface AccountServiceOptions {
+  dbOperationRetries?: number;
+  dbOperationTimeoutMs?: number;
   idGenerator?: (prefix: string) => string;
   now?: () => Date;
 }
@@ -56,9 +58,10 @@ interface LoginInput {
 }
 
 export function createAccountService(db: AccountDb, options: AccountServiceOptions = {}) {
-  const idGenerator =
-    options.idGenerator ?? ((prefix: string) => `${prefix}_${randomBytes(8).toString("hex")}`);
+  const idGenerator = options.idGenerator ?? ((prefix: string) => randomId(prefix));
   const now = options.now ?? (() => new Date());
+  const dbOperationRetries = options.dbOperationRetries ?? 2;
+  const dbOperationTimeoutMs = options.dbOperationTimeoutMs ?? 5000;
 
   return {
     async register(input: RegisterInput) {
@@ -67,7 +70,14 @@ export function createAccountService(db: AccountDb, options: AccountServiceOptio
       validateEmail(email);
       validatePassword(input.password);
 
-      const existingUser = await db.user.findUnique({ where: { email } });
+      const existingUser = await retryDbOperation(
+        "account_register_find_user",
+        () => db.user.findUnique({ where: { email } }),
+        {
+          retries: dbOperationRetries,
+          timeoutMs: dbOperationTimeoutMs
+        }
+      );
       if (existingUser) {
         throw new Error("Account already exists");
       }
@@ -85,15 +95,28 @@ export function createAccountService(db: AccountDb, options: AccountServiceOptio
         ownerUserId: user.id
       };
 
-      const createdUser = await db.user.create({ data: user });
-      const createdWorkspace = await db.workspace.create({ data: workspace });
-      await db.workspaceMember.create({
-        data: {
-          workspaceId: createdWorkspace.id,
-          userId: createdUser.id,
-          role: "owner"
-        }
-      });
+      const createdUser = await runDbOperation(
+        "account_register_create_user",
+        () => db.user.create({ data: user }),
+        dbOperationTimeoutMs
+      );
+      const createdWorkspace = await runDbOperation(
+        "account_register_create_workspace",
+        () => db.workspace.create({ data: workspace }),
+        dbOperationTimeoutMs
+      );
+      await runDbOperation(
+        "account_register_create_workspace_member",
+        () =>
+          db.workspaceMember.create({
+            data: {
+              workspaceId: createdWorkspace.id,
+              userId: createdUser.id,
+              role: "owner"
+            }
+          }),
+        dbOperationTimeoutMs
+      );
 
       return {
         user: createdUser,
@@ -103,7 +126,14 @@ export function createAccountService(db: AccountDb, options: AccountServiceOptio
 
     async login(input: LoginInput) {
       const email = normalizeEmail(input.email);
-      const user = await db.user.findUnique({ where: { email } });
+      const user = await retryDbOperation(
+        "account_login_find_user",
+        () => db.user.findUnique({ where: { email } }),
+        {
+          retries: dbOperationRetries,
+          timeoutMs: dbOperationTimeoutMs
+        }
+      );
       if (!user || !(await verifyPassword(input.password, user.passwordHash))) {
         return null;
       }
@@ -111,8 +141,15 @@ export function createAccountService(db: AccountDb, options: AccountServiceOptio
       return user;
     },
 
-    findDefaultWorkspace(userId: string) {
-      return db.workspace.findFirst({ where: { ownerUserId: userId } });
+    async findDefaultWorkspace(userId: string) {
+      return retryDbOperation(
+        "account_find_default_workspace",
+        () => db.workspace.findFirst({ where: { ownerUserId: userId } }),
+        {
+          retries: dbOperationRetries,
+          timeoutMs: dbOperationTimeoutMs
+        }
+      );
     }
   };
 }

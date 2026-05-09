@@ -26,7 +26,11 @@ export async function POST(request: Request) {
       displayName: String(form.get("displayName") ?? "")
     });
     if (cliCode) {
-      await cliDeviceLoginService.completeLogin({ code: cliCode, userId: result.user.id });
+      await cliDeviceLoginService.completeLogin({
+        code: cliCode,
+        userId: result.user.id,
+        workspaceId: result.workspace.id
+      });
     }
     const response = NextResponse.redirect(createBrowserRedirectUrl(request, nextPath), 303);
     response.cookies.set(
@@ -41,7 +45,10 @@ export async function POST(request: Request) {
       }
     );
     return response;
-  } catch {
+  } catch (error) {
+    console.warn("account registration failed", {
+      message: error instanceof Error ? error.message : String(error)
+    });
     registerUrl.searchParams.set("error", "1");
     if (nextPath !== "/") {
       registerUrl.searchParams.set("next", nextPath);

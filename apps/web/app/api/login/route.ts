@@ -20,7 +20,15 @@ export async function POST(request: Request) {
   const nextPath = sanitizeRedirectPath(form.get("next"));
   const cliCode = normalizeCliLoginCode(form.get("cliCode"));
   const loginUrl = createBrowserRedirectUrl(request, "/login");
-  const user = await accountService.login({ email, password });
+  let user: Awaited<ReturnType<typeof accountService.login>> | null;
+  try {
+    user = await accountService.login({ email, password });
+  } catch (error) {
+    console.warn("account login failed", {
+      message: error instanceof Error ? error.message : String(error)
+    });
+    user = null;
+  }
 
   if (!user) {
     loginUrl.searchParams.set("error", "1");
@@ -34,7 +42,17 @@ export async function POST(request: Request) {
   }
 
   if (cliCode) {
-    await cliDeviceLoginService.completeLogin({ code: cliCode, userId: user.id });
+    const workspace = await accountService.findDefaultWorkspace(user.id).catch((error: unknown) => {
+      console.warn("CLI login workspace lookup skipped", {
+        message: error instanceof Error ? error.message : String(error)
+      });
+      return null;
+    });
+    await cliDeviceLoginService.completeLogin({
+      code: cliCode,
+      userId: user.id,
+      workspaceId: workspace?.id
+    });
   }
 
   const response = NextResponse.redirect(createBrowserRedirectUrl(request, nextPath), 303);

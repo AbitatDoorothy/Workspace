@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { cliDeviceLoginService } from "../../../../../server/auth/cli-device-login-service";
+import { cliDeviceLoginErrorStatus } from "../errors";
 
 const requestSchema = z.object({
   deviceLoginId: z.string().min(1)
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to poll CLI login" },
-      { status: 400 }
+      { status: cliDeviceLoginErrorStatus(error) }
     );
   }
 }

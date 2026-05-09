@@ -208,7 +208,7 @@ class CodexSnapshotClient {
         },
         clientInfo: {
           name: "abitat-host-daemon",
-          version: "0.1.1"
+          version: "0.1.3"
         }
       });
       connection.notify("initialized");

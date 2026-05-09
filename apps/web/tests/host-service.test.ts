@@ -212,4 +212,120 @@ describe("host service", () => {
       pairingTokenHash: hashHostToken("host_secret")
     });
   });
+
+  it("issues signed host tokens for CLI-registered hosts", async () => {
+    const db = createHostDb();
+    const service = createHostService(db, {
+      idGenerator: (prefix) => `${prefix}_1`,
+      tokenSecret: "test-secret"
+    });
+
+    const result = await service.registerHost({
+      userId: "user_1",
+      workspaceId: "workspace_1",
+      machineName: "Reece MacBook Pro",
+      platform: "darwin"
+    });
+
+    expect(result.hostToken).toMatch(/^host_v2_/u);
+    await expect(service.verifyHostToken(result.machineId, result.hostToken)).resolves.toBe(true);
+    await expect(service.verifyAnyHostToken(result.hostToken)).resolves.toBe(true);
+  });
+
+  it("authenticates signed host heartbeat without a database token lookup", async () => {
+    const db = createHostDb();
+    const service = createHostService(db, {
+      idGenerator: (prefix) => `${prefix}_1`,
+      tokenSecret: "test-secret"
+    });
+    const result = await service.registerHost({
+      userId: "user_1",
+      workspaceId: "workspace_1",
+      machineName: "Reece MacBook Pro",
+      platform: "darwin"
+    });
+    let findUniqueAttempts = 0;
+    db.machine.findUnique = async () => {
+      findUniqueAttempts += 1;
+      throw new Error("Signed heartbeat should not read before authentication");
+    };
+
+    await expect(
+      service.recordHeartbeat(
+        {
+          machineId: result.machineId,
+          status: "online"
+        },
+        result.hostToken
+      )
+    ).resolves.toMatchObject({ ok: true });
+    expect(findUniqueAttempts).toBe(0);
+  });
+
+  it("retries host registration when a hosted database read stalls", async () => {
+    const db = createHostDb();
+    const findFirst = db.machine.findFirst;
+    let attempts = 0;
+    db.machine.findFirst = async (args) => {
+      attempts += 1;
+      if (attempts === 1) {
+        return new Promise<null>(() => undefined);
+      }
+      return findFirst(args);
+    };
+    const service = createHostService(db, {
+      dbOperationRetries: 1,
+      dbOperationTimeoutMs: 1,
+      idGenerator: (prefix) => `${prefix}_1`,
+      tokenGenerator: () => "host_secret"
+    });
+
+    await expect(
+      service.registerHost({
+        userId: "user_1",
+        workspaceId: "workspace_1",
+        machineName: "Reece MacBook Pro",
+        platform: "darwin"
+      })
+    ).resolves.toMatchObject({
+      machineId: "machine_1",
+      workspaceId: "workspace_1"
+    });
+    expect(attempts).toBe(2);
+  });
+
+  it("retries heartbeat authentication when a hosted database read stalls", async () => {
+    const db = createHostDb();
+    const service = createHostService(db, {
+      dbOperationRetries: 1,
+      dbOperationTimeoutMs: 1,
+      pairingCode: DEMO_PAIRING_CODE
+    });
+    const paired = await service.pairHost({
+      pairingCode: DEMO_PAIRING_CODE,
+      machineName: "Reece MacBook Pro",
+      daemonVersion: "0.1.0"
+    });
+
+    const findUnique = db.machine.findUnique;
+    let attempts = 0;
+    db.machine.findUnique = async (args) => {
+      attempts += 1;
+      if (attempts === 1) {
+        return new Promise<TestMachine | null>(() => undefined);
+      }
+      return findUnique(args);
+    };
+
+    await expect(
+      service.recordHeartbeat(
+        {
+          machineId: paired.machineId,
+          status: "online"
+        },
+        paired.hostToken
+      )
+    ).resolves.toMatchObject({ ok: true });
+    expect(attempts).toBe(2);
+  });
 });

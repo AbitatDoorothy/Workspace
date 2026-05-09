@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 import type { CliSession } from "./auth";
 
 export interface IphoneStartupInput {
@@ -19,7 +21,9 @@ interface RegisterHostInput {
   cliToken: string;
   fetchFn?: FetchFn;
   machineName: string;
+  maxAttempts?: number;
   platform: string;
+  retryDelayMs?: number;
 }
 
 interface PrepareIphoneCommandInput {
@@ -49,6 +53,9 @@ type FetchFn = (
   json(): Promise<unknown>;
 }>;
 
+const DEFAULT_HOST_REGISTER_ATTEMPTS = 4;
+const DEFAULT_HOST_REGISTER_RETRY_DELAY_MS = 1000;
+
 export function createIphoneStartupPlan(input: IphoneStartupInput): StartupProcess[] {
   return [
     {
@@ -72,23 +79,50 @@ export function createIphoneStartupPlan(input: IphoneStartupInput): StartupProce
 
 export async function registerHost(input: RegisterHostInput): Promise<HostRegistration> {
   const fetchFn = input.fetchFn ?? fetch;
-  const response = await fetchFn(`${trimTrailingSlash(input.apiUrl)}/api/hosts/register`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${input.cliToken}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      machineName: input.machineName,
-      platform: input.platform
-    })
-  });
+  let lastError: unknown;
+  const maxAttempts = Math.max(1, input.maxAttempts ?? DEFAULT_HOST_REGISTER_ATTEMPTS);
+  const retryDelayMs = input.retryDelayMs ?? DEFAULT_HOST_REGISTER_RETRY_DELAY_MS;
 
-  if (!response.ok) {
-    throw new Error(`Unable to register host (${response.status})`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetchFn(`${trimTrailingSlash(input.apiUrl)}/api/hosts/register`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${input.cliToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          machineName: input.machineName,
+          platform: input.platform
+        })
+      });
+
+      if (response.ok) {
+        return parseHostRegistration(await response.json());
+      }
+
+      const error = new Error(`Unable to register host (${response.status})`);
+      if (!isTransientHostedStatus(response.status) || attempt >= maxAttempts) {
+        throw error;
+      }
+      lastError = error;
+    } catch (error) {
+      if (!isTransientFetchError(error) || attempt >= maxAttempts) {
+        throw error;
+      }
+      lastError = error;
+    }
+
+    if (retryDelayMs > 0) {
+      await delay(retryDelayMs);
+    }
   }
 
-  const body = (await response.json()) as Partial<HostRegistration>;
+  throw lastError instanceof Error ? lastError : new Error("Unable to register host");
+}
+
+function parseHostRegistration(value: unknown): HostRegistration {
+  const body = value as Partial<HostRegistration>;
   if (
     typeof body.machineId !== "string" ||
     typeof body.workspaceId !== "string" ||
@@ -126,4 +160,12 @@ export async function prepareIphoneCommand(input: PrepareIphoneCommandInput) {
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/u, "");
+}
+
+function isTransientHostedStatus(status: number) {
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+function isTransientFetchError(error: unknown) {
+  return error instanceof TypeError;
 }

@@ -1,3 +1,6 @@
+import { hmac } from "@noble/hashes/hmac";
+import { sha256 } from "@noble/hashes/sha2";
+
 export const SESSION_COOKIE_NAME = "abitat_session";
 export const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -125,15 +128,9 @@ export async function verifySessionToken(
 }
 
 async function sign(payload: string, secret: string) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
-  return base64UrlBytes(new Uint8Array(signature));
+  const encoder = new TextEncoder();
+  const signature = hmac(sha256, encoder.encode(secret), encoder.encode(payload));
+  return base64UrlBytes(signature);
 }
 
 function base64UrlString(input: string) {

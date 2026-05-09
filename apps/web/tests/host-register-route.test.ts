@@ -62,4 +62,28 @@ describe("host registration route", () => {
       platform: "darwin"
     });
   });
+
+  it("marks hosted host registration database timeouts as transient", async () => {
+    registerHost.mockRejectedValueOnce(
+      Object.assign(new Error("host_register_find_existing timed out after 5000ms"), {
+        name: "DbOperationTimeoutError"
+      })
+    );
+    const { POST } = await import("../app/api/hosts/register/route");
+
+    const response = await POST(
+      new Request("https://workspace.abitat.io/api/hosts/register", {
+        body: JSON.stringify({
+          machineName: "Reece MacBook Pro",
+          platform: "darwin"
+        }),
+        headers: {
+          authorization: "Bearer cli_secret"
+        },
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(503);
+  });
 });

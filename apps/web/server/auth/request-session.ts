@@ -1,8 +1,8 @@
-import { randomBytes } from "node:crypto";
-
 import { cookies } from "next/headers";
 
+import { randomId } from "../crypto";
 import { prisma } from "../db/client";
+import { retryDbOperation, runDbOperation } from "../db/operation";
 import { SESSION_COOKIE_NAME, getSessionSecret, verifySessionToken } from "./session";
 
 export interface AccountContext {
@@ -38,68 +38,92 @@ export async function getRequestSessionUserId(request: Request) {
 }
 
 export async function getAccountContextForUserId(userId: string): Promise<AccountContext> {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) {
-    throw new Error("Authentication required");
-  }
-
-  let workspace = await prisma.workspace.findFirst({
-    where: { ownerUserId: userId },
-    orderBy: { createdAt: "asc" }
-  });
+  let workspace = await retryDbOperation(
+    "account_context_find_workspace",
+    () =>
+      prisma.workspace.findFirst({
+        where: { ownerUserId: userId },
+        orderBy: { createdAt: "asc" }
+      }),
+    {
+      retries: 2,
+      timeoutMs: 5000
+    }
+  );
 
   if (!workspace) {
-    workspace = await prisma.workspace.create({
-      data: {
-        id: randomId("workspace"),
-        name: `${user.displayName} Workspace`,
-        ownerUserId: userId
-      }
-    });
-    await prisma.workspaceMember.create({
-      data: {
-        workspaceId: workspace.id,
-        userId,
-        role: "owner"
-      }
-    });
+    const createdWorkspace = await runDbOperation(
+      "account_context_create_workspace",
+      () =>
+        prisma.workspace.create({
+          data: {
+            id: randomId("workspace"),
+            name: "Abitat Workspace",
+            ownerUserId: userId
+          }
+        }),
+      5000
+    );
+    workspace = createdWorkspace;
+    await runDbOperation(
+      "account_context_create_workspace_member",
+      () =>
+        prisma.workspaceMember.create({
+          data: {
+            workspaceId: createdWorkspace.id,
+            userId,
+            role: "owner"
+          }
+        }),
+      5000
+    );
   }
+  const workspaceId = workspace.id;
 
-  let host = await prisma.machine.findFirst({
-    where: {
-      workspaceId: workspace.id,
-      ownerUserId: userId,
-      type: "host"
-    },
-    orderBy: { createdAt: "asc" }
-  });
+  let host = await retryDbOperation(
+    "account_context_find_host",
+    () =>
+      prisma.machine.findFirst({
+        where: {
+          workspaceId,
+          ownerUserId: userId,
+          type: "host"
+        },
+        orderBy: { createdAt: "asc" }
+      }),
+    {
+      retries: 2,
+      timeoutMs: 5000
+    }
+  );
 
   if (!host) {
-    host = await prisma.machine.create({
-      data: {
-        id: randomId("machine"),
-        workspaceId: workspace.id,
-        ownerUserId: userId,
-        name: "Mac Host",
-        type: "host",
-        status: "pending",
-        platform: "darwin",
-        deviceKind: "host",
-        capabilitiesJson: ["codex", "claude", "screen_capture", "input_control"],
-        installedToolsJson: []
-      }
-    });
+    host = await runDbOperation(
+      "account_context_create_host",
+      () =>
+        prisma.machine.create({
+          data: {
+            id: randomId("machine"),
+            workspaceId,
+            ownerUserId: userId,
+            name: "Mac Host",
+            type: "host",
+            status: "pending",
+            platform: "darwin",
+            deviceKind: "host",
+            capabilitiesJson: ["codex", "claude", "screen_capture", "input_control"],
+            installedToolsJson: []
+          }
+        }),
+      5000
+    );
   }
 
   return {
     userId,
-    workspaceId: workspace.id,
+    workspaceId,
     hostMachineId: host.id
   };
-}
-
-function randomId(prefix: string) {
-  return `${prefix}_${randomBytes(8).toString("hex")}`;
 }
 
 function readCookie(cookieHeader: string | null, name: string) {

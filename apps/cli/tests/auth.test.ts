@@ -160,4 +160,58 @@ describe("CLI auth storage", () => {
     expect(pollAttempts).toBe(3);
     await rm(homeDir, { force: true, recursive: true });
   });
+
+  it("retries login start through temporary hosted API failures before opening the browser", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "abitat-cli-login-start-retry-"));
+    const configPath = sessionConfigPath(homeDir);
+    const openedUrls: string[] = [];
+    let startAttempts = 0;
+
+    const fetchFn = async (url: string) => {
+      if (url.endsWith("/api/cli/device-login/start")) {
+        startAttempts += 1;
+        if (startAttempts === 1) {
+          return Response.json({ error: "Database timeout" }, { status: 503 });
+        }
+        if (startAttempts === 2) {
+          throw new TypeError("fetch failed");
+        }
+
+        return Response.json(
+          {
+            code: "ABITAT-LOGIN",
+            deviceLoginId: "cli_login_1",
+            expiresAt: "2026-05-07T12:10:00.000Z",
+            verificationPath: "/login?cliCode=ABITAT-LOGIN"
+          },
+          { status: 201 }
+        );
+      }
+
+      return Response.json({
+        status: "approved",
+        userId: "user_1",
+        cliToken: "cli_secret"
+      });
+    };
+
+    await expect(
+      runLoginCommand({
+        apiUrl: "https://workspace.abitat.io",
+        configPath,
+        fetchFn,
+        openUrl: (url) => openedUrls.push(url),
+        pollIntervalMs: 0,
+        startRetryDelayMs: 0
+      })
+    ).resolves.toEqual({
+      apiUrl: "https://workspace.abitat.io",
+      cliToken: "cli_secret",
+      userId: "user_1"
+    });
+
+    expect(startAttempts).toBe(3);
+    expect(openedUrls).toEqual(["https://workspace.abitat.io/login?cliCode=ABITAT-LOGIN"]);
+    await rm(homeDir, { force: true, recursive: true });
+  });
 });

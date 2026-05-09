@@ -16,7 +16,7 @@ import { HostApiClient } from "../transport/api-client.js";
 import { createToolScanner } from "../tools/scanner.js";
 import { runConversationRuntime } from "./conversation-runtime.js";
 import { resolveDaemonConnection } from "./daemon-connection.js";
-import { runHeartbeatWithRecovery } from "./heartbeat-loop.js";
+import { createSerialHeartbeatLoop, runHeartbeatWithRecovery } from "./heartbeat-loop.js";
 import { createRetryableTask } from "./retryable-task.js";
 import { parseStartOptions } from "./start-options.js";
 
@@ -157,15 +157,11 @@ async function startDaemon(args: string[]) {
   };
 
   await runHeartbeatWithRecovery(beat);
-  const heartbeat = setInterval(
-    () => {
-      void runHeartbeatWithRecovery(beat);
-    },
-    Math.max(pollIntervalMs, 1000)
-  );
+  const heartbeat = createSerialHeartbeatLoop(beat, Math.max(pollIntervalMs, 1000));
+  heartbeat.start();
 
   process.on("SIGINT", () => {
-    clearInterval(heartbeat);
+    heartbeat.stop();
     remoteControlManager?.stopAll();
     void stopDaemon(client, connection);
   });
