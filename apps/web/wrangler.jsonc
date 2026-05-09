@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "abitat-workspace-edge",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-05-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "migrations": [
+    {
+      "tag": "2026-05-08-delete-legacy-tunnel-session",
+      "deleted_classes": ["TunnelSession"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    {
+      "pattern": "workspace.abitat.io/*",
+      "zone_name": "abitat.io"
+    }
+  ],
+  "vars": {
+    "ABITAT_PUBLIC_URL": "https://workspace.abitat.io",
+    "NEXTAUTH_URL": "https://workspace.abitat.io"
+  }
+}

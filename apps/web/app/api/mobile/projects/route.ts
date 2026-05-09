@@ -1,18 +1,27 @@
 import { NextResponse } from "next/server";
 
 import { codexAppService } from "../../../../server/codex-app";
+import { hostCodexSnapshotService } from "../../../../server/hosts";
 import { mobileService } from "../../../../server/mobile";
+import { canUseLocalCodexApp } from "../../../../server/mobile/codex-host-access";
 import { mobileActivityLog } from "../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../server/mobile/request-auth";
 
 export async function GET(request: Request) {
   try {
     const actor = await requireMobileActor(request);
+    const useLocalCodexApp = await canUseLocalCodexApp(actor);
     const [localProjects, codexProjects] = await Promise.allSettled([
       mobileService.listProjects(actor),
-      codexAppService.listProjects()
+      useLocalCodexApp
+        ? codexAppService.listProjects()
+        : hostCodexSnapshotService.listProjects({
+            hostMachineId: actor.hostMachineId,
+            workspaceId: actor.workspaceId
+          })
     ]);
     mobileActivityLog.record("mobile_projects_listed", {
+      codexAccess: useLocalCodexApp ? "local_host" : "denied_cross_host",
       codexProjectCount: codexProjects.status === "fulfilled" ? codexProjects.value.length : 0,
       codexProjectError:
         codexProjects.status === "rejected" ? errorMessage(codexProjects.reason) : null,

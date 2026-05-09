@@ -1,12 +1,19 @@
 import { NextResponse } from "next/server";
 
 import { codexAppService } from "../../../../../server/codex-app";
+import { hostCodexSnapshotService } from "../../../../../server/hosts";
+import { canUseLocalCodexApp } from "../../../../../server/mobile/codex-host-access";
 import { requireMobileActor } from "../../../../../server/mobile/request-auth";
 
 export async function GET(request: Request) {
   try {
-    await requireMobileActor(request);
-    const completions = await codexAppService.listCompletionStates();
+    const actor = await requireMobileActor(request);
+    const completions = (await canUseLocalCodexApp(actor))
+      ? await codexAppService.listCompletionStates()
+      : await hostCodexSnapshotService.listCompletionStates({
+          hostMachineId: actor.hostMachineId,
+          workspaceId: actor.workspaceId
+        });
 
     return NextResponse.json({ completions });
   } catch (error) {

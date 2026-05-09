@@ -3,12 +3,18 @@ import tseslint from "typescript-eslint";
 
 export default [
   {
-    ignores: ["**/.next/**", "**/dist/**", "**/node_modules/**", "pnpm-lock.yaml"]
+    ignores: [
+      "**/.next/**",
+      "**/.open-next/**",
+      "**/dist/**",
+      "**/node_modules/**",
+      "pnpm-lock.yaml"
+    ]
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["**/*.ts", "**/*.tsx"],
+    files: ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.tsx"],
     languageOptions: {
       globals: {
         React: "readonly",

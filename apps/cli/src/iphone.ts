@@ -63,7 +63,8 @@ export function createIphoneStartupPlan(input: IphoneStartupInput): StartupProce
       env: {
         ABITAT_API_URL: input.apiUrl,
         ABITAT_HOST_TOKEN: input.hostToken,
-        ABITAT_MACHINE_ID: input.machineId
+        ABITAT_MACHINE_ID: input.machineId,
+        CODEX_APP_SERVER_URL: input.codexServerUrl
       }
     }
   ];

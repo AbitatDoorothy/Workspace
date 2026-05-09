@@ -13,6 +13,8 @@ import {
   isCodexConversationBusyError,
   isCodexProjectId
 } from "../../../../../../server/codex-app";
+import { hostCodexSnapshotService } from "../../../../../../server/hosts";
+import { canUseLocalCodexApp } from "../../../../../../server/mobile/codex-host-access";
 import { mobileActivityLog } from "../../../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../../../server/mobile/request-auth";
 import { runEventService } from "../../../../../../server/run-events";
@@ -63,6 +65,22 @@ export async function GET(request: Request, context: { params: Promise<{ project
     };
 
     if (isCodexProjectId(projectId)) {
+      if (!(await canUseLocalCodexApp(actor))) {
+        const conversations = await hostCodexSnapshotService.listProjectConversations({
+          hostMachineId: actor.hostMachineId,
+          projectId,
+          workspaceId: actor.workspaceId
+        });
+        mobileActivityLog.record("mobile_codex_conversations_access_denied", {
+          conversationCount: conversations.length,
+          projectId,
+          reason: conversations.length > 0 ? "using_host_snapshot" : "cross_host",
+          ...actorDetails
+        });
+
+        return mobileJson({ conversations });
+      }
+
       const conversations = await codexAppService.listProjectConversations(projectId);
       mobileActivityLog.record("mobile_conversations_listed", {
         conversationCount: conversations.length,
@@ -128,6 +146,15 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     }
 
     if (isCodexProjectId(projectId)) {
+      if (!(await canUseLocalCodexApp(actor))) {
+        mobileActivityLog.record("mobile_codex_conversation_start_denied", {
+          projectId,
+          reason: "cross_host",
+          ...actorDetails
+        });
+        return mobileJson({ error: "Project not found" }, { status: 404 });
+      }
+
       const conversation = await codexAppService.startConversation(projectId, {
         attachments: input.attachments,
         modelSettings:

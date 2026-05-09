@@ -51,6 +51,7 @@ export function createLauncherEnv({ baseEnv, lanAddress }) {
 
   return {
     ...baseEnv,
+    ABITAT_ENABLE_LOCAL_CODEX_APP: baseEnv.ABITAT_ENABLE_LOCAL_CODEX_APP ?? "1",
     ABITAT_MACHINE_ID: nonEmptyValue(baseEnv.ABITAT_MACHINE_ID) ?? DEFAULT_MACHINE_ID,
     ABITAT_PUBLIC_URL: publicUrl,
     CODEX_APP_SERVER_URL: codexServerUrl,

@@ -15,8 +15,9 @@ for (const path of [
   config({ path, quiet: true, override: false });
 }
 
-const databaseUrl =
+const pooledDatabaseUrl =
   process.env["DATABASE_URL"] ?? "postgresql://reece@localhost:5432/abitat_workspace";
+const migrationDatabaseUrl = process.env["DIRECT_URL"] ?? pooledDatabaseUrl;
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
@@ -25,7 +26,7 @@ export default defineConfig({
     seed: "tsx prisma/seed.ts"
   },
   datasource: {
-    url: databaseUrl,
+    url: migrationDatabaseUrl,
     shadowDatabaseUrl: process.env["SHADOW_DATABASE_URL"]
   }
 });

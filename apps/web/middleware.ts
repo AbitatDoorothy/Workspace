@@ -13,6 +13,7 @@ const PUBLIC_PATHS = new Set([
   "/register",
   "/api/register",
   "/api/logout",
+  "/api/health",
   "/api/cli/device-login/start",
   "/api/cli/device-login/poll",
   "/api/mobile/pairing/complete"
@@ -22,10 +23,11 @@ const HOST_API_PATHS = new Set([
   "/api/hosts/pair",
   "/api/hosts/heartbeat",
   "/api/hosts/tools",
+  "/api/hosts/codex/snapshot",
   "/api/daemon/jobs/poll"
 ]);
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (isPublicRequest(request)) {

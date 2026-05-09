@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { access } from "node:fs/promises";
 import { runtimeSchema, type DaemonJob } from "@abitat_reece/shared";
 
+import { collectCodexAppSnapshot } from "../codex-app/snapshot.js";
 import { defaultConfigPath, loadHostConfig, saveHostConfig } from "../config/host-config.js";
 import { collectChangeset } from "../git/changeset.js";
 import { branchNameForConversation, resolveRepoPath } from "../git/paths.js";
@@ -67,6 +68,7 @@ async function startDaemon(args: string[]) {
   const runtime = runtimeSchema.parse(options.mock || args.length === 0 ? "mock" : "codex");
   const workspaceRoot = process.env.ABITAT_WORKSPACE_ROOT ?? `${homedir()}/AbitatWorkspace`;
   const pollIntervalMs = Number(process.env.ABITAT_DAEMON_POLL_INTERVAL_MS ?? 2000);
+  const codexSnapshotIntervalMs = Number(process.env.ABITAT_CODEX_SNAPSHOT_INTERVAL_MS ?? 5000);
   const configPath = process.env.ABITAT_CONFIG_PATH ?? defaultConfigPath();
   const config = await readConfigIfAvailable(configPath);
   let connection = resolveDaemonConnection({ config, env: process.env });
@@ -109,6 +111,9 @@ async function startDaemon(args: string[]) {
   const toolScanUpload = createRetryableTask(async () => {
     await uploadToolScan(client, connection.machineId);
   });
+  const codexSnapshotUpload = createIntervalTask(codexSnapshotIntervalMs, async () => {
+    await uploadCodexSnapshot(client, connection.machineId);
+  });
   const remoteControlManager =
     process.env.ABITAT_ENABLE_REMOTE_CONTROL === "1"
       ? createRemoteControlManager(client, {
@@ -124,6 +129,7 @@ async function startDaemon(args: string[]) {
 
     if (connection.paired) {
       await toolScanUpload.run();
+      await codexSnapshotUpload.run();
     }
 
     if (connection.paired) {
@@ -196,6 +202,44 @@ async function uploadToolScan(client: HostApiClient, machineId: string) {
   const tools = await createToolScanner().scan();
   await client.uploadTools(machineId, tools);
   console.log(`tools=${tools.filter((tool) => tool.installed).length}/${tools.length}`);
+}
+
+async function uploadCodexSnapshot(client: HostApiClient, machineId: string) {
+  const snapshot = await collectCodexAppSnapshot();
+  await client.uploadCodexSnapshot(machineId, snapshot);
+  console.log(
+    `codexSnapshot=${snapshot.projects.length}/${snapshot.conversations.length}/${Object.keys(snapshot.messages).length}`
+  );
+}
+
+function createIntervalTask(intervalMs: number, task: () => Promise<void>) {
+  let lastStartedAt = 0;
+  let inFlight: Promise<void> | null = null;
+
+  return {
+    async run() {
+      if (inFlight) {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastStartedAt < intervalMs) {
+        return;
+      }
+
+      lastStartedAt = now;
+      inFlight = task()
+        .catch((error: unknown) => {
+          console.error(
+            `codex snapshot upload failed: ${error instanceof Error ? error.message : String(error)}`
+          );
+        })
+        .finally(() => {
+          inFlight = null;
+        });
+      await inFlight;
+    }
+  };
 }
 
 async function pollDaemonJob(

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Abitat",
+    "name": "Remote Abitat",
     "slug": "abitat-ios",
     "scheme": "abitat",
     "version": "0.1.0",
@@ -12,7 +12,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Abitat scans the pairing QR code shown on your Mac.",
         "UIBackgroundModes": ["fetch", "remote-notification"]
-      }
+      },
+      "buildNumber": "2"
     },
     "plugins": [
       "expo-secure-store",

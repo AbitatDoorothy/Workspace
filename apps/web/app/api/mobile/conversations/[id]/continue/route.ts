@@ -9,6 +9,7 @@ import {
   isCodexConversationBusyError,
   isCodexConversationId
 } from "../../../../../../server/codex-app";
+import { canUseLocalCodexApp } from "../../../../../../server/mobile/codex-host-access";
 import { mobileActivityLog } from "../../../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../../../server/mobile/request-auth";
 import { runEventService } from "../../../../../../server/run-events";
@@ -85,6 +86,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     if (isCodexConversationId(id)) {
+      if (!(await canUseLocalCodexApp(actor))) {
+        mobileActivityLog.record("mobile_codex_conversation_continue_denied", {
+          conversationId: id,
+          reason: "cross_host",
+          ...actorDetails,
+          ...requestDetails
+        });
+        return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+      }
+
       mobileActivityLog.record("mobile_codex_conversation_continue_requested", {
         attachmentCount: input.attachments.length,
         clientMessageId: input.clientMessageId ?? "unknown",

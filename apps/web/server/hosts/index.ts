@@ -1,9 +1,11 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { prisma } from "../db/client";
+import { createHostCodexSnapshotService } from "./codex-snapshot-service";
 import { createHostService, type HostDb } from "./host-service";
 
 export const hostService = createHostService(createPrismaHostDb(prisma));
+export const hostCodexSnapshotService = createHostCodexSnapshotService(createPrismaHostDb(prisma));
 
 function createPrismaHostDb(db: PrismaClient): HostDb {
   return {

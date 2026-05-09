@@ -9,6 +9,7 @@ import type {
   RunEventIngestRequest,
   ToolScanUploadRequest
 } from "@abitat_reece/shared";
+import type { CodexHostSnapshot } from "../codex-app/snapshot.js";
 
 interface RemoteControlSessionSummary {
   id: string;
@@ -47,6 +48,10 @@ export class HostApiClient {
   uploadTools(machineId: string, tools: HostTool[]) {
     const input: ToolScanUploadRequest = { machineId, tools };
     return this.post<{ ok: true }>("/api/hosts/tools", input);
+  }
+
+  uploadCodexSnapshot(machineId: string, snapshot: CodexHostSnapshot) {
+    return this.post<{ ok: true }>("/api/hosts/codex/snapshot", { machineId, snapshot });
   }
 
   pollJob(machineId: string, activeConversationIds?: string | string[]) {

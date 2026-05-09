@@ -364,6 +364,16 @@ const appScreen = await readFile(join(process.cwd(), "src/App.tsx"), "utf8");
 if (!appScreen.includes("useThreadCompletionNotifications")) {
   throw new Error("Expected App to start the thread completion notification watcher");
 }
+for (const expected of [
+  "openConversationFromNotification",
+  "api.listProjects()",
+  "api.listConversations(target.projectId)",
+  'setRoute("conversation")'
+]) {
+  if (!appScreen.includes(expected)) {
+    throw new Error(`Expected App to open Codex threads from notification taps: ${expected}`);
+  }
+}
 if (!appScreen.includes("modelSettings={store.modelSettings}")) {
   throw new Error("Expected App to pass persisted Codex model settings to mobile chat screens");
 }
@@ -424,7 +434,12 @@ for (const expected of [
   "allowSound",
   "CODEX_COMPLETION_NOTIFICATION_SOUNDS",
   "randomCodexCompletionSound",
-  "mirrorForegroundCodexCompletionNotification"
+  "mirrorForegroundCodexCompletionNotification",
+  "CodexCompletionNotificationTarget",
+  "parseCodexCompletionNotificationTarget",
+  "Notifications.addNotificationResponseReceivedListener",
+  "Notifications.getLastNotificationResponse",
+  "Notifications.clearLastNotificationResponse"
 ]) {
   if (!notificationWatcher.includes(expected)) {
     throw new Error(`Expected notification watcher to include ${expected}`);

@@ -4,24 +4,29 @@
   "version": "0.1.0",
   "scripts": {
     "build": "next build",
+    "build:cloudflare": "next build && node scripts/prepare-cloudflare-standalone.mjs && opennextjs-cloudflare build --skipNextBuild",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:migrate": "prisma migrate deploy --schema prisma/schema.prisma",
     "db:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
     "db:seed": "prisma db seed --schema prisma/schema.prisma",
     "db:validate": "prisma validate --schema prisma/schema.prisma",
+    "deploy:cloudflare": "pnpm build:cloudflare && opennextjs-cloudflare deploy",
     "predev": "pnpm --filter @abitat_reece/shared build",
     "dev": "tsx server.ts",
     "lint": "eslint .",
+    "preview:cloudflare": "pnpm build:cloudflare && opennextjs-cloudflare preview",
     "pretest": "pnpm --filter @abitat_reece/shared build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@abitat_reece/shared": "workspace:*",
+    "@opennextjs/cloudflare": "^1.19.8",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@xterm/xterm": "^6.0.0",
-    "next": "16.2.4",
+    "next": "16.2.6",
+    "pg-cloudflare": "1.3.0",
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "ws": "^8.20.0",
@@ -33,6 +38,7 @@
     "@types/ws": "^8.18.1",
     "dotenv": "^17.4.2",
     "prisma": "^7.8.0",
-    "tsx": "4.21.0"
+    "tsx": "4.21.0",
+    "wrangler": "^4.90.0"
   }
 }

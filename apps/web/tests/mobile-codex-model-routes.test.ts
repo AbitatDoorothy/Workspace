@@ -52,6 +52,12 @@ vi.mock("../server/mobile/request-auth", () => ({
   requireMobileActor
 }));
 
+vi.mock("../server/hosts", () => ({
+  hostCodexSnapshotService: {
+    listModelOptions: vi.fn(async () => [])
+  }
+}));
+
 vi.mock("../server/mobile/mobile-activity-log", () => ({
   mobileActivityLog: {
     record: vi.fn()
@@ -84,6 +90,8 @@ describe("mobile Codex model routes", () => {
     listModelOptions.mockClear();
     requireMobileActor.mockClear();
     startConversation.mockClear();
+    vi.stubEnv("ABITAT_ENABLE_LOCAL_CODEX_APP", "1");
+    vi.stubEnv("ABITAT_MACHINE_ID", "machine_host");
   });
 
   it("lists Codex model options for the iPhone app", async () => {

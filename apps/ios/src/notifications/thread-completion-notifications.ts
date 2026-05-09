@@ -15,6 +15,20 @@ export const CODEX_COMPLETION_NOTIFICATION_SOUNDS = [
 
 let notificationPermissionPromise: Promise<boolean> | null = null;
 
+export interface CodexCompletionNotificationTarget {
+  conversationId: string;
+  projectId: string;
+  projectName?: string;
+  prompt?: string;
+  status?: string;
+  turnId?: string;
+  workspaceId?: string;
+}
+
+type OpenConversationFromNotification = (
+  target: CodexCompletionNotificationTarget
+) => Promise<void> | void;
+
 Notifications.setNotificationHandler({
   handleNotification: async (notification) =>
     shouldMirrorForegroundNotification(notification)
@@ -26,11 +40,21 @@ export function rememberRunningConversation(_conversationId: string) {
   // Server-side Expo push is the single user-visible completion notification source.
 }
 
-export function useThreadCompletionNotifications(api: ApiClient, isEnabled: boolean) {
+export function useThreadCompletionNotifications(
+  api: ApiClient,
+  isEnabled: boolean,
+  onOpenConversation?: OpenConversationFromNotification
+) {
   const registeredTokenRef = useRef<string | null>(null);
   const isRegisteringPushRef = useRef(false);
   const lastPushRegistrationAttemptAtRef = useRef(0);
   const lastPushRegistrationWarningRef = useRef<string | null>(null);
+  const lastHandledNotificationResponseKeyRef = useRef<string | null>(null);
+  const onOpenConversationRef = useRef(onOpenConversation);
+
+  useEffect(() => {
+    onOpenConversationRef.current = onOpenConversation;
+  }, [onOpenConversation]);
 
   useEffect(() => {
     if (!isEnabled) {
@@ -150,6 +174,59 @@ export function useThreadCompletionNotifications(api: ApiClient, isEnabled: bool
       subscription.remove();
     };
   }, [isEnabled]);
+
+  useEffect(() => {
+    if (!isEnabled) {
+      lastHandledNotificationResponseKeyRef.current = null;
+      return;
+    }
+
+    function openFromNotificationResponse(response: Notifications.NotificationResponse) {
+      if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) {
+        return;
+      }
+
+      const target = parseCodexCompletionNotificationTarget(
+        response.notification.request.content.data
+      );
+      if (!target) {
+        return;
+      }
+
+      const key = notificationResponseKey(response, target);
+      if (lastHandledNotificationResponseKeyRef.current === key) {
+        return;
+      }
+
+      lastHandledNotificationResponseKeyRef.current = key;
+      clearLastNotificationResponse();
+
+      Promise.resolve(onOpenConversationRef.current?.(target)).catch((error) => {
+        console.warn(
+          `[notifications] Unable to open Codex completion notification: ${errorMessage(error)}`
+        );
+      });
+    }
+
+    const subscription = Notifications.addNotificationResponseReceivedListener(
+      openFromNotificationResponse
+    );
+
+    try {
+      const lastResponse = Notifications.getLastNotificationResponse();
+      if (lastResponse) {
+        openFromNotificationResponse(lastResponse);
+      }
+    } catch (error) {
+      console.warn(
+        `[notifications] Unable to read last notification response: ${errorMessage(error)}`
+      );
+    }
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isEnabled]);
 }
 
 async function mirrorForegroundCodexCompletionNotification(
@@ -195,6 +272,30 @@ function notificationSoundFromData(data: Notifications.NotificationContent["data
     : randomCodexCompletionSound();
 }
 
+export function parseCodexCompletionNotificationTarget(
+  data: Notifications.NotificationContent["data"]
+): CodexCompletionNotificationTarget | null {
+  if (data?.source !== "codex_app") {
+    return null;
+  }
+
+  const conversationId = requiredString(data.conversationId);
+  const projectId = requiredString(data.projectId);
+  if (!conversationId || !projectId) {
+    return null;
+  }
+
+  return {
+    conversationId,
+    projectId,
+    projectName: optionalString(data.projectName),
+    prompt: optionalString(data.prompt),
+    status: optionalString(data.status),
+    turnId: optionalString(data.turnId),
+    workspaceId: optionalString(data.workspaceId)
+  };
+}
+
 function isCodexCompletionSound(sound: string) {
   return CODEX_COMPLETION_NOTIFICATION_SOUNDS.some((candidate) => candidate === sound);
 }
@@ -229,6 +330,23 @@ function silentNotificationBehavior(): Notifications.NotificationBehavior {
     shouldShowBanner: false,
     shouldShowList: false
   };
+}
+
+function notificationResponseKey(
+  response: Notifications.NotificationResponse,
+  target: CodexCompletionNotificationTarget
+) {
+  return `${response.notification.request.identifier}:${target.conversationId}:${
+    target.turnId ?? ""
+  }`;
+}
+
+function clearLastNotificationResponse() {
+  try {
+    Notifications.clearLastNotificationResponse();
+  } catch {
+    // Older/dev notification runtimes can omit this native method.
+  }
 }
 
 function pushTokenOptions() {
@@ -309,6 +427,14 @@ function withPushRegistrationTimeout<T>(promise: Promise<T>, timeoutMs: number) 
     }),
     timeoutPromise
   ]);
+}
+
+function requiredString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function optionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function errorMessage(error: unknown) {

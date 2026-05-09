@@ -2,6 +2,8 @@
 .env
 .env.local
 .next
+apps/web/.open-next
+apps/web/.wrangler
 apps/web/.data
 apps/ios/.expo
 apps/mac-remote-helper/.build

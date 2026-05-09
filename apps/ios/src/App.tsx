@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import type { ComponentProps } from "react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 
 import { PairingScreen } from "./screens/PairingScreen";
@@ -9,7 +9,10 @@ import { ProjectsScreen } from "./screens/ProjectsScreen";
 import { ProjectDetailScreen } from "./screens/ProjectDetailScreen";
 import { ConversationScreen } from "./screens/ConversationScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
-import { useThreadCompletionNotifications } from "./notifications/thread-completion-notifications";
+import {
+  type CodexCompletionNotificationTarget,
+  useThreadCompletionNotifications
+} from "./notifications/thread-completion-notifications";
 import { useMobileStore } from "./state/mobile-store";
 import { colors } from "./theme";
 import type { ConversationSummary, ProjectSummary, RouteName } from "./types";
@@ -49,7 +52,47 @@ export default function App() {
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
   const shouldShowBottomNav = route !== "conversation";
-  useThreadCompletionNotifications(store.api, store.isPaired);
+  const openConversationFromNotification = useCallback(
+    async (target: CodexCompletionNotificationTarget) => {
+      const api = store.api;
+      let projects: ProjectSummary[] = [];
+
+      try {
+        projects = await api.listProjects();
+      } catch (caught) {
+        console.warn(
+          `[notifications] Unable to load projects before opening ${target.conversationId}: ${errorMessage(
+            caught
+          )}`
+        );
+      }
+
+      const nextProject =
+        projects.find((candidate) => candidate.id === target.projectId) ??
+        fallbackProjectFromNotification(target, store.pairing?.workspaceId ?? "");
+
+      let conversations: ConversationSummary[] = [];
+      try {
+        conversations = await api.listConversations(target.projectId);
+      } catch (caught) {
+        console.warn(
+          `[notifications] Unable to load conversations before opening ${
+            target.conversationId
+          }: ${errorMessage(caught)}`
+        );
+      }
+
+      const nextConversation =
+        conversations.find((candidate) => candidate.id === target.conversationId) ??
+        fallbackConversationFromNotification(target, nextProject);
+
+      setProject(nextProject);
+      setConversation(nextConversation);
+      setRoute("conversation");
+    },
+    [store.api, store.pairing?.workspaceId]
+  );
+  useThreadCompletionNotifications(store.api, store.isPaired, openConversationFromNotification);
 
   if (store.isRestoring) {
     return (
@@ -184,3 +227,38 @@ const styles = StyleSheet.create({
     opacity: 0.72
   }
 });
+
+function fallbackProjectFromNotification(
+  target: CodexCompletionNotificationTarget,
+  workspaceId: string
+): ProjectSummary {
+  return {
+    id: target.projectId,
+    name: target.projectName ?? "Codex Project",
+    repoSyncStatus: "unknown",
+    repoUrl: "",
+    source: "codex_app",
+    workspaceId: target.workspaceId ?? workspaceId
+  };
+}
+
+function fallbackConversationFromNotification(
+  target: CodexCompletionNotificationTarget,
+  project: ProjectSummary
+): ConversationSummary {
+  return {
+    id: target.conversationId,
+    mobileOpenState: "ready",
+    projectId: target.projectId,
+    prompt: target.prompt ?? "Codex thread",
+    source: "codex_app",
+    status: target.status ?? "approved",
+    type: "codex_app",
+    workspaceId: target.workspaceId ?? project.workspaceId,
+    worktreePath: project.hostLocalPath ?? null
+  };
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}

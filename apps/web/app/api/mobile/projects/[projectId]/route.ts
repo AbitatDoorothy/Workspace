@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 
 import { codexAppService, isCodexProjectId } from "../../../../../server/codex-app";
+import { hostCodexSnapshotService } from "../../../../../server/hosts";
 import { mobileService } from "../../../../../server/mobile";
+import { canUseLocalCodexApp } from "../../../../../server/mobile/codex-host-access";
 import { requireMobileActor } from "../../../../../server/mobile/request-auth";
 
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
@@ -9,6 +11,20 @@ export async function GET(request: Request, context: { params: Promise<{ project
     const [{ projectId }, actor] = await Promise.all([context.params, requireMobileActor(request)]);
 
     if (isCodexProjectId(projectId)) {
+      if (!(await canUseLocalCodexApp(actor))) {
+        const project = await hostCodexSnapshotService.getProject({
+          hostMachineId: actor.hostMachineId,
+          projectId,
+          workspaceId: actor.workspaceId
+        });
+
+        if (!project) {
+          return NextResponse.json({ error: "Project not found" }, { status: 404 });
+        }
+
+        return NextResponse.json({ project });
+      }
+
       const project = await codexAppService.getProject(projectId);
 
       if (!project) {

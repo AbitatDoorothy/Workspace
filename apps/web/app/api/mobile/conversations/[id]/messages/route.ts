@@ -9,6 +9,8 @@ import {
   isCodexConversationBusyError,
   isCodexConversationId
 } from "../../../../../../server/codex-app";
+import { hostCodexSnapshotService } from "../../../../../../server/hosts";
+import { canUseLocalCodexApp } from "../../../../../../server/mobile/codex-host-access";
 import { mobileActivityLog } from "../../../../../../server/mobile/mobile-activity-log";
 import { requireMobileActor } from "../../../../../../server/mobile/request-auth";
 import { runEventService } from "../../../../../../server/run-events";
@@ -42,6 +44,42 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     };
 
     if (isCodexConversationId(id)) {
+      if (!(await canUseLocalCodexApp(actor))) {
+        const conversation = await hostCodexSnapshotService.getConversation({
+          conversationId: id,
+          hostMachineId: actor.hostMachineId,
+          workspaceId: actor.workspaceId
+        });
+
+        if (!conversation) {
+          mobileActivityLog.record("mobile_codex_messages_access_denied", {
+            conversationId,
+            reason: "cross_host",
+            ...actorDetails,
+            ...requestDetails
+          });
+          return mobileJson({ error: "Conversation not found" }, { status: 404 });
+        }
+
+        const messages = await hostCodexSnapshotService.listMessages({
+          afterSequence: query.afterSequence,
+          conversationId: id,
+          hostMachineId: actor.hostMachineId,
+          includeRuntime: query.includeRuntime,
+          workspaceId: actor.workspaceId
+        });
+        mobileActivityLog.record("mobile_codex_messages_loaded_from_host_snapshot", {
+          conversationId,
+          durationMs: Date.now() - startedAt,
+          messageCount: messages.length,
+          ...messageSequenceStats(messages),
+          reason: "cross_host",
+          ...actorDetails,
+          ...requestDetails
+        });
+        return mobileJson({ messages });
+      }
+
       const messages = await codexAppService.listMessages(id, {
         afterSequence: query.afterSequence,
         includeRuntime: query.includeRuntime
@@ -172,6 +210,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     ]);
 
     if (isCodexConversationId(id)) {
+      if (!(await canUseLocalCodexApp(actor))) {
+        return mobileJson({ error: "Conversation not found" }, { status: 404 });
+      }
+
       const continued = await codexAppService.continueConversation(id, {
         prompt: input.content
       });

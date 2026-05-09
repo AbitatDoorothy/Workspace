@@ -24,7 +24,8 @@ describe("abitat iphone", () => {
         env: {
           ABITAT_API_URL: "https://workspace.abitat.io",
           ABITAT_HOST_TOKEN: "host_secret",
-          ABITAT_MACHINE_ID: "machine_1"
+          ABITAT_MACHINE_ID: "machine_1",
+          CODEX_APP_SERVER_URL: "ws://127.0.0.1:17321"
         }
       }
     ]);
@@ -108,7 +109,8 @@ describe("abitat iphone", () => {
           env: {
             ABITAT_API_URL: "https://workspace.abitat.io",
             ABITAT_HOST_TOKEN: "host_secret",
-            ABITAT_MACHINE_ID: "machine_1"
+            ABITAT_MACHINE_ID: "machine_1",
+            CODEX_APP_SERVER_URL: "ws://127.0.0.1:17321"
           }
         }
       ]

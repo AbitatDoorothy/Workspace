@@ -1,6 +1,8 @@
 import { conversationMessageService } from "../../../../../../../server/conversation-messages";
 import { conversationQueueService } from "../../../../../../../server/conversations";
 import { codexAppService, isCodexConversationId } from "../../../../../../../server/codex-app";
+import { hostCodexSnapshotService } from "../../../../../../../server/hosts";
+import { canUseLocalCodexApp } from "../../../../../../../server/mobile/codex-host-access";
 import { requireMobileActor } from "../../../../../../../server/mobile/request-auth";
 
 const encoder = new TextEncoder();
@@ -10,6 +12,25 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const [{ id }, actor] = await Promise.all([context.params, requireMobileActor(request)]);
 
     if (isCodexConversationId(id)) {
+      if (!(await canUseLocalCodexApp(actor))) {
+        const conversation = await hostCodexSnapshotService.getConversation({
+          conversationId: id,
+          hostMachineId: actor.hostMachineId,
+          workspaceId: actor.workspaceId
+        });
+
+        if (!conversation) {
+          return Response.json({ error: "Conversation not found" }, { status: 404 });
+        }
+
+        return streamSnapshotMessages(request, {
+          afterSequence: Number(new URL(request.url).searchParams.get("afterSequence") ?? "0"),
+          conversationId: id,
+          hostMachineId: actor.hostMachineId,
+          workspaceId: actor.workspaceId
+        });
+      }
+
       const after = Number(new URL(request.url).searchParams.get("afterSequence") ?? "0");
       let lastSequence = Number.isFinite(after) ? after : 0;
 
@@ -111,6 +132,64 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       { status: error instanceof Error && error.message === "Invalid mobile token" ? 401 : 400 }
     );
   }
+}
+
+function streamSnapshotMessages(
+  request: Request,
+  input: {
+    afterSequence: number;
+    conversationId: string;
+    hostMachineId: string | null;
+    workspaceId: string;
+  }
+) {
+  let lastSequence = Number.isFinite(input.afterSequence) ? input.afterSequence : 0;
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const sendMessages = async () => {
+        const messages = await hostCodexSnapshotService.listMessages({
+          afterSequence: lastSequence,
+          conversationId: input.conversationId,
+          hostMachineId: input.hostMachineId,
+          workspaceId: input.workspaceId
+        });
+
+        for (const message of messages) {
+          lastSequence = message.sequence;
+          controller.enqueue(
+            encoder.encode(`event: message\ndata: ${JSON.stringify(message)}\n\n`)
+          );
+        }
+      };
+
+      await sendMessages();
+      const interval = setInterval(() => {
+        sendMessages().catch((error) => {
+          controller.enqueue(
+            encoder.encode(
+              `event: error\ndata: ${JSON.stringify({
+                error: error instanceof Error ? error.message : "Unable to stream messages"
+              })}\n\n`
+            )
+          );
+        });
+      }, 1500);
+
+      request.signal.addEventListener("abort", () => {
+        clearInterval(interval);
+        controller.close();
+      });
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "content-type": "text/event-stream"
+    }
+  });
 }
 
 async function assertMobileConversation(workspaceId: string, conversationId: string) {
