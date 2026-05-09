@@ -25,7 +25,7 @@ describe("abitat cli", () => {
     ).toBe(true);
   });
 
-  it("runs the hosted login command and stores the approved session", async () => {
+  it("runs the local login command and stores the approved session", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "abitat-cli-index-login-"));
     const openedUrls: string[] = [];
     const output: string[] = [];
@@ -61,13 +61,13 @@ describe("abitat cli", () => {
       })
     ).resolves.toBe(0);
 
-    expect(openedUrls).toEqual(["https://workspace.abitat.io/login?cliCode=ABITAT-LOGIN"]);
+    expect(openedUrls).toEqual(["http://127.0.0.1:3901/login?cliCode=ABITAT-LOGIN"]);
     await expect(loadCliSession(sessionConfigPath(homeDir))).resolves.toEqual({
-      apiUrl: "https://workspace.abitat.io",
+      apiUrl: "http://127.0.0.1:3901",
       cliToken: "cli_secret",
       userId: "user_1"
     });
-    expect(output).toContain("Logged in to https://workspace.abitat.io");
+    expect(output).toContain("Logged in to http://127.0.0.1:3901");
     await rm(homeDir, { force: true, recursive: true });
   });
 
@@ -77,7 +77,7 @@ describe("abitat cli", () => {
 
     await saveCliSession(
       {
-        apiUrl: "https://workspace.abitat.io",
+        apiUrl: "http://127.0.0.1:3901",
         cliToken: "cli_secret",
         userId: "user_1"
       },
@@ -96,10 +96,9 @@ describe("abitat cli", () => {
     await rm(homeDir, { force: true, recursive: true });
   });
 
-  it("prepares hosted iphone control from the stored CLI session", async () => {
+  it("starts local-first iphone control without a hosted session", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "abitat-cli-index-iphone-"));
     const output: string[] = [];
-    const openedUrls: string[] = [];
     const startedProcesses: Array<{
       args: string[];
       command: string;
@@ -107,100 +106,71 @@ describe("abitat cli", () => {
       name: string;
     }> = [];
 
-    await saveCliSession(
-      {
-        apiUrl: "https://workspace.abitat.io",
-        cliToken: "cli_secret",
-        userId: "user_1"
-      },
-      sessionConfigPath(homeDir)
-    );
-
-    const fetchFn = async () =>
-      Response.json({
-        machineId: "machine_1",
-        workspaceId: "workspace_1",
-        hostToken: "host_secret"
-      });
-
     await expect(
       runCli(["iphone"], {
         env: {
-          ABITAT_MACHINE_NAME: "Reece MacBook Pro",
           CODEX_APP_SERVER_URL: "ws://127.0.0.1:17321"
         },
-        fetchFn,
         homeDir,
-        isEndpointListening: async () => false,
-        openUrl: (url) => openedUrls.push(url),
         output: (line) => output.push(line),
         platform: "darwin",
         startProcess: (process) => startedProcesses.push(process)
       })
     ).resolves.toBe(0);
 
-    expect(openedUrls).toEqual(["https://workspace.abitat.io"]);
     expect(startedProcesses).toEqual([
       {
-        name: "codex-app-server",
-        command: "codex",
-        args: ["app-server", "--listen", "ws://127.0.0.1:17321", "--analytics-default-enabled"]
-      },
-      {
-        name: "host-daemon",
+        name: "local-control-server",
         command: "abitat-host",
-        args: ["start"],
-        env: {
-          ABITAT_API_URL: "https://workspace.abitat.io",
-          ABITAT_HOST_TOKEN: "host_secret",
-          ABITAT_MACHINE_ID: "machine_1",
-          CODEX_APP_SERVER_URL: "ws://127.0.0.1:17321"
-        }
+        args: [
+          "iphone",
+          "--port",
+          "3901",
+          "--transport",
+          "quick-tunnel",
+          "--codex-server-url",
+          "ws://127.0.0.1:17321"
+        ]
       }
     ]);
-    expect(output).toContain("Mac host registered as machine_1");
-    expect(output).toContain("Open the iPhone app and pair from https://workspace.abitat.io");
+    expect(output).toContain("Starting local-first iPhone control on this Mac.");
+    expect(output).toContain(
+      "The Mac will print a QR/manual pairing payload. No hosted domain or database is used."
+    );
     await rm(homeDir, { force: true, recursive: true });
   });
 
-  it("reuses an already running Codex app server instead of starting a duplicate", async () => {
+  it("passes the configured Codex app server to the local control server", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "abitat-cli-index-iphone-reuse-"));
-    const output: string[] = [];
-    const startedProcesses: Array<{ name: string }> = [];
-
-    await saveCliSession(
-      {
-        apiUrl: "https://workspace.abitat.io",
-        cliToken: "cli_secret",
-        userId: "user_1"
-      },
-      sessionConfigPath(homeDir)
-    );
-
-    const fetchFn = async () =>
-      Response.json({
-        machineId: "machine_1",
-        workspaceId: "workspace_1",
-        hostToken: "host_secret"
-      });
+    const startedProcesses: Array<{ args: string[]; name: string }> = [];
 
     await expect(
       runCli(["iphone"], {
         env: {
           CODEX_APP_SERVER_URL: "ws://127.0.0.1:47777"
         },
-        fetchFn,
         homeDir,
-        isEndpointListening: async (url) => url === "ws://127.0.0.1:47777",
-        openUrl: () => {},
-        output: (line) => output.push(line),
+        output: () => {},
         platform: "darwin",
         startProcess: (process) => startedProcesses.push(process)
       })
     ).resolves.toBe(0);
 
-    expect(startedProcesses.map((process) => process.name)).toEqual(["host-daemon"]);
-    expect(output).toContain("Using existing Codex app server at ws://127.0.0.1:47777");
+    expect(startedProcesses).toEqual([
+      {
+        name: "local-control-server",
+        command: "abitat-host",
+        args: [
+          "iphone",
+          "--port",
+          "3901",
+          "--transport",
+          "quick-tunnel",
+          "--codex-server-url",
+          "ws://127.0.0.1:47777"
+        ]
+      }
+    ]);
     await rm(homeDir, { force: true, recursive: true });
   });
 
@@ -208,15 +178,17 @@ describe("abitat cli", () => {
     expect(
       resolveStartupProcess(
         {
-          name: "host-daemon",
+          name: "local-control-server",
           command: "abitat-host",
-          args: ["start"],
-          env: {
-            ABITAT_API_URL: "https://workspace.abitat.io",
-            ABITAT_HOST_TOKEN: "host_secret",
-            ABITAT_MACHINE_ID: "machine_1",
-            CODEX_APP_SERVER_URL: "ws://127.0.0.1:47777"
-          }
+          args: [
+            "iphone",
+            "--port",
+            "3901",
+            "--transport",
+            "tailscale",
+            "--codex-server-url",
+            "ws://127.0.0.1:47777"
+          ]
         },
         {
           resolvePackageExport: () =>
@@ -225,15 +197,18 @@ describe("abitat cli", () => {
         }
       )
     ).toEqual({
-      name: "host-daemon",
+      name: "local-control-server",
       command: "/usr/local/bin/node",
-      args: ["/opt/abitat/node_modules/@abitat_reece/host-daemon/dist/cli/index.js", "start"],
-      env: {
-        ABITAT_API_URL: "https://workspace.abitat.io",
-        ABITAT_HOST_TOKEN: "host_secret",
-        ABITAT_MACHINE_ID: "machine_1",
-        CODEX_APP_SERVER_URL: "ws://127.0.0.1:47777"
-      }
+      args: [
+        "/opt/abitat/node_modules/@abitat_reece/host-daemon/dist/cli/index.js",
+        "iphone",
+        "--port",
+        "3901",
+        "--transport",
+        "tailscale",
+        "--codex-server-url",
+        "ws://127.0.0.1:47777"
+      ]
     });
   });
 });

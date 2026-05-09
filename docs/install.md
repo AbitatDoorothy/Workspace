@@ -1,6 +1,6 @@
 # Public Install
 
-Abitat’s public hosted flow uses `workspace.abitat.io` as the control plane. The Mac connects outbound to the hosted API, and the iPhone app also talks to the hosted API. The phone does not need to be on the same network as the Mac.
+Abitat’s public mobile-control flow is local-first. The Mac runs the control server, owns Codex state, issues pairing payloads, and accepts iPhone requests directly through the selected transport. No Abitat-hosted domain, hosted database, or hosted account is required for core iPhone control.
 
 ## Mac
 
@@ -23,6 +23,12 @@ The npm package remains available as an alternate install path:
 npm install -g @abitat_reece/cli
 ```
 
+Install the Mac-side tunnel helper. The iPhone does not need Cloudflare, Tailscale, or any other networking app:
+
+```sh
+brew install cloudflared
+```
+
 Start the Mac host:
 
 ```sh
@@ -31,27 +37,30 @@ abitat iphone
 
 This command:
 
-1. Opens `https://workspace.abitat.io` for registration or login.
-2. Stores a CLI session in `~/Library/Application Support/Abitat/config.json`.
-3. Registers the Mac host to the signed-in account.
-4. Starts the local Codex app server.
-5. Starts the packaged `@abitat_reece/host-daemon` dependency with hosted API credentials.
-6. Opens the hosted dashboard for iPhone pairing.
+1. Starts the packaged `@abitat_reece/host-daemon` local-control server.
+2. Starts or connects to the local Codex app-server.
+3. Starts `cloudflared tunnel --url <local-control-url>` on the Mac.
+4. Creates a short-lived, single-use pairing secret on the Mac.
+5. Prints a QR code and manual pairing payload containing the temporary `trycloudflare.com` URL.
+6. Stores paired device records and token hashes under `~/Library/Application Support/Abitat/`.
 
 ## iPhone
 
-Install the Abitat iPhone app, keep the API URL set to `https://workspace.abitat.io`, then pair using the code shown in the Mac dashboard.
+Install the Abitat iPhone app, scan the QR code from the Mac command, or paste the manual pairing payload. The app stores the paired Mac endpoint and device token locally and uses those for reconnects.
 
 ## Network Model
 
-Remote control works off-network because both devices communicate through `workspace.abitat.io`:
+Remote control works off-network through the Mac-side Quick Tunnel:
 
-- The Mac daemon polls and heartbeats to the hosted API using its host token.
-- The iPhone sends project, conversation, and message requests to the hosted API using its pairing token.
-- Hosted job routing assigns phone-started Codex work to the paired Mac host.
-- Push notifications are delivered from the hosted API to the iPhone.
+- `abitat iphone` defaults to `--transport quick-tunnel`.
+- The tunnel URL is temporary and can change when the Mac command restarts.
+- The iPhone only needs the Abitat app because the tunnel terminates on the Mac side.
+- `abitat iphone --transport tailscale` remains available for users who already run Tailscale on both devices.
+- `abitat iphone --transport manual --endpoint <url>` lets advanced users provide their own endpoint.
 
-No inbound port forwarding, LAN discovery, or shared Wi-Fi is required.
+The Mac still requires Abitat device-token auth for every iPhone request. The tunnel only provides reachability; it is not the product authorization boundary.
+
+Hosted `workspace.abitat.io` mobile-control APIs are no longer the public control path.
 
 ## Maintainer Release Check
 

@@ -3,16 +3,25 @@
 import { homedir } from "node:os";
 import { access } from "node:fs/promises";
 import { runtimeSchema, type DaemonJob } from "@abitat_reece/shared";
+import qrcode from "qrcode-terminal";
 
 import { collectCodexAppSnapshot } from "../codex-app/snapshot.js";
 import { defaultConfigPath, loadHostConfig, saveHostConfig } from "../config/host-config.js";
 import { collectChangeset } from "../git/changeset.js";
 import { branchNameForConversation, resolveRepoPath } from "../git/paths.js";
+import { createLocalCodexBridge } from "../local-control/codex-bridge.js";
+import { startLocalControlServer } from "../local-control/server.js";
+import { createLocalControlStore, type LocalControlTransport } from "../local-control/state.js";
+import {
+  resolveLocalControlTransport,
+  startQuickTunnel,
+  type QuickTunnel
+} from "../local-control/transport.js";
 import { commitAndPushWorktree, tryCreatePullRequest } from "../git/publish.js";
 import { cleanupConversationWorktree, setupConversationWorktree } from "../git/worktree.js";
 import { createRemoteControlManager } from "../remote-control/manager.js";
 import { createRuntimeAdapter } from "../runtime/index.js";
-import { HostApiClient } from "../transport/api-client.js";
+import { HostApiClient, isTransientHostApiError } from "../transport/api-client.js";
 import { createToolScanner } from "../tools/scanner.js";
 import { runConversationRuntime } from "./conversation-runtime.js";
 import { resolveDaemonConnection } from "./daemon-connection.js";
@@ -31,6 +40,11 @@ async function main() {
     return;
   }
 
+  if (command === "iphone") {
+    await startIphoneControl(args);
+    return;
+  }
+
   if (command === "start") {
     await startDaemon(args);
     return;
@@ -42,7 +56,9 @@ async function main() {
   }
 
   console.error(`Unknown command: ${command}`);
-  console.error("Usage: abitat-host pair --code ABITAT-123456 | abitat-host start --mock");
+  console.error(
+    "Usage: abitat-host iphone [--transport quick-tunnel|local|tailscale|manual] | abitat-host pair --code ABITAT-123456 | abitat-host start --mock"
+  );
   process.exitCode = 1;
 }
 
@@ -61,6 +77,77 @@ async function pairDaemon(args: string[]) {
   await saveHostConfig({ apiUrl, ...response }, configPath);
   console.log(`paired machineId=${response.machineId}`);
   console.log(`config=${configPath}`);
+}
+
+async function startIphoneControl(args: string[]) {
+  const port = numberOption(args, "--port", Number(process.env.ABITAT_LOCAL_CONTROL_PORT ?? 3901));
+  const requestedTransport = transportOption(readOption(args, "--transport") ?? "quick-tunnel");
+  const endpoint = readOption(args, "--endpoint") ?? process.env.ABITAT_LOCAL_CONTROL_ENDPOINT;
+  const codexServerUrl =
+    readOption(args, "--codex-server-url") ??
+    process.env.CODEX_APP_SERVER_URL ??
+    "ws://127.0.0.1:47777";
+  const transport = await resolveLocalControlTransport({
+    endpoint,
+    port,
+    requestedTransport
+  });
+  const store = createLocalControlStore();
+  const server = await startLocalControlServer({
+    bindHost: transport.bindHost,
+    codex: createLocalCodexBridge({ serverUrl: codexServerUrl }),
+    endpoint: transport.endpoint,
+    port,
+    store,
+    transport: transport.transport
+  });
+  let quickTunnel: QuickTunnel | null = null;
+  let publicEndpoint = server.endpoint;
+  if (transport.transport === "quick-tunnel") {
+    console.log("Starting Cloudflare Quick Tunnel from this Mac...");
+    quickTunnel = await startQuickTunnel({ localUrl: server.endpoint }).catch(async (error) => {
+      await server.close().catch(() => undefined);
+      throw error;
+    });
+    publicEndpoint = quickTunnel.endpoint;
+  }
+  const pairing = await store.createPairing({
+    endpoint: publicEndpoint,
+    transport: transport.transport
+  });
+  const qrPayload = JSON.stringify(pairing);
+
+  console.log("Abitat local iPhone control");
+  console.log(`status=online`);
+  console.log(`endpoint=${publicEndpoint}`);
+  if (transport.transport === "quick-tunnel") {
+    console.log(`localEndpoint=${server.endpoint}`);
+  }
+  console.log(`transport=${transport.transport}`);
+  if (transport.warning) {
+    console.log(`warning=${transport.warning}`);
+  }
+  console.log(`macId=${pairing.macId}`);
+  console.log(`manualCode=${pairing.manualCode}`);
+  console.log(`expiresAt=${pairing.expiresAt}`);
+  console.log("");
+  console.log("Scan this QR code in the Abitat iPhone app:");
+  qrcode.generate(qrPayload, { small: true }, (qr) => console.log(qr));
+  console.log("Manual pairing payload:");
+  console.log(qrPayload);
+  console.log("");
+  console.log("Keep this command running while pairing and using the phone.");
+
+  const stop = async () => {
+    await quickTunnel?.close().catch(() => undefined);
+    await server.close().catch(() => undefined);
+    console.log("status=stopped");
+    process.exit(0);
+  };
+  process.once("SIGINT", () => void stop());
+  process.once("SIGTERM", () => void stop());
+
+  await new Promise(() => undefined);
 }
 
 async function startDaemon(args: string[]) {
@@ -246,7 +333,18 @@ async function pollDaemonJob(
   apiUrl: string,
   hostToken?: string
 ) {
-  const { job } = await client.pollJob(machineId, getActiveConversationIds(activeState));
+  let response: Awaited<ReturnType<HostApiClient["pollJob"]>>;
+  try {
+    response = await client.pollJob(machineId, getActiveConversationIds(activeState));
+  } catch (error) {
+    if (isTransientHostApiError(error)) {
+      console.error(`daemon job poll skipped: ${error.message}`);
+      return;
+    }
+    throw error;
+  }
+
+  const { job } = response;
 
   if (!job) {
     return;
@@ -484,6 +582,31 @@ async function readConfigIfAvailable(path: string) {
 function readOption(args: string[], option: string) {
   const index = args.indexOf(option);
   return index >= 0 ? args[index + 1] : undefined;
+}
+
+function numberOption(args: string[], option: string, fallback: number) {
+  const value = readOption(args, option);
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function transportOption(value: string) {
+  const normalized = value.trim();
+  if (
+    normalized === "auto" ||
+    normalized === "local" ||
+    normalized === "tailscale" ||
+    normalized === "quick-tunnel" ||
+    normalized === "manual"
+  ) {
+    return normalized as "auto" | LocalControlTransport;
+  }
+
+  return "auto";
 }
 
 async function stopDaemon(

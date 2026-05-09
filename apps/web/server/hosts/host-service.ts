@@ -7,7 +7,12 @@ import { hmac } from "@noble/hashes/hmac";
 import { sha256 } from "@noble/hashes/sha2";
 
 import { randomHex, randomId, sha256Hex } from "../crypto";
-import { retryDbOperation, runDbOperation } from "../db/operation";
+import {
+  DEFAULT_DB_OPERATION_RETRIES,
+  DEFAULT_DB_OPERATION_TIMEOUT_MS,
+  retryDbOperation,
+  runDbOperation
+} from "../db/operation";
 import { getSessionSecret } from "../auth/session";
 
 export const DEMO_PAIRING_CODE = "ABITAT-123456";
@@ -70,13 +75,18 @@ interface HostServiceOptions {
 
 const SIGNED_HOST_TOKEN_PREFIX = "host_v2_";
 
+export interface SignedHostTokenActor {
+  machineId: string;
+  workspaceId: string;
+}
+
 export function createHostService(db: HostDb, options: HostServiceOptions = {}) {
   const pairingCode = options.pairingCode ?? getHostPairingCode();
   const idGenerator = options.idGenerator ?? ((prefix: string) => randomId(prefix));
   const tokenGenerator = options.tokenGenerator ?? (() => `host_${randomHex(24)}`);
   const tokenSecret = options.tokenSecret ?? getSessionSecret();
-  const dbOperationRetries = options.dbOperationRetries ?? 2;
-  const dbOperationTimeoutMs = options.dbOperationTimeoutMs ?? 5000;
+  const dbOperationRetries = options.dbOperationRetries ?? DEFAULT_DB_OPERATION_RETRIES;
+  const dbOperationTimeoutMs = options.dbOperationTimeoutMs ?? DEFAULT_DB_OPERATION_TIMEOUT_MS;
 
   return {
     async registerHost(input: RegisterHostInput) {
@@ -228,6 +238,10 @@ export function createHostService(db: HostDb, options: HostServiceOptions = {}) 
       return Boolean(machine);
     },
 
+    readSignedHostToken(hostToken: string): SignedHostTokenActor | null {
+      return verifySignedHostToken(hostToken, tokenSecret);
+    },
+
     async recordHeartbeat(input: HostHeartbeatRequest, hostToken: string) {
       const signedHost = verifySignedHostToken(hostToken, tokenSecret);
       if (
@@ -270,11 +284,16 @@ export function createHostService(db: HostDb, options: HostServiceOptions = {}) 
     },
 
     async recordToolScan(input: ToolScanUploadRequest, hostToken: string) {
-      if (!(await this.verifyHostToken(input.machineId, hostToken))) {
+      const signedHost = verifySignedHostToken(hostToken, tokenSecret);
+      if (
+        signedHost
+          ? signedHost.machineId !== input.machineId
+          : !(await this.verifyHostToken(input.machineId, hostToken))
+      ) {
         throw new Error("Invalid host token");
       }
 
-      await retryDbOperation(
+      const updateToolScan = retryDbOperation(
         "host_tool_scan_update_machine",
         () =>
           db.machine.update({
@@ -289,6 +308,15 @@ export function createHostService(db: HostDb, options: HostServiceOptions = {}) 
           timeoutMs: dbOperationTimeoutMs
         }
       );
+      if (signedHost) {
+        await updateToolScan.catch((error: unknown) => {
+          console.warn("signed host tool scan update skipped", {
+            message: error instanceof Error ? error.message : String(error)
+          });
+        });
+      } else {
+        await updateToolScan;
+      }
 
       return { ok: true } as const;
     },

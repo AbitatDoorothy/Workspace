@@ -80,39 +80,40 @@ enum RemoteControlStatus {
 }
 
 model User {
-  id                    String         @id @default(cuid())
-  email                 String         @unique
-  displayName           String
-  passwordHash          String         @default("")
-  passwordUpdatedAt     DateTime       @default(now())
-  ownedWorkspaces       Workspace[]    @relation("WorkspaceOwner")
-  memberships           WorkspaceMember[]
-  ownedMachines         Machine[]      @relation("MachineOwner")
-  devicePairingsCreated DevicePairing[]
-  projectsCreated       Project[]
-  agentsCreated         Agent[]
-  conversationsCreated  Conversation[] @relation("ConversationCreator")
-  conversationsApproved Conversation[] @relation("ConversationApprover")
+  id                           String                 @id @default(cuid())
+  email                        String                 @unique
+  displayName                  String
+  passwordHash                 String                 @default("")
+  passwordUpdatedAt            DateTime               @default(now())
+  ownedWorkspaces              Workspace[]            @relation("WorkspaceOwner")
+  memberships                  WorkspaceMember[]
+  ownedMachines                Machine[]              @relation("MachineOwner")
+  devicePairingsCreated        DevicePairing[]
+  projectsCreated              Project[]
+  agentsCreated                Agent[]
+  conversationsCreated         Conversation[]         @relation("ConversationCreator")
+  conversationsApproved        Conversation[]         @relation("ConversationApprover")
   remoteControlSessionsCreated RemoteControlSession[] @relation("RemoteControlSessionCreator")
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
+  createdAt                    DateTime               @default(now())
+  updatedAt                    DateTime               @updatedAt
 }
 
 model Workspace {
-  id          String            @id @default(cuid())
-  name        String
-  ownerUserId String
-  owner       User              @relation("WorkspaceOwner", fields: [ownerUserId], references: [id])
-  members     WorkspaceMember[]
-  machines    Machine[]
-  devicePairings DevicePairing[]
-  projects    Project[]
-  conversations Conversation[]
+  id                    String                 @id @default(cuid())
+  name                  String
+  ownerUserId           String
+  owner                 User                   @relation("WorkspaceOwner", fields: [ownerUserId], references: [id])
+  members               WorkspaceMember[]
+  machines              Machine[]
+  devicePairings        DevicePairing[]
+  projects              Project[]
+  conversations         Conversation[]
   remoteControlSessions RemoteControlSession[]
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
 
   @@index([ownerUserId])
+  @@index([ownerUserId, createdAt])
 }
 
 model WorkspaceMember {
@@ -128,37 +129,38 @@ model WorkspaceMember {
 }
 
 model Machine {
-  id                 String        @id @default(cuid())
-  workspaceId        String
-  ownerUserId        String?
-  name               String
-  type               MachineType
-  status             MachineStatus @default(pending)
-  platform           String?
-  deviceKind         String?
-  publicKey          String?
-  tokenHash          String?       @unique
-  pairedHostMachineId String?
-  capabilitiesJson   Json?
-  pairingTokenHash   String?
-  lastSeenAt         DateTime?
-  installedToolsJson Json?
-  workspace          Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  owner              User?         @relation("MachineOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
-  pairedHost         Machine?      @relation("PairedHost", fields: [pairedHostMachineId], references: [id], onDelete: SetNull)
-  pairedClients      Machine[]     @relation("PairedHost")
-  devicePairingsHost DevicePairing[] @relation("DevicePairingHost")
-  conversationMessages ConversationMessage[] @relation("ConversationMessageSourceDevice")
-  remoteControlHostSessions RemoteControlSession[] @relation("RemoteControlHost")
+  id                          String                 @id @default(cuid())
+  workspaceId                 String
+  ownerUserId                 String?
+  name                        String
+  type                        MachineType
+  status                      MachineStatus          @default(pending)
+  platform                    String?
+  deviceKind                  String?
+  publicKey                   String?
+  tokenHash                   String?                @unique
+  pairedHostMachineId         String?
+  capabilitiesJson            Json?
+  pairingTokenHash            String?
+  lastSeenAt                  DateTime?
+  installedToolsJson          Json?
+  workspace                   Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner                       User?                  @relation("MachineOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  pairedHost                  Machine?               @relation("PairedHost", fields: [pairedHostMachineId], references: [id], onDelete: SetNull)
+  pairedClients               Machine[]              @relation("PairedHost")
+  devicePairingsHost          DevicePairing[]        @relation("DevicePairingHost")
+  conversationMessages        ConversationMessage[]  @relation("ConversationMessageSourceDevice")
+  remoteControlHostSessions   RemoteControlSession[] @relation("RemoteControlHost")
   remoteControlClientSessions RemoteControlSession[] @relation("RemoteControlClient")
-  remoteSignalsSent  RemoteControlSignal[] @relation("RemoteControlSignalSender")
-  remoteSignalsReceived RemoteControlSignal[] @relation("RemoteControlSignalRecipient")
-  daemonJobs         DaemonJob[]
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  remoteSignalsSent           RemoteControlSignal[]  @relation("RemoteControlSignalSender")
+  remoteSignalsReceived       RemoteControlSignal[]  @relation("RemoteControlSignalRecipient")
+  daemonJobs                  DaemonJob[]
+  createdAt                   DateTime               @default(now())
+  updatedAt                   DateTime               @updatedAt
 
   @@index([workspaceId])
   @@index([ownerUserId])
+  @@index([ownerUserId, workspaceId, type, createdAt])
   @@index([pairedHostMachineId])
 }
 
@@ -216,27 +218,27 @@ model Project {
 }
 
 model Agent {
-  id              String         @id @default(cuid())
-  projectId       String
-  name            String
-  role            String
-  instructions    String
-  model           String
-  runtime         AgentRuntime
-  allowedToolsJson Json          @default("[]")
-  createdByUserId String
-  project         Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdBy       User           @relation(fields: [createdByUserId], references: [id])
-  conversations   Conversation[]
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id               String         @id @default(cuid())
+  projectId        String
+  name             String
+  role             String
+  instructions     String
+  model            String
+  runtime          AgentRuntime
+  allowedToolsJson Json           @default("[]")
+  createdByUserId  String
+  project          Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy        User           @relation(fields: [createdByUserId], references: [id])
+  conversations    Conversation[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
   @@index([projectId])
   @@index([createdByUserId])
 }
 
 model Conversation {
-  id               String             @id @default(cuid())
+  id               String                @id @default(cuid())
   agentId          String
   projectId        String
   workspaceId      String
@@ -244,7 +246,7 @@ model Conversation {
   approvedByUserId String?
   approvedAt       DateTime?
   type             ConversationType
-  status           ConversationStatus @default(draft)
+  status           ConversationStatus    @default(draft)
   prompt           String
   branchName       String?
   worktreePath     String?
@@ -254,17 +256,17 @@ model Conversation {
   commitSha        String?
   prUrl            String?
   errorMessage     String?
-  agent            Agent              @relation(fields: [agentId], references: [id])
-  project          Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  workspace        Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy        User               @relation("ConversationCreator", fields: [createdByUserId], references: [id])
-  approvedBy       User?              @relation("ConversationApprover", fields: [approvedByUserId], references: [id])
+  agent            Agent                 @relation(fields: [agentId], references: [id])
+  project          Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace        Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy        User                  @relation("ConversationCreator", fields: [createdByUserId], references: [id])
+  approvedBy       User?                 @relation("ConversationApprover", fields: [approvedByUserId], references: [id])
   events           RunEvent[]
   messages         ConversationMessage[]
   changeSet        ChangeSet?
   daemonJobs       DaemonJob[]
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
 
   @@index([agentId])
   @@index([projectId])
@@ -334,30 +336,32 @@ model DaemonJob {
 
   @@index([workspaceId])
   @@index([machineId])
+  @@index([machineId, status, updatedAt])
   @@index([projectId])
   @@index([conversationId])
   @@index([status])
+  @@index([status, type, createdAt])
 }
 
 model RemoteControlSession {
-  id              String              @id @default(cuid())
+  id              String                @id @default(cuid())
   workspaceId     String
   hostMachineId   String
   clientMachineId String
   createdByUserId String
-  status          RemoteControlStatus @default(requested)
-  screenEnabled   Boolean             @default(true)
-  inputEnabled    Boolean             @default(true)
+  status          RemoteControlStatus   @default(requested)
+  screenEnabled   Boolean               @default(true)
+  inputEnabled    Boolean               @default(true)
   startedAt       DateTime?
   endedAt         DateTime?
   errorMessage    String?
-  workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  hostMachine     Machine             @relation("RemoteControlHost", fields: [hostMachineId], references: [id], onDelete: Cascade)
-  clientMachine   Machine             @relation("RemoteControlClient", fields: [clientMachineId], references: [id], onDelete: Cascade)
-  createdBy       User                @relation("RemoteControlSessionCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  workspace       Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  hostMachine     Machine               @relation("RemoteControlHost", fields: [hostMachineId], references: [id], onDelete: Cascade)
+  clientMachine   Machine               @relation("RemoteControlClient", fields: [clientMachineId], references: [id], onDelete: Cascade)
+  createdBy       User                  @relation("RemoteControlSessionCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
   signals         RemoteControlSignal[]
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
 
   @@index([workspaceId])
   @@index([hostMachineId])

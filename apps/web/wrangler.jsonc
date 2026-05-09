@@ -26,5 +26,11 @@
   "vars": {
     "ABITAT_PUBLIC_URL": "https://workspace.abitat.io",
     "NEXTAUTH_URL": "https://workspace.abitat.io"
-  }
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "194e059cd023444c971068c8e06699b2"
+    }
+  ]
 }

@@ -4,19 +4,9 @@ import { AppShell, Icon } from "./components/app-shell";
 import { PairIphonePanel } from "./components/pair-iphone-panel";
 import { appInfo } from "../lib/app-info";
 import { getServerAccountContext } from "../server/auth/request-session";
-import { getHostPairingCode } from "../server/hosts/host-service";
 import { prisma } from "../server/db/client";
 
-export default async function Home({
-  searchParams
-}: {
-  searchParams: Promise<{
-    iphonePairingCode?: string;
-    iphonePairingExpiresAt?: string;
-    iphonePairingQrPayload?: string;
-  }>;
-}) {
-  const pairing = getPhonePairingFromSearchParams(await searchParams);
+export default async function Home() {
   const account = await getServerAccountContext();
   const host = await getHost(account.hostMachineId);
   const tools = Array.isArray(host?.installedToolsJson)
@@ -24,7 +14,6 @@ export default async function Home({
     : [];
 
   const installedTools = tools.filter((tool) => tool.installed);
-  const pairingCode = getHostPairingCode();
 
   return (
     <AppShell active="dashboard">
@@ -37,8 +26,8 @@ export default async function Home({
               {host?.name ?? "Mac Studio"} (Local)
             </div>
             <p>
-              {appInfo.name} controls coding-agent work from this paired host. Pairing code{" "}
-              <strong>{pairingCode}</strong>.
+              {appInfo.name} controls coding-agent work from this Mac. iPhone pairing now starts
+              from the local <strong>abitat iphone</strong> command.
             </p>
           </div>
 
@@ -79,24 +68,18 @@ export default async function Home({
                   <span className="icon-tile">
                     <Icon>vpn_key</Icon>
                   </span>
-                  <span className="muted">{pairingCode}</span>
+                  <span className="muted">local-first</span>
                 </div>
                 <div>
                   <h3>Host Pairing</h3>
-                  <p>pnpm cloud</p>
+                  <p>abitat iphone</p>
                 </div>
               </div>
             </div>
           </section>
 
           <aside className="dashboard-side">
-            {host ? (
-              <PairIphonePanel
-                hostMachineId={host.id}
-                initialPairing={pairing}
-                workspaceId={account.workspaceId}
-              />
-            ) : null}
+            {host ? <PairIphonePanel /> : null}
 
             <section className="glass-card health-card">
               <h2>System Health</h2>
@@ -152,26 +135,6 @@ export default async function Home({
       </section>
     </AppShell>
   );
-}
-
-function getPhonePairingFromSearchParams(searchParams: {
-  iphonePairingCode?: string;
-  iphonePairingExpiresAt?: string;
-  iphonePairingQrPayload?: string;
-}) {
-  if (
-    !searchParams.iphonePairingCode ||
-    !searchParams.iphonePairingExpiresAt ||
-    !searchParams.iphonePairingQrPayload
-  ) {
-    return null;
-  }
-
-  return {
-    code: searchParams.iphonePairingCode,
-    expiresAt: searchParams.iphonePairingExpiresAt,
-    qrPayload: searchParams.iphonePairingQrPayload
-  };
 }
 
 async function getHost(hostMachineId: string) {

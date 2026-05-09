@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { codexAppService } from "../../../../server/codex-app";
+import { isDbOperationTimeout } from "../../../../server/db/operation";
 import { hostCodexSnapshotService } from "../../../../server/hosts";
 import { mobileService } from "../../../../server/mobile";
 import { canUseLocalCodexApp } from "../../../../server/mobile/codex-host-access";
@@ -42,7 +43,13 @@ export async function GET(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to list mobile projects" },
-      { status: error instanceof Error && error.message === "Invalid mobile token" ? 401 : 400 }
+      {
+        status: isDbOperationTimeout(error)
+          ? 503
+          : error instanceof Error && error.message === "Invalid mobile token"
+            ? 401
+            : 400
+      }
     );
   }
 }

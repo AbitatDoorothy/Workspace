@@ -5,6 +5,7 @@ import type {
   ConversationAttachment,
   ConversationMessage,
   ConversationSummary,
+  LocalPairingPayload,
   MobileBootstrap,
   PairingState,
   ProjectSummary,
@@ -18,6 +19,8 @@ export interface ApiClient {
     appVersion: string;
     code: string;
     deviceName: string;
+    endpoint?: string;
+    pairingSecret?: string;
   }): Promise<PairingState>;
   continueConversation(
     conversationId: string,
@@ -68,17 +71,20 @@ export function createApiClient(pairing: PairingState): ApiClient {
   return {
     bootstrap: () => get(pairing, "/api/mobile/bootstrap").then((body) => body as MobileBootstrap),
     async completePairing(input) {
-      const response = await postUnauthed(pairing.apiUrl, "/api/mobile/pairing/complete", {
+      const endpoint = input.endpoint ?? pairing.apiUrl;
+      const response = await postUnauthed(endpoint, "/pairing/consume", {
         appVersion: input.appVersion,
         code: input.code,
         deviceName: input.deviceName,
+        pairingSecret: input.pairingSecret,
         platform: "ios"
       });
 
       return {
-        apiUrl: pairing.apiUrl,
+        apiUrl: endpoint,
         clientToken: response.clientToken,
         hostMachineId: response.hostMachineId,
+        macId: response.macId ?? response.hostMachineId,
         machineId: response.machineId,
         workspaceId: response.workspaceId
       };
@@ -148,6 +154,24 @@ export function createPairingClient(apiUrl: string) {
   return createApiClient(bootstrapPairing);
 }
 
+export function parsePairingPayload(value: string): LocalPairingPayload | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = parsePairingPayloadJson(trimmed) ?? parsePairingPayloadUrl(trimmed);
+  if (!parsed || parsed.product !== "abitat" || parsed.version !== 1) {
+    return null;
+  }
+
+  if (!parsed.endpoint || !parsed.macId || !parsed.pairingSecret) {
+    return null;
+  }
+
+  return parsed;
+}
+
 async function get(pairing: PairingState, path: string) {
   return request(pairing, path, { method: "GET" });
 }
@@ -194,6 +218,87 @@ async function postUnauthed(apiUrl: string, path: string, body: unknown) {
   }
 
   return readJsonBody(response, path) as Promise<Record<string, string>>;
+}
+
+function parsePairingPayloadJson(value: string): LocalPairingPayload | null {
+  if (!value.startsWith("{")) {
+    return null;
+  }
+
+  try {
+    return normalizePairingPayload(JSON.parse(value) as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
+
+function parsePairingPayloadUrl(value: string): LocalPairingPayload | null {
+  if (!value.startsWith("abitat://")) {
+    return null;
+  }
+
+  const params = parseQuery(value.split("?")[1] ?? "");
+  return normalizePairingPayload({
+    version: Number(params.version ?? "1"),
+    product: params.product ?? "abitat",
+    endpoint: params.endpoint,
+    macId: params.macId,
+    pairingSecret: params.pairingSecret,
+    manualCode: params.manualCode ?? params.code,
+    expiresAt: params.expiresAt,
+    transport: params.transport ?? "manual"
+  });
+}
+
+function normalizePairingPayload(value: Record<string, unknown>): LocalPairingPayload | null {
+  const transport = value.transport;
+  if (
+    transport !== "local" &&
+    transport !== "tailscale" &&
+    transport !== "quick-tunnel" &&
+    transport !== "manual"
+  ) {
+    return null;
+  }
+
+  if (
+    value.version !== 1 ||
+    value.product !== "abitat" ||
+    typeof value.endpoint !== "string" ||
+    typeof value.macId !== "string" ||
+    typeof value.pairingSecret !== "string" ||
+    typeof value.expiresAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    version: 1,
+    product: "abitat",
+    endpoint: value.endpoint,
+    macId: value.macId,
+    pairingSecret: value.pairingSecret,
+    manualCode: typeof value.manualCode === "string" ? value.manualCode : undefined,
+    expiresAt: value.expiresAt,
+    transport,
+    capabilities: Array.isArray(value.capabilities)
+      ? value.capabilities.filter(
+          (capability): capability is string => typeof capability === "string"
+        )
+      : []
+  };
+}
+
+function parseQuery(query: string) {
+  return Object.fromEntries(
+    query
+      .split("&")
+      .filter(Boolean)
+      .map((part) => {
+        const [rawKey, rawValue = ""] = part.split("=");
+        return [decodeURIComponent(rawKey), decodeURIComponent(rawValue.replace(/\+/g, " "))];
+      })
+  ) as Record<string, string>;
 }
 
 async function readableError(response: Response) {

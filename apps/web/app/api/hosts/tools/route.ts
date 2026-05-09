@@ -1,6 +1,7 @@
 import { toolScanUploadRequestSchema } from "@abitat_reece/shared";
 import { NextResponse } from "next/server";
 
+import { isDbOperationTimeout } from "../../../../server/db/operation";
 import { hostService } from "../../../../server/hosts";
 import { getBearerToken } from "../../../../server/hosts/request-auth";
 
@@ -12,7 +13,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to upload tools" },
-      { status: 401 }
+      { status: isDbOperationTimeout(error) ? 503 : 401 }
     );
   }
 }

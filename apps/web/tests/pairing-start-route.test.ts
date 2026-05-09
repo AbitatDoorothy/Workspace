@@ -45,7 +45,7 @@ describe("phone pairing start route", () => {
     getRequestSessionUserId.mockClear();
   });
 
-  it("uses the signed browser session user instead of caller-provided ownership fields", async () => {
+  it("uses the signed browser session user with the submitted host target", async () => {
     const sessionToken = await createSessionToken(
       "user_account",
       "test-secret",
@@ -55,9 +55,9 @@ describe("phone pairing start route", () => {
     const response = await POST(
       new Request("http://127.0.0.1:3000/api/mobile/pairing/start", {
         body: new URLSearchParams({
-          workspaceId: "workspace_attacker",
-          hostMachineId: "machine_attacker",
-          createdByUserId: "user_attacker",
+          workspaceId: "workspace_fresh",
+          hostMachineId: "machine_fresh",
+          createdByUserId: "user_ignored",
           redirectTo: "/#pair-iphone"
         }),
         headers: {
@@ -69,11 +69,13 @@ describe("phone pairing start route", () => {
     );
 
     expect(response.status).toBe(303);
-    expect(getRequestAccountContext).toHaveBeenCalled();
+    expect(getRequestAccountContext).not.toHaveBeenCalled();
+    expect(getRequestSessionUserId).toHaveBeenCalled();
     expect(createPhonePairing).toHaveBeenCalledWith({
-      workspaceId: "workspace_account",
-      hostMachineId: "machine_account",
-      createdByUserId: "user_account"
+      workspaceId: "workspace_fresh",
+      hostMachineId: "machine_fresh",
+      createdByUserId: "user_account",
+      skipHostLookup: true
     });
   });
 
@@ -104,7 +106,31 @@ describe("phone pairing start route", () => {
     expect(createPhonePairing).toHaveBeenCalledWith({
       workspaceId: "workspace_fresh",
       hostMachineId: "machine_fresh",
-      createdByUserId: "user_account"
+      createdByUserId: "user_account",
+      skipHostLookup: true
+    });
+  });
+
+  it("returns service unavailable when account context lookup times out", async () => {
+    getRequestAccountContext.mockRejectedValueOnce(
+      new Error("account_context_find_workspace timed out after 5000ms")
+    );
+
+    const response = await POST(
+      new Request("http://127.0.0.1:3000/api/mobile/pairing/start", {
+        body: new URLSearchParams({
+          redirectTo: "/#pair-iphone"
+        }),
+        headers: {
+          "content-type": "application/x-www-form-urlencoded"
+        },
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "account_context_find_workspace timed out after 5000ms"
     });
   });
 });

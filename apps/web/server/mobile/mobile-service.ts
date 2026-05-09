@@ -4,9 +4,12 @@ import type {
   PhonePairingCompleteResponse,
   PhonePairingStartResponse
 } from "@abitat_reece/shared";
+import { hmac } from "@noble/hashes/hmac";
+import { sha256 } from "@noble/hashes/sha2";
 
-import { randomHex, randomId, sha256Hex } from "../crypto";
-import { retryDbOperation, runDbOperation } from "../db/operation";
+import { randomId, sha256Hex } from "../crypto";
+import { DEFAULT_DB_OPERATION_TIMEOUT_MS, retryDbOperation, runDbOperation } from "../db/operation";
+import { getSessionSecret } from "../auth/session";
 
 interface MachineRecord {
   id: string;
@@ -82,7 +85,9 @@ export interface MobileDb {
     create(args: { data: MachineRecord }): Promise<MachineRecord>;
     findFirst(args: { where: Partial<MachineRecord> }): Promise<MachineRecord | null>;
     findMany(args: { where: Partial<MachineRecord> }): Promise<MachineRecord[]>;
-    findUnique(args: { where: { id: string } }): Promise<MachineRecord | null>;
+    findUnique(args: {
+      where: { id: string } | { tokenHash: string };
+    }): Promise<MachineRecord | null>;
     update(args: { where: { id: string }; data: Partial<MachineRecord> }): Promise<MachineRecord>;
   };
   devicePairing: {
@@ -112,6 +117,7 @@ interface CreatePhonePairingInput {
   workspaceId: string;
   hostMachineId: string;
   createdByUserId: string;
+  skipHostLookup?: boolean;
   ttlMs?: number;
 }
 
@@ -138,11 +144,13 @@ interface MobileServiceOptions {
   hostFreshnessMs?: number;
   idGenerator?: (prefix: string) => string;
   now?: () => Date;
-  tokenGenerator?: () => string;
+  tokenGenerator?: (actor: MobileActor, issuedAt: Date) => string;
+  tokenSecret?: string;
 }
 
 const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_HOST_FRESHNESS_MS = 30_000;
+const SIGNED_MOBILE_TOKEN_PREFIX = "client_v2_";
 
 export function hashMobileToken(token: string) {
   return sha256Hex(token);
@@ -156,23 +164,32 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
   const now = options.now ?? (() => new Date());
   const hostFreshnessMs = options.hostFreshnessMs ?? DEFAULT_HOST_FRESHNESS_MS;
   const idGenerator = options.idGenerator ?? ((prefix: string) => randomId(prefix));
-  const tokenGenerator = options.tokenGenerator ?? (() => `client_${randomHex(24)}`);
+  const tokenSecret = options.tokenSecret ?? getSessionSecret();
+  const tokenGenerator =
+    options.tokenGenerator ?? ((actor: MobileActor) => createSignedMobileToken(actor, tokenSecret));
   const codeGenerator = options.codeGenerator ?? createPairingCode;
   const dbOperationRetries = options.dbOperationRetries ?? 2;
-  const dbOperationTimeoutMs = options.dbOperationTimeoutMs ?? 5000;
+  const dbOperationTimeoutMs = options.dbOperationTimeoutMs ?? DEFAULT_DB_OPERATION_TIMEOUT_MS;
 
   return {
     async createPhonePairing(input: CreatePhonePairingInput): Promise<PhonePairingStartResponse> {
-      const host = await retryDbOperation(
-        "mobile_pairing_start_find_host",
-        () => db.machine.findUnique({ where: { id: input.hostMachineId } }),
-        {
-          retries: dbOperationRetries,
-          timeoutMs: dbOperationTimeoutMs
+      if (!input.skipHostLookup) {
+        const host = await retryDbOperation(
+          "mobile_pairing_start_find_host",
+          () => db.machine.findUnique({ where: { id: input.hostMachineId } }),
+          {
+            retries: dbOperationRetries,
+            timeoutMs: dbOperationTimeoutMs
+          }
+        );
+        if (
+          !host ||
+          host.workspaceId !== input.workspaceId ||
+          host.type !== "host" ||
+          (host.ownerUserId && host.ownerUserId !== input.createdByUserId)
+        ) {
+          throw new Error("Host machine not found");
         }
-      );
-      if (!host || host.workspaceId !== input.workspaceId || host.type !== "host") {
-        throw new Error("Host machine not found");
       }
 
       const createdAt = now();
@@ -244,13 +261,20 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
         throw new Error("Host machine not found");
       }
 
-      const clientToken = tokenGenerator();
+      const phoneId = idGenerator("machine");
+      const actor = {
+        machineId: phoneId,
+        workspaceId: pairing.workspaceId,
+        hostMachineId: pairing.hostMachineId,
+        userId: pairing.createdByUserId
+      };
+      const clientToken = tokenGenerator(actor, pairedAt);
       const phone = await runDbOperation(
         "mobile_pairing_complete_create_phone",
         () =>
           db.machine.create({
             data: {
-              id: idGenerator("machine"),
+              id: phoneId,
               workspaceId: pairing.workspaceId,
               name: input.deviceName,
               type: "client",
@@ -293,6 +317,11 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
     },
 
     async verifyMobileToken(machineId: string, token: string) {
+      const signedActor = verifySignedMobileToken(token, tokenSecret);
+      if (signedActor) {
+        return signedActor.machineId === machineId;
+      }
+
       const machine = await retryDbOperation(
         "mobile_verify_token_find_machine",
         () => db.machine.findUnique({ where: { id: machineId } }),
@@ -305,13 +334,20 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
     },
 
     async requireMobileActor(token: string): Promise<MobileActor> {
+      const signedActor = verifySignedMobileToken(token, tokenSecret);
+      if (signedActor) {
+        void updatePhoneLastSeen(db, signedActor.machineId, now(), {
+          retries: dbOperationRetries,
+          timeoutMs: dbOperationTimeoutMs
+        });
+        return signedActor;
+      }
+
       const machine = await retryDbOperation(
         "mobile_require_actor_find_phone",
         () =>
-          db.machine.findFirst({
+          db.machine.findUnique({
             where: {
-              type: "client",
-              deviceKind: "phone",
               tokenHash: hashMobileToken(token)
             }
           }),
@@ -321,25 +357,14 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
         }
       );
 
-      if (!machine) {
+      if (!machine || machine.type !== "client" || machine.deviceKind !== "phone") {
         throw new Error("Invalid mobile token");
       }
 
-      await retryDbOperation(
-        "mobile_require_actor_update_phone",
-        () =>
-          db.machine.update({
-            where: { id: machine.id },
-            data: {
-              status: "online",
-              lastSeenAt: now()
-            }
-          }),
-        {
-          retries: dbOperationRetries,
-          timeoutMs: dbOperationTimeoutMs
-        }
-      );
+      void updatePhoneLastSeen(db, machine.id, now(), {
+        retries: dbOperationRetries,
+        timeoutMs: dbOperationTimeoutMs
+      });
 
       return {
         machineId: machine.id,
@@ -494,6 +519,108 @@ export function createMobileService(db: MobileDb, options: MobileServiceOptions 
       );
     }
   };
+}
+
+async function updatePhoneLastSeen(
+  db: MobileDb,
+  machineId: string,
+  seenAt: Date,
+  options: { retries: number; timeoutMs: number }
+) {
+  await retryDbOperation(
+    "mobile_require_actor_update_phone",
+    () =>
+      db.machine.update({
+        where: { id: machineId },
+        data: {
+          status: "online",
+          lastSeenAt: seenAt
+        }
+      }),
+    options
+  ).catch((error: unknown) => {
+    console.warn("mobile phone last-seen update skipped", {
+      message: error instanceof Error ? error.message : String(error)
+    });
+  });
+}
+
+function createSignedMobileToken(actor: MobileActor, secret: string) {
+  const encoded = base64UrlString(JSON.stringify(actor));
+  const signature = signMobileTokenPayload(encoded, secret);
+  return `${SIGNED_MOBILE_TOKEN_PREFIX}${encoded}.${signature}`;
+}
+
+function verifySignedMobileToken(token: string, secret: string): MobileActor | null {
+  if (!token.startsWith(SIGNED_MOBILE_TOKEN_PREFIX)) {
+    return null;
+  }
+
+  const rest = token.slice(SIGNED_MOBILE_TOKEN_PREFIX.length);
+  const parts = rest.split(".");
+  if (parts.length !== 2) {
+    return null;
+  }
+
+  const [payload, signature] = parts;
+  if (signMobileTokenPayload(payload, secret) !== signature) {
+    return null;
+  }
+
+  try {
+    const decoded = JSON.parse(base64UrlToString(payload)) as Partial<MobileActor>;
+    if (typeof decoded.machineId !== "string" || !decoded.machineId) {
+      return null;
+    }
+    if (typeof decoded.workspaceId !== "string" || !decoded.workspaceId) {
+      return null;
+    }
+    if (
+      decoded.hostMachineId !== null &&
+      decoded.hostMachineId !== undefined &&
+      typeof decoded.hostMachineId !== "string"
+    ) {
+      return null;
+    }
+    if (
+      decoded.userId !== null &&
+      decoded.userId !== undefined &&
+      typeof decoded.userId !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      machineId: decoded.machineId,
+      workspaceId: decoded.workspaceId,
+      hostMachineId: decoded.hostMachineId ?? null,
+      userId: decoded.userId ?? null
+    };
+  } catch {
+    return null;
+  }
+}
+
+function signMobileTokenPayload(payload: string, secret: string) {
+  const encoder = new TextEncoder();
+  return base64UrlBytes(hmac(sha256, encoder.encode(secret), encoder.encode(payload)));
+}
+
+function base64UrlString(input: string) {
+  return base64UrlBytes(new TextEncoder().encode(input));
+}
+
+function base64UrlBytes(input: Uint8Array) {
+  const binary = Array.from(input, (byte) => String.fromCharCode(byte)).join("");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/u, "");
+}
+
+function base64UrlToString(input: string) {
+  const base64 = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = `${base64}${"=".repeat((4 - (base64.length % 4)) % 4)}`;
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
 }
 
 function createPairingCode() {

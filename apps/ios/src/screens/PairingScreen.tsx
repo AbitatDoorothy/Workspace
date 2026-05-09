@@ -1,7 +1,9 @@
+import { CameraView, useCameraPermissions, type BarcodeScanningResult } from "expo-camera";
 import { useState } from "react";
-import { Text, TextInput, View } from "react-native";
+import { StyleSheet, Text, TextInput, View } from "react-native";
 
 import type { ApiClient } from "../api/client";
+import { createPairingClient, parsePairingPayload } from "../api/client";
 import { Button, Header } from "../components/Controls";
 import { Screen } from "../components/Screen";
 import { colors, sharedStyles } from "../theme";
@@ -15,22 +17,46 @@ interface PairingScreenProps {
 }
 
 export function PairingScreen({ api, apiUrl, onApiUrlChange, onPaired }: PairingScreenProps) {
-  const [code, setCode] = useState("");
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [pairingInput, setPairingInput] = useState("");
   const [deviceName, setDeviceName] = useState("Reece iPhone");
   const [error, setError] = useState<string | null>(null);
   const [isPairing, setIsPairing] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const pairingPayload = parsePairingPayload(pairingInput);
+  const endpoint = pairingPayload?.endpoint ?? apiUrl;
+
+  function updatePairingInput(value: string) {
+    setPairingInput(value);
+    const payload = parsePairingPayload(value);
+    if (payload) {
+      onApiUrlChange(payload.endpoint);
+    }
+  }
+
+  function handleBarcodeScanned(result: BarcodeScanningResult) {
+    setIsScanning(false);
+    updatePairingInput(result.data);
+  }
 
   async function pair() {
     setError(null);
     setIsPairing(true);
 
     try {
-      const pairing = await api.completePairing({
+      const client = pairingPayload ? createPairingClient(pairingPayload.endpoint) : api;
+      const pairing = await client.completePairing({
         appVersion: "0.1.0",
-        code,
-        deviceName
+        code: pairingPayload?.manualCode ?? pairingInput,
+        deviceName,
+        endpoint,
+        pairingSecret: pairingPayload?.pairingSecret
       });
-      onPaired(pairing);
+      onPaired({
+        ...pairing,
+        apiUrl: endpoint,
+        macId: pairingPayload?.macId ?? pairing.macId
+      });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to pair iPhone");
     } finally {
@@ -38,21 +64,44 @@ export function PairingScreen({ api, apiUrl, onApiUrlChange, onPaired }: Pairing
     }
   }
 
+  async function startScanning() {
+    setError(null);
+    if (!cameraPermission?.granted) {
+      const nextPermission = await requestCameraPermission();
+      if (!nextPermission.granted) {
+        setError("Camera permission is required to scan the Mac pairing QR code.");
+        return;
+      }
+    }
+
+    setIsScanning(true);
+  }
+
   return (
     <Screen>
       <Header
         eyebrow="Abitat Mobile"
         title="Pair iPhone"
-        subtitle="Enter the code from the Mac dashboard signed in to your Abitat account."
+        subtitle="Scan the QR code from `abitat iphone` or paste its manual payload."
       />
 
+      {isScanning ? (
+        <View style={styles.cameraFrame}>
+          <CameraView
+            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+            onBarcodeScanned={handleBarcodeScanned}
+            style={StyleSheet.absoluteFill}
+          />
+        </View>
+      ) : null}
+
       <View style={sharedStyles.card}>
-        <Text style={sharedStyles.label}>API</Text>
+        <Text style={sharedStyles.label}>Mac endpoint</Text>
         <TextInput
           autoCapitalize="none"
           autoCorrect={false}
           onChangeText={onApiUrlChange}
-          placeholder="https://workspace.abitat.io"
+          placeholder="http://100.x.y.z:3901"
           placeholderTextColor={colors.muted}
           style={[sharedStyles.input, { marginTop: 8 }]}
           value={apiUrl}
@@ -60,15 +109,16 @@ export function PairingScreen({ api, apiUrl, onApiUrlChange, onPaired }: Pairing
       </View>
 
       <View style={sharedStyles.card}>
-        <Text style={sharedStyles.label}>Pairing code</Text>
+        <Text style={sharedStyles.label}>Pairing payload or manual code</Text>
         <TextInput
-          autoCapitalize="characters"
+          autoCapitalize="none"
           autoCorrect={false}
-          onChangeText={setCode}
-          placeholder="ABITAT-123456"
+          multiline
+          onChangeText={updatePairingInput}
+          placeholder='{"product":"abitat",...}'
           placeholderTextColor={colors.muted}
-          style={[sharedStyles.input, { fontSize: 20, marginTop: 8 }]}
-          value={code}
+          style={[sharedStyles.input, styles.payloadInput]}
+          value={pairingInput}
         />
         <Text style={[sharedStyles.label, { marginTop: 16 }]}>Device name</Text>
         <TextInput
@@ -82,9 +132,28 @@ export function PairingScreen({ api, apiUrl, onApiUrlChange, onPaired }: Pairing
 
       {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
 
-      <Button disabled={isPairing || code.trim().length === 0} onPress={pair}>
+      <Button disabled={isPairing} onPress={startScanning}>
+        Scan QR
+      </Button>
+      <Button disabled={isPairing || pairingInput.trim().length === 0} onPress={pair}>
         {isPairing ? "Pairing" : "Pair with Mac"}
       </Button>
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  cameraFrame: {
+    backgroundColor: colors.surfaceHigh,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 280,
+    overflow: "hidden"
+  },
+  payloadInput: {
+    marginTop: 8,
+    minHeight: 104,
+    textAlignVertical: "top"
+  }
+});

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { hostCodexSnapshotService } from "../../../../../server/hosts";
+import { hostCodexSnapshotService, hostService } from "../../../../../server/hosts";
 import type { HostCodexSnapshot } from "../../../../../server/hosts/codex-snapshot-service";
 import { requireHostToken } from "../../../../../server/hosts/request-auth";
 import { mobileActivityLog } from "../../../../../server/mobile/mobile-activity-log";
@@ -21,9 +21,11 @@ const requestSchema = z.object({
 export async function POST(request: Request) {
   try {
     const input = requestSchema.parse(await request.json());
-    await requireHostToken(request, input.machineId);
+    const token = await requireHostToken(request, input.machineId);
+    const signedHost = hostService.readSignedHostToken(token);
     const snapshot = await hostCodexSnapshotService.recordSnapshot({
       machineId: input.machineId,
+      signedHost,
       snapshot: input.snapshot as unknown as HostCodexSnapshot
     });
 
@@ -40,7 +42,17 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to upload Codex snapshot" },
-      { status: error instanceof Error && error.message === "Invalid host token" ? 401 : 400 }
+      { status: snapshotErrorStatus(error) }
     );
   }
+}
+
+function snapshotErrorStatus(error: unknown) {
+  if (error instanceof Error && error.message === "Invalid host token") {
+    return 401;
+  }
+  if (error instanceof Error && error.message.toLowerCase().includes("timeout")) {
+    return 503;
+  }
+  return 400;
 }

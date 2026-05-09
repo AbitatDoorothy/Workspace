@@ -15,13 +15,15 @@ const npmTarballUrl = `https://registry.npmjs.org/@abitat_reece/cli/-/cli-${vers
 for (const expected of [
   "class Abitat < Formula",
   'desc "Remote Codex control from Mac and iPhone"',
-  'homepage "https://workspace.abitat.io"',
+  'homepage "https://github.com/AbitatDoorothy/Workspace"',
   `url "${npmTarballUrl}"`,
   'depends_on "node@22"',
+  'depends_on "cloudflared"',
   'depends_on "python" => :build',
   "std_npm_args",
   'bin.install_symlink libexec/"bin/abitat"',
-  'assert_match "Not logged in. Run `abitat login`.", shell_output("#{bin}/abitat doctor")'
+  'ENV["ABITAT_CLI_CONFIG_PATH"] = testpath/"config.json"',
+  'assert_match "Local iPhone control does not require an Abitat hosted login.", shell_output("#{bin}/abitat doctor")'
 ]) {
   if (!formula.includes(expected)) {
     throw new Error(`Expected Formula/abitat.rb to include ${expected}`);
@@ -36,8 +38,8 @@ if (!shaMatch) {
 for (const expected of [
   "brew tap Abitat/abitat",
   "brew install abitat",
+  "brew install cloudflared",
   "abitat iphone",
-  "workspace.abitat.io",
   "Install the Abitat iPhone app"
 ]) {
   if (!installDocs.includes(expected)) {
@@ -49,8 +51,9 @@ for (const expected of [
   "# Abitat User Onboarding",
   "brew tap Abitat/abitat",
   "brew install abitat",
+  "brew install cloudflared",
   "abitat iphone",
-  "The Mac and iPhone do not need to be on the same network"
+  "Cloudflare Quick Tunnel"
 ]) {
   if (!onboardingDocs.includes(expected)) {
     throw new Error(`Expected docs/onboarding.md to include ${expected}`);

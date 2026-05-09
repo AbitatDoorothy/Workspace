@@ -24,6 +24,14 @@ describe("cloud command", () => {
       scripts: Record<string, string>;
     };
     const wranglerConfig = await readFile(resolve(process.cwd(), "wrangler.jsonc"), "utf8");
+    const wrangler = JSON.parse(wranglerConfig) as {
+      compatibility_flags: string[];
+      hyperdrive: Array<{ binding: string; id: string }>;
+      main: string;
+      migrations: Array<{ deleted_classes?: string[] }>;
+      name: string;
+      routes: Array<{ pattern: string; zone_name: string }>;
+    };
     const openNextConfig = await readFile(resolve(process.cwd(), "open-next.config.ts"), "utf8");
 
     expect(packageJson.dependencies["@opennextjs/cloudflare"]).toBeTruthy();
@@ -37,12 +45,18 @@ describe("cloud command", () => {
     expect(packageJson.scripts["preview:cloudflare"]).toBe(
       "pnpm build:cloudflare && opennextjs-cloudflare preview"
     );
-    expect(wranglerConfig).toContain('"main": ".open-next/worker.js"');
-    expect(wranglerConfig).toContain('"compatibility_flags": ["nodejs_compat"]');
-    expect(wranglerConfig).toContain('"name": "abitat-workspace-edge"');
-    expect(wranglerConfig).toContain('"pattern": "workspace.abitat.io/*"');
-    expect(wranglerConfig).toContain('"zone_name": "abitat.io"');
-    expect(wranglerConfig).toContain('"deleted_classes": ["TunnelSession"]');
+    expect(wrangler.main).toBe(".open-next/worker.js");
+    expect(wrangler.compatibility_flags).toContain("nodejs_compat");
+    expect(wrangler.name).toBe("abitat-workspace-edge");
+    expect(wrangler.routes).toContainEqual({
+      pattern: "workspace.abitat.io/*",
+      zone_name: "abitat.io"
+    });
+    expect(wrangler.migrations[0]?.deleted_classes).toContain("TunnelSession");
+    expect(wrangler.hyperdrive).toContainEqual({
+      binding: "HYPERDRIVE",
+      id: "194e059cd023444c971068c8e06699b2"
+    });
     expect(openNextConfig).toContain("defineCloudflareConfig");
   });
 });

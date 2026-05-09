@@ -123,7 +123,7 @@ export class HostApiClient {
     });
 
     if (!response.ok) {
-      throw new Error(`${response.status} ${await response.text()}`);
+      throw await createHostApiError("GET", path, response);
     }
 
     return (await response.json()) as TResponse;
@@ -140,7 +140,7 @@ export class HostApiClient {
     });
 
     if (!response.ok) {
-      throw new Error(`${response.status} ${await response.text()}`);
+      throw await createHostApiError("PATCH", path, response);
     }
 
     return (await response.json()) as TResponse;
@@ -157,9 +157,38 @@ export class HostApiClient {
     });
 
     if (!response.ok) {
-      throw new Error(`${response.status} ${await response.text()}`);
+      throw await createHostApiError("POST", path, response);
     }
 
     return (await response.json()) as TResponse;
   }
+}
+
+export class HostApiError extends Error {
+  constructor(
+    readonly method: string,
+    readonly path: string,
+    readonly status: number,
+    readonly body: string
+  ) {
+    super(`${method} ${path} failed: ${status} ${body}`);
+    this.name = "HostApiError";
+  }
+}
+
+export function isTransientHostApiError(error: unknown): error is HostApiError {
+  if (!(error instanceof HostApiError)) {
+    return false;
+  }
+
+  if ([500, 502, 503, 504].includes(error.status)) {
+    return true;
+  }
+
+  const body = error.body.toLowerCase();
+  return body.includes("query read timeout") || body.includes("timed out");
+}
+
+async function createHostApiError(method: string, path: string, response: Response) {
+  return new HostApiError(method, path, response.status, await response.text());
 }

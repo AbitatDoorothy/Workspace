@@ -10,8 +10,21 @@ export interface PairingState {
   apiUrl: string;
   clientToken: string;
   hostMachineId: string;
+  macId?: string;
   machineId: string;
   workspaceId: string;
+}
+
+export interface LocalPairingPayload {
+  version: 1;
+  product: "abitat";
+  endpoint: string;
+  macId: string;
+  pairingSecret: string;
+  manualCode?: string;
+  expiresAt: string;
+  transport: "local" | "tailscale" | "quick-tunnel" | "manual";
+  capabilities?: string[];
 }
 
 export interface WorkspaceSummary {

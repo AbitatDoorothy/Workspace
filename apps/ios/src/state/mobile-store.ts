@@ -7,7 +7,7 @@ import type { CodexMobileModelSettings, MobileBootstrap, PairingState } from "..
 
 const STORAGE_KEY = "abitat.mobile.pairing";
 const MODEL_SETTINGS_STORAGE_KEY = "abitat.mobile.modelSettings";
-const DEFAULT_API_URL = "https://workspace.abitat.io";
+const DEFAULT_API_URL = "http://127.0.0.1:3901";
 const BOOTSTRAP_POLL_INTERVAL_MS = 5000;
 
 export function useMobileStore() {

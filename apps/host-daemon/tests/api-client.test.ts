@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { HostApiClient } from "../src/transport/api-client";
+import { HostApiClient, HostApiError, isTransientHostApiError } from "../src/transport/api-client";
 
 describe("HostApiClient", () => {
   afterEach(() => {
@@ -50,6 +50,40 @@ describe("HostApiClient", () => {
         },
         method: "POST"
       }
+    );
+  });
+
+  it("marks hosted timeout responses as transient API errors", async () => {
+    const client = new HostApiClient("https://workspace.example", "host_secret");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Query read timeout" }), {
+        status: 400
+      })
+    );
+
+    let pollError: unknown;
+    try {
+      await client.pollJob("machine_demo");
+    } catch (error) {
+      pollError = error;
+    }
+
+    expect(pollError).toBeInstanceOf(HostApiError);
+    expect(pollError).toMatchObject({
+      body: '{"error":"Query read timeout"}',
+      path: "/api/daemon/jobs/poll",
+      status: 400
+    });
+
+    const error = new HostApiError(
+      "POST",
+      "/api/daemon/jobs/poll",
+      400,
+      '{"error":"Query read timeout"}'
+    );
+    expect(isTransientHostApiError(error)).toBe(true);
+    expect(isTransientHostApiError(new HostApiError("POST", "/api/hosts/heartbeat", 401, ""))).toBe(
+      false
     );
   });
 });

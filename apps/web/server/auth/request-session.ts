@@ -2,7 +2,12 @@ import { cookies } from "next/headers";
 
 import { randomId } from "../crypto";
 import { prisma } from "../db/client";
-import { retryDbOperation, runDbOperation } from "../db/operation";
+import {
+  DEFAULT_DB_OPERATION_RETRIES,
+  DEFAULT_DB_OPERATION_TIMEOUT_MS,
+  retryDbOperation,
+  runDbOperation
+} from "../db/operation";
 import { SESSION_COOKIE_NAME, getSessionSecret, verifySessionToken } from "./session";
 
 export interface AccountContext {
@@ -46,8 +51,8 @@ export async function getAccountContextForUserId(userId: string): Promise<Accoun
         orderBy: { createdAt: "asc" }
       }),
     {
-      retries: 2,
-      timeoutMs: 5000
+      retries: DEFAULT_DB_OPERATION_RETRIES,
+      timeoutMs: DEFAULT_DB_OPERATION_TIMEOUT_MS
     }
   );
 
@@ -62,7 +67,7 @@ export async function getAccountContextForUserId(userId: string): Promise<Accoun
             ownerUserId: userId
           }
         }),
-      5000
+      DEFAULT_DB_OPERATION_TIMEOUT_MS
     );
     workspace = createdWorkspace;
     await runDbOperation(
@@ -75,7 +80,7 @@ export async function getAccountContextForUserId(userId: string): Promise<Accoun
             role: "owner"
           }
         }),
-      5000
+      DEFAULT_DB_OPERATION_TIMEOUT_MS
     );
   }
   const workspaceId = workspace.id;
@@ -92,8 +97,8 @@ export async function getAccountContextForUserId(userId: string): Promise<Accoun
         orderBy: { createdAt: "asc" }
       }),
     {
-      retries: 2,
-      timeoutMs: 5000
+      retries: DEFAULT_DB_OPERATION_RETRIES,
+      timeoutMs: DEFAULT_DB_OPERATION_TIMEOUT_MS
     }
   );
 
@@ -115,7 +120,7 @@ export async function getAccountContextForUserId(userId: string): Promise<Accoun
             installedToolsJson: []
           }
         }),
-      5000
+      DEFAULT_DB_OPERATION_TIMEOUT_MS
     );
   }
 

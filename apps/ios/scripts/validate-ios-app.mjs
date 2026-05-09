@@ -92,6 +92,27 @@ const codexModelControls = await readFile(
   join(process.cwd(), "src/components/CodexModelControls.tsx"),
   "utf8"
 );
+const apiClient = await readFile(join(process.cwd(), "src/api/client.ts"), "utf8");
+const mobileStore = await readFile(join(process.cwd(), "src/state/mobile-store.ts"), "utf8");
+const pairingScreen = await readFile(join(process.cwd(), "src/screens/PairingScreen.tsx"), "utf8");
+if (mobileStore.includes("https://workspace.abitat.io")) {
+  throw new Error("Expected mobile-store to avoid hosted workspace.abitat.io defaults");
+}
+if (!mobileStore.includes('const DEFAULT_API_URL = "http://127.0.0.1:3901"')) {
+  throw new Error("Expected mobile-store to default to the Mac-local control endpoint");
+}
+if (!apiClient.includes('"/pairing/consume"')) {
+  throw new Error("Expected iOS pairing to consume Mac-local pairing secrets");
+}
+if (!apiClient.includes("parsePairingPayload")) {
+  throw new Error("Expected iOS API client to parse Mac QR pairing payloads");
+}
+if (!pairingScreen.includes("CameraView") || !pairingScreen.includes("onBarcodeScanned")) {
+  throw new Error("Expected PairingScreen to scan Mac-generated QR payloads");
+}
+if (!pairingScreen.includes("pairingSecret")) {
+  throw new Error("Expected PairingScreen to exchange the Mac-issued pairing secret");
+}
 if (!conversationScreen.includes("mergeConversationMessages")) {
   throw new Error("Expected ConversationScreen to merge refreshed messages without duplicates");
 }
@@ -464,14 +485,12 @@ if (notificationWatcher.includes("isNotificationMessageFromCompletedTurn")) {
   throw new Error("Expected notifications to be based on turn completion, not assistant messages");
 }
 
-const apiClient = await readFile(join(process.cwd(), "src/api/client.ts"), "utf8");
 for (const expected of ["listCodexModels", "model?: string", "effort?: CodexReasoningEffort"]) {
   if (!apiClient.includes(expected)) {
     throw new Error(`Expected API client to support Codex model control: ${expected}`);
   }
 }
 
-const mobileStore = await readFile(join(process.cwd(), "src/state/mobile-store.ts"), "utf8");
 for (const expected of ["MODEL_SETTINGS_STORAGE_KEY", "modelSettings", "saveModelSettings"]) {
   if (!mobileStore.includes(expected)) {
     throw new Error(`Expected mobile store to persist Codex model settings: ${expected}`);

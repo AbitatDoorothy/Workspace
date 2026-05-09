@@ -15,8 +15,7 @@ const PUBLIC_PATHS = new Set([
   "/api/logout",
   "/api/health",
   "/api/cli/device-login/start",
-  "/api/cli/device-login/poll",
-  "/api/mobile/pairing/complete"
+  "/api/cli/device-login/poll"
 ]);
 const HOST_API_PATHS = new Set([
   "/api/hosts/register",
@@ -29,6 +28,16 @@ const HOST_API_PATHS = new Set([
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (isHostedMobileControlRequest(pathname)) {
+    return NextResponse.json(
+      {
+        error:
+          "Hosted mobile control has been retired. Run abitat iphone on the Mac and pair the iPhone with the QR/manual payload from that local command."
+      },
+      { status: 410 }
+    );
+  }
 
   if (isPublicRequest(request)) {
     return NextResponse.next();
@@ -63,10 +72,12 @@ function isPublicRequest(request: NextRequest) {
       /^\/api\/conversations\/[^/]+\/(?:events|changeset)$/u.test(pathname)) ||
     (request.method === "POST" &&
       hasBearerToken &&
-      /^\/api\/daemon\/jobs\/[^/]+\/ack$/u.test(pathname)) ||
-    (hasBearerToken &&
-      (pathname.startsWith("/api/mobile/") || pathname.startsWith("/api/remote-control/")))
+      /^\/api\/daemon\/jobs\/[^/]+\/ack$/u.test(pathname))
   );
+}
+
+function isHostedMobileControlRequest(pathname: string) {
+  return pathname.startsWith("/api/mobile/") || pathname.startsWith("/api/remote-control/");
 }
 
 export const config = {

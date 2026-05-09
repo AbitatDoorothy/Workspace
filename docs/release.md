@@ -29,7 +29,7 @@ pnpm test:homebrew
 
 ## Homebrew
 
-The formula source lives at `Formula/abitat.rb` and installs the published `@abitat_reece/cli` npm tarball with `node@22`. It also declares Python as a build dependency because the packaged host daemon includes the native `node-pty` dependency.
+The formula source lives at `Formula/abitat.rb` and installs the published `@abitat_reece/cli` npm tarball with `node@22`. It declares Python as a build dependency because the packaged host daemon includes the native `node-pty` dependency, and it depends on `cloudflared` so off-network iPhone control works without any second iPhone networking app.
 
 For the first public Homebrew release:
 
@@ -56,11 +56,11 @@ If the formula is later accepted into Homebrew core, users can install with `bre
 
 ## Hosted Web
 
-Deploy `apps/web` to `https://workspace.abitat.io` with the environment in `docs/hosting.md`, then apply the Prisma migrations.
+Hosted web deployment is optional for dashboard development and legacy hosted flows. Core iPhone control no longer depends on `workspace.abitat.io` or a hosted database.
 
 ## iPhone App
 
-Ship a TestFlight or App Store build with the API URL defaulting to `https://workspace.abitat.io`.
+Ship a TestFlight or App Store build with the local-first pairing screen. The app should pair from the QR/manual payload printed by `abitat iphone`.
 
 ## User Flow
 
@@ -69,7 +69,8 @@ After release, a new user can:
 ```sh
 brew tap Abitat/abitat
 brew install abitat
+abitat doctor
 abitat iphone
 ```
 
-Then they register or log in at `workspace.abitat.io`, open the iPhone app, and pair with the hosted dashboard. The phone and Mac can be on different networks because both communicate through the hosted API.
+Then they open the iPhone app and scan the QR code printed by the Mac. The phone and Mac can be on different networks because the Mac starts a Cloudflare Quick Tunnel and embeds that temporary URL in the pairing payload.

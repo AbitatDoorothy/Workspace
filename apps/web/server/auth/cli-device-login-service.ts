@@ -5,6 +5,8 @@ import { randomHex, randomId, sha256Hex } from "../crypto";
 import { prisma } from "../db/client";
 import {
   DB_OPERATION_TIMEOUT_ERROR_NAME,
+  DEFAULT_DB_OPERATION_RETRIES,
+  DEFAULT_DB_OPERATION_TIMEOUT_MS,
   isDbOperationTimeout,
   retryDbOperation
 } from "../db/operation";
@@ -92,8 +94,8 @@ export function createCliDeviceLoginService(
     ((actor: CliTokenActor, issuedAt: Date) =>
       createSignedCliToken(actor, tokenSecret, tokenTtlMs, issuedAt.getTime()));
   const ttlMs = options.ttlMs ?? DEFAULT_LOGIN_TTL_MS;
-  const dbOperationRetries = options.dbOperationRetries ?? 2;
-  const dbOperationTimeoutMs = options.dbOperationTimeoutMs ?? 5000;
+  const dbOperationRetries = options.dbOperationRetries ?? DEFAULT_DB_OPERATION_RETRIES;
+  const dbOperationTimeoutMs = options.dbOperationTimeoutMs ?? DEFAULT_DB_OPERATION_TIMEOUT_MS;
 
   return {
     async startLogin() {

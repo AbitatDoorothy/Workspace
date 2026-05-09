@@ -2,8 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { connect } from "node:net";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,7 +14,7 @@ import {
   sessionConfigPath,
   type FetchFn
 } from "./auth.js";
-import { prepareIphoneCommand, type StartupProcess } from "./iphone.js";
+import { createIphoneStartupPlan, type IphoneTransport, type StartupProcess } from "./iphone.js";
 
 export type AbitatCommand = {
   command: "doctor" | "help" | "iphone" | "login" | "logout";
@@ -53,7 +52,6 @@ export function parseCommand(args: string[]): AbitatCommand {
 export async function runCli(args: string[], input: RunCliInput = {}) {
   const parsed = parseCommand(args);
   const env = input.env ?? process.env;
-  const isEndpointListening = input.isEndpointListening ?? isTcpEndpointListening;
   const output = input.output ?? console.log;
   const openUrl = input.openUrl ?? openUrlInBrowser;
   const homeDir = input.homeDir ?? homedir();
@@ -85,76 +83,27 @@ export async function runCli(args: string[], input: RunCliInput = {}) {
 
   if (parsed.command === "doctor") {
     const session = await loadCliSession(configPath);
-    output(session ? `Logged in to ${session.apiUrl}` : "Not logged in. Run `abitat login`.");
+    output("Local iPhone control does not require an Abitat hosted login.");
+    if (session) {
+      output(`Hosted web session: ${session.apiUrl}`);
+    }
     return 0;
   }
 
-  const session =
-    (await loadCliSession(configPath)) ??
-    (await runLoginCommand({
-      apiUrl,
-      configPath,
-      fetchFn: input.fetchFn,
-      openUrl,
-      pollIntervalMs: input.pollIntervalMs
-    }));
-  const result = await prepareIphoneCommand({
+  const startupPlan = createIphoneStartupPlan({
     codexServerUrl: env.CODEX_APP_SERVER_URL ?? DEFAULT_CODEX_APP_SERVER_URL,
-    fetchFn: input.fetchFn,
-    machineName: env.ABITAT_MACHINE_NAME ?? hostname(),
-    platform: input.platform ?? process.platform,
-    session
+    endpoint: readOption(args, "--endpoint") ?? env.ABITAT_LOCAL_CONTROL_ENDPOINT,
+    port: numberOption(args, "--port", Number(env.ABITAT_LOCAL_CONTROL_PORT ?? 3901)),
+    transport: transportOption(readOption(args, "--transport") ?? "quick-tunnel")
   });
 
-  for (const process of result.startupPlan) {
-    const existingServerUrl = codexAppServerListenUrl(process);
-    if (existingServerUrl && (await isEndpointListening(existingServerUrl))) {
-      output(`Using existing Codex app server at ${existingServerUrl}`);
-      continue;
-    }
-
+  output("Starting local-first iPhone control on this Mac.");
+  output("The Mac will print a QR/manual pairing payload. No hosted domain or database is used.");
+  for (const process of startupPlan) {
     (input.startProcess ?? startProcess)(process);
   }
 
-  openUrl(session.apiUrl);
-  output(`Mac host registered as ${result.registration.machineId}`);
-  output(`Open the iPhone app and pair from ${session.apiUrl}`);
   return 0;
-}
-
-function codexAppServerListenUrl(process: StartupProcess) {
-  if (process.name !== "codex-app-server") {
-    return null;
-  }
-
-  const listenIndex = process.args.indexOf("--listen");
-  return listenIndex >= 0 ? (process.args[listenIndex + 1] ?? null) : null;
-}
-
-function isTcpEndpointListening(url: string, timeoutMs = 250) {
-  return new Promise<boolean>((resolve) => {
-    let settled = false;
-
-    const endpoint = new URL(url);
-    const socket = connect({
-      host: endpoint.hostname,
-      port: Number(endpoint.port || (endpoint.protocol === "wss:" ? 443 : 80))
-    });
-
-    const finish = (listening: boolean) => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      socket.destroy();
-      resolve(listening);
-    };
-
-    socket.setTimeout(timeoutMs, () => finish(false));
-    socket.on("connect", () => finish(true));
-    socket.on("error", () => finish(false));
-  });
 }
 
 function startProcess(process: StartupProcess) {
@@ -169,7 +118,7 @@ export function resolveStartupProcess(
   process: StartupProcess,
   options: ResolveStartupProcessOptions = {}
 ): StartupProcess {
-  if (process.name !== "host-daemon") {
+  if (process.command !== "abitat-host") {
     return process;
   }
 
@@ -195,6 +144,35 @@ function openUrlInBrowser(url: string) {
     stdio: "ignore"
   });
   child.unref();
+}
+
+function readOption(args: string[], option: string) {
+  const index = args.indexOf(option);
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+function numberOption(args: string[], option: string, fallback: number) {
+  const value = readOption(args, option);
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function transportOption(value: string): IphoneTransport {
+  if (
+    value === "auto" ||
+    value === "local" ||
+    value === "tailscale" ||
+    value === "quick-tunnel" ||
+    value === "manual"
+  ) {
+    return value;
+  }
+
+  return "auto";
 }
 
 export function isCliEntrypoint(importMetaUrl: string, argvPath = process.argv[1]) {

@@ -7,6 +7,7 @@ import {
   getRequestSessionUserId
 } from "../../../../../server/auth/request-session";
 import { createBrowserRedirectUrl, sanitizeRedirectPath } from "../../../../../server/auth/session";
+import { isDbOperationTimeout } from "../../../../../server/db/operation";
 import { mobileService } from "../../../../../server/mobile";
 import { mobileActivityLog } from "../../../../../server/mobile/mobile-activity-log";
 
@@ -21,7 +22,7 @@ export async function POST(request: Request) {
       ?.includes("application/x-www-form-urlencoded");
     const input = requestSchema.parse(await parseRequest(request));
     const account =
-      !isFormRequest && input.workspaceId && input.hostMachineId
+      input.workspaceId && input.hostMachineId
         ? {
             userId: await requireRequestSessionUserId(request),
             workspaceId: input.workspaceId,
@@ -31,7 +32,8 @@ export async function POST(request: Request) {
     const pairing = await mobileService.createPhonePairing({
       workspaceId: account.workspaceId,
       hostMachineId: account.hostMachineId,
-      createdByUserId: account.userId
+      createdByUserId: account.userId,
+      skipHostLookup: Boolean(input.workspaceId && input.hostMachineId)
     });
     mobileActivityLog.record("mobile_pairing_started", {
       hostMachineId: account.hostMachineId,
@@ -53,7 +55,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to start phone pairing" },
-      { status: 400 }
+      { status: isDbOperationTimeout(error) ? 503 : 400 }
     );
   }
 }

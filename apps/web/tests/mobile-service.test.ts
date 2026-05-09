@@ -77,7 +77,15 @@ function createMobileDb() {
         [...machines.values()].filter((machine) =>
           Object.entries(where).every(([key, value]) => machine[key as keyof TestMachine] === value)
         ),
-      findUnique: async ({ where }: { where: { id: string } }) => machines.get(where.id) ?? null,
+      findUnique: async ({ where }: { where: { id?: string; tokenHash?: string } }) => {
+        if (where.id) {
+          return machines.get(where.id) ?? null;
+        }
+
+        return (
+          [...machines.values()].find((machine) => machine.tokenHash === where.tokenHash) ?? null
+        );
+      },
       update: async ({ where, data }: { where: { id: string }; data: Partial<TestMachine> }) => {
         const current = machines.get(where.id);
         if (!current) {
@@ -163,6 +171,51 @@ describe("mobile service", () => {
         appVersion: "1.0.0"
       })
     ).rejects.toThrow("Pairing code has already been used");
+  });
+
+  it("rejects phone pairing when the signed-in user does not own the host", async () => {
+    const db = createMobileDb();
+    db.state.machines.set("machine_other", {
+      id: "machine_other",
+      workspaceId: "workspace_demo",
+      name: "Other Host",
+      type: "host",
+      status: "online",
+      ownerUserId: "user_other",
+      pairingTokenHash: "host-token"
+    });
+    const service = createMobileService(db);
+
+    await expect(
+      service.createPhonePairing({
+        workspaceId: "workspace_demo",
+        hostMachineId: "machine_other",
+        createdByUserId: "user_demo"
+      })
+    ).rejects.toThrow("Host machine not found");
+  });
+
+  it("can create a pairing from a trusted host target without another host lookup", async () => {
+    const db = createMobileDb();
+    db.machine.findUnique = async () => {
+      throw new Error("Host lookup should be skipped");
+    };
+    const service = createMobileService(db, {
+      codeGenerator: () => "ABITAT-654321",
+      idGenerator: (prefix) => `${prefix}_test`,
+      now: () => new Date("2026-05-03T10:00:00.000Z")
+    });
+
+    await expect(
+      service.createPhonePairing({
+        workspaceId: "workspace_demo",
+        hostMachineId: "machine_demo",
+        createdByUserId: "user_demo",
+        skipHostLookup: true
+      })
+    ).resolves.toMatchObject({
+      code: "ABITAT-654321"
+    });
   });
 
   it("rejects expired pairing codes", async () => {
@@ -276,14 +329,14 @@ describe("mobile service", () => {
       deviceKind: "phone",
       platform: "ios"
     });
-    const findFirst = db.machine.findFirst;
+    const findUnique = db.machine.findUnique;
     let attempts = 0;
-    db.machine.findFirst = async (args) => {
+    db.machine.findUnique = async (args) => {
       attempts += 1;
       if (attempts === 1) {
         return new Promise<TestMachine | null>(() => undefined);
       }
-      return findFirst(args);
+      return findUnique(args);
     };
     const service = createMobileService(db, {
       dbOperationRetries: 1,
@@ -295,6 +348,39 @@ describe("mobile service", () => {
       workspaceId: "workspace_demo"
     });
     expect(attempts).toBe(2);
+  });
+
+  it("issues signed mobile tokens that authenticate without a database read", async () => {
+    const db = createMobileDb();
+    const service = createMobileService(db, {
+      codeGenerator: () => "ABITAT-654321",
+      idGenerator: (prefix) => `${prefix}_test`,
+      now: () => new Date("2026-05-03T10:00:00.000Z"),
+      tokenSecret: "test-secret"
+    });
+
+    await service.createPhonePairing({
+      workspaceId: "workspace_demo",
+      hostMachineId: "machine_demo",
+      createdByUserId: "user_demo"
+    });
+    const paired = await service.completePhonePairing({
+      code: "ABITAT-654321",
+      deviceName: "Reece iPhone",
+      platform: "ios",
+      appVersion: "1.0.0"
+    });
+    db.machine.findUnique = async () => {
+      throw new Error("Signed mobile tokens should not read before authentication");
+    };
+
+    expect(paired.clientToken).toMatch(/^client_v2_/u);
+    await expect(service.requireMobileActor(paired.clientToken)).resolves.toEqual({
+      machineId: "machine_test",
+      workspaceId: "workspace_demo",
+      hostMachineId: "machine_demo",
+      userId: "user_demo"
+    });
   });
 
   it("reports a paired host as online when a recent heartbeat exists even if the stored status is pending", async () => {

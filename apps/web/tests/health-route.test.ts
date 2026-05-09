@@ -5,6 +5,7 @@ import { GET } from "../app/api/health/route";
 const queryRaw = vi.hoisted(() => vi.fn(async () => [{ "?column?": 1 }]));
 
 vi.mock("../server/db/client", () => ({
+  databaseConnectionSource: "hyperdrive",
   prisma: {
     $queryRaw: queryRaw
   }
@@ -24,6 +25,7 @@ describe("health route", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       database: "ok",
+      databaseConnectionSource: "hyperdrive",
       publicUrl: "https://workspace.abitat.io"
     });
   });
@@ -37,6 +39,7 @@ describe("health route", () => {
     await expect(response.json()).resolves.toEqual({
       ok: false,
       database: "error",
+      databaseConnectionSource: "hyperdrive",
       publicUrl: "https://workspace.abitat.io"
     });
   });

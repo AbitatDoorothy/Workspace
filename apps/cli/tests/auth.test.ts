@@ -14,8 +14,8 @@ import {
 } from "../src/auth";
 
 describe("CLI auth storage", () => {
-  it("defaults to the hosted Abitat API", () => {
-    expect(defaultApiUrl({})).toBe("https://workspace.abitat.io");
+  it("defaults to the Mac-local Abitat API", () => {
+    expect(defaultApiUrl({})).toBe("http://127.0.0.1:3901");
     expect(defaultApiUrl({ ABITAT_API_URL: "https://staging.abitat.io" })).toBe(
       "https://staging.abitat.io"
     );
@@ -27,7 +27,7 @@ describe("CLI auth storage", () => {
 
     await saveCliSession(
       {
-        apiUrl: "https://workspace.abitat.io",
+        apiUrl: "http://127.0.0.1:3901",
         cliToken: "cli_secret",
         userId: "user_1"
       },
@@ -35,7 +35,7 @@ describe("CLI auth storage", () => {
     );
 
     await expect(loadCliSession(configPath)).resolves.toEqual({
-      apiUrl: "https://workspace.abitat.io",
+      apiUrl: "http://127.0.0.1:3901",
       cliToken: "cli_secret",
       userId: "user_1"
     });
@@ -45,7 +45,7 @@ describe("CLI auth storage", () => {
     await rm(homeDir, { force: true, recursive: true });
   });
 
-  it("runs the hosted browser login flow and stores the approved CLI session", async () => {
+  it("runs the local browser login flow and stores the approved CLI session", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "abitat-cli-login-"));
     const configPath = sessionConfigPath(homeDir);
     const openedUrls: string[] = [];
@@ -78,38 +78,38 @@ describe("CLI auth storage", () => {
 
     await expect(
       runLoginCommand({
-        apiUrl: "https://workspace.abitat.io",
+        apiUrl: "http://127.0.0.1:3901",
         configPath,
         fetchFn,
         openUrl: (url) => openedUrls.push(url),
         pollIntervalMs: 0
       })
     ).resolves.toEqual({
-      apiUrl: "https://workspace.abitat.io",
+      apiUrl: "http://127.0.0.1:3901",
       cliToken: "cli_secret",
       userId: "user_1"
     });
 
-    expect(openedUrls).toEqual(["https://workspace.abitat.io/login?cliCode=ABITAT-LOGIN"]);
+    expect(openedUrls).toEqual(["http://127.0.0.1:3901/login?cliCode=ABITAT-LOGIN"]);
     expect(requests).toEqual([
       {
-        url: "https://workspace.abitat.io/api/cli/device-login/start",
+        url: "http://127.0.0.1:3901/api/cli/device-login/start",
         body: null
       },
       {
-        url: "https://workspace.abitat.io/api/cli/device-login/poll",
+        url: "http://127.0.0.1:3901/api/cli/device-login/poll",
         body: { deviceLoginId: "cli_login_1" }
       }
     ]);
     await expect(loadCliSession(configPath)).resolves.toEqual({
-      apiUrl: "https://workspace.abitat.io",
+      apiUrl: "http://127.0.0.1:3901",
       cliToken: "cli_secret",
       userId: "user_1"
     });
     await rm(homeDir, { force: true, recursive: true });
   });
 
-  it("keeps polling through temporary hosted tunnel failures", async () => {
+  it("keeps polling through temporary local endpoint failures", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "abitat-cli-login-retry-"));
     const configPath = sessionConfigPath(homeDir);
     let pollAttempts = 0;
@@ -144,7 +144,7 @@ describe("CLI auth storage", () => {
 
     await expect(
       runLoginCommand({
-        apiUrl: "https://workspace.abitat.io",
+        apiUrl: "http://127.0.0.1:3901",
         configPath,
         fetchFn,
         maxPolls: 4,
@@ -152,7 +152,7 @@ describe("CLI auth storage", () => {
         pollIntervalMs: 0
       })
     ).resolves.toEqual({
-      apiUrl: "https://workspace.abitat.io",
+      apiUrl: "http://127.0.0.1:3901",
       cliToken: "cli_secret",
       userId: "user_1"
     });
@@ -161,7 +161,7 @@ describe("CLI auth storage", () => {
     await rm(homeDir, { force: true, recursive: true });
   });
 
-  it("retries login start through temporary hosted API failures before opening the browser", async () => {
+  it("retries login start through temporary local API failures before opening the browser", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "abitat-cli-login-start-retry-"));
     const configPath = sessionConfigPath(homeDir);
     const openedUrls: string[] = [];
@@ -197,7 +197,7 @@ describe("CLI auth storage", () => {
 
     await expect(
       runLoginCommand({
-        apiUrl: "https://workspace.abitat.io",
+        apiUrl: "http://127.0.0.1:3901",
         configPath,
         fetchFn,
         openUrl: (url) => openedUrls.push(url),
@@ -205,13 +205,13 @@ describe("CLI auth storage", () => {
         startRetryDelayMs: 0
       })
     ).resolves.toEqual({
-      apiUrl: "https://workspace.abitat.io",
+      apiUrl: "http://127.0.0.1:3901",
       cliToken: "cli_secret",
       userId: "user_1"
     });
 
     expect(startAttempts).toBe(3);
-    expect(openedUrls).toEqual(["https://workspace.abitat.io/login?cliCode=ABITAT-LOGIN"]);
+    expect(openedUrls).toEqual(["http://127.0.0.1:3901/login?cliCode=ABITAT-LOGIN"]);
     await rm(homeDir, { force: true, recursive: true });
   });
 });

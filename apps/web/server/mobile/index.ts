@@ -24,7 +24,9 @@ function createPrismaMobileDb(db: PrismaClient): MobileDb {
         });
       },
       findUnique(args) {
-        return db.machine.findUnique(args);
+        return db.machine.findUnique({
+          where: args.where as Prisma.MachineWhereUniqueInput
+        });
       },
       update(args) {
         return db.machine.update({

@@ -1,7 +1,7 @@
 {
   "name": "@abitat_reece/host-daemon",
   "private": false,
-  "version": "0.1.3",
+  "version": "0.1.6",
   "type": "module",
   "description": "Mac host daemon for Abitat Workspace remote Codex control",
   "bin": {
@@ -32,9 +32,11 @@
   "dependencies": {
     "@abitat_reece/shared": "workspace:*",
     "node-pty": "^1.1.0",
+    "qrcode-terminal": "0.12.0",
     "ws": "^8.20.0"
   },
   "devDependencies": {
+    "@types/qrcode-terminal": "0.12.2",
     "@types/ws": "^8.18.1",
     "tsx": "4.21.0"
   }

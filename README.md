@@ -6,7 +6,9 @@ Abitat Workspace is a web-controlled local coding-agent runtime. This scaffold i
 
 - Node.js 24 or newer
 - pnpm 10.33.0 or newer
-- PostgreSQL running on `localhost:5432`
+- Codex installed and signed in on the Mac
+- `cloudflared` on the Mac for off-network iPhone control without another iPhone app
+- PostgreSQL running on `localhost:5432` only when developing the web app
 
 ## Local Setup
 
@@ -56,18 +58,26 @@ pnpm test
 pnpm format
 ```
 
-## Cloudflare Workspace
+## Local-First iPhone Control
 
-`workspace.abitat.io` is hosted on Cloudflare Workers and uses hosted Postgres for account, pairing, project, and conversation state. Users do not need to run the web app locally to open the mobile control plane.
+Core iPhone control is local-first. The Mac runs the Abitat control server, owns Codex execution and state, and issues the short-lived pairing payload. The iPhone stores the paired Mac endpoint and token locally, then calls that Mac directly through Tailscale, a temporary tunnel, or a user-managed endpoint. No Abitat-hosted domain or hosted database is required for pairing, projects, conversations, messages, attachments, or remote control.
 
-For the public flow, install and authenticate the CLI, then start the local Mac host daemon:
+Recommended public flow:
 
 ```bash
-abitat login
+brew install cloudflared
 abitat iphone
 ```
 
-Open `https://workspace.abitat.io` or the iPhone app, register or log in with the same email account, and pair the phone to the Mac host. The host daemon connects outbound to the hosted API, so the phone and Mac do not need to be on the same Wi-Fi network.
+The command starts the Mac-local control server, starts a Cloudflare Quick Tunnel from the Mac, prints a QR/manual pairing payload with the generated `trycloudflare.com` URL, and bridges requests to the local Codex app-server. The iPhone only needs the Abitat app.
+
+Same-Wi-Fi, Tailscale, and manual endpoint modes are still available:
+
+```bash
+abitat iphone --transport local
+abitat iphone --transport tailscale
+abitat iphone --transport manual --endpoint https://your-endpoint.example
+```
 
 For local development on this repository, use:
 
@@ -82,11 +92,11 @@ From any directory, use the project-directed form instead:
 pnpm --dir /Users/reece/Desktop/Abitat_Workspace iphone
 ```
 
-The daemon uploads the local `git`, `gh`, `node`, `python`, `codex`, and `claude` scan on startup. After that, create projects, agents, and conversations from the web UI.
+The local control server reads projects, conversations, and messages from the Mac's Codex state. Phone messages are sent through the Mac and never write directly to hosted state.
 
-When a Codex conversation starts, the host daemon opens macOS Terminal and runs the local Codex CLI for the matching web conversation. Continuing a web conversation resumes the stored Codex session instead of creating a new one. Set `ABITAT_CLI_RUNTIME_MODE=inline` only when you want the older hidden CLI runner for debugging.
+When a Codex conversation starts from the phone, the Mac bridge starts or resumes the local Codex thread. Set `CODEX_APP_SERVER_URL` only when you want to point Abitat at a non-default Codex app-server endpoint.
 
-For debugging the older local relay flow, the split commands still exist as `pnpm cloud:dev` and `pnpm cloud:host`. For legacy Cloudflare Tunnel testing, set `ABITAT_TUNNEL_MODE=cloudflared` before `pnpm cloud`.
+The hosted web app may still be useful for local dashboard development, but hosted mobile-control APIs are retired and return guidance to run `abitat iphone` on the Mac.
 
 ## Workspace Structure
 

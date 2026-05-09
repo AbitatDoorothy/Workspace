@@ -42,7 +42,7 @@ try {
       ABITAT_CLI_CONFIG_PATH: join(installDir, "abitat-cli-config.json")
     }
   });
-  if (!doctor.stdout.includes("Not logged in. Run `abitat login`.")) {
+  if (!doctor.stdout.includes("Local iPhone control does not require an Abitat hosted login.")) {
     throw new Error(`Unexpected abitat doctor output: ${doctor.stdout}`);
   }
 

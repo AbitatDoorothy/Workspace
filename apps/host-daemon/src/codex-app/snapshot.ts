@@ -9,7 +9,8 @@ const CODEX_THREAD_PREFIX = "codex_thread_";
 const DEFAULT_CODEX_APP_SERVER_URL = "ws://127.0.0.1:47777";
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_SYNCED_THREADS = 80;
-const MAX_MESSAGE_CONTENT_LENGTH = 12_000;
+const MAX_SYNCED_MESSAGES_PER_THREAD = 80;
+const MAX_MESSAGE_CONTENT_LENGTH = 4_000;
 
 let nextRequestId = 1;
 
@@ -208,7 +209,7 @@ class CodexSnapshotClient {
         },
         clientInfo: {
           name: "abitat-host-daemon",
-          version: "0.1.3"
+          version: "0.1.4"
         }
       });
       connection.notify("initialized");
@@ -385,7 +386,7 @@ function flattenThreadMessages(thread: CodexAppThread) {
     for (const [itemIndex, item] of turn.items.entries()) {
       const flattened = threadItemToMessageContent(item);
 
-      if (!flattened) {
+      if (!flattened || flattened.role === "runtime") {
         continue;
       }
 
@@ -414,7 +415,7 @@ function flattenThreadMessages(thread: CodexAppThread) {
     }
   }
 
-  return messages;
+  return messages.slice(-MAX_SYNCED_MESSAGES_PER_THREAD);
 }
 
 function threadItemToMessageContent(item: CodexAppThreadItem) {

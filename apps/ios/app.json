@@ -10,10 +10,14 @@
       "bundleIdentifier": "io.abitat.workspace",
       "supportsTablet": false,
       "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        },
         "NSCameraUsageDescription": "Abitat scans the pairing QR code shown on your Mac.",
         "UIBackgroundModes": ["fetch", "remote-notification"]
       },
-      "buildNumber": "2"
+      "buildNumber": "3"
     },
     "plugins": [
       "expo-secure-store",
@@ -30,7 +34,7 @@
       ]
     ],
     "extra": {
-      "defaultApiUrl": "https://workspace.abitat.io",
+      "defaultApiUrl": "http://127.0.0.1:3901",
       "eas": {
         "projectId": "a04ce550-f89e-40b6-9426-3af635b23ee3"
       }

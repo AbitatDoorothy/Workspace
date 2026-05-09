@@ -262,6 +262,33 @@ describe("host service", () => {
     expect(findUniqueAttempts).toBe(0);
   });
 
+  it("does not fail signed host tool scans when the hosted update times out", async () => {
+    const db = createHostDb();
+    const service = createHostService(db, {
+      dbOperationRetries: 0,
+      dbOperationTimeoutMs: 1,
+      idGenerator: (prefix) => `${prefix}_1`,
+      tokenSecret: "test-secret"
+    });
+    const result = await service.registerHost({
+      userId: "user_1",
+      workspaceId: "workspace_1",
+      machineName: "Reece MacBook Pro",
+      platform: "darwin"
+    });
+    db.machine.update = async () => new Promise<TestMachine>(() => undefined);
+
+    await expect(
+      service.recordToolScan(
+        {
+          machineId: result.machineId,
+          tools: [{ name: "git", installed: true }]
+        },
+        result.hostToken
+      )
+    ).resolves.toEqual({ ok: true });
+  });
+
   it("retries host registration when a hosted database read stalls", async () => {
     const db = createHostDb();
     const findFirst = db.machine.findFirst;

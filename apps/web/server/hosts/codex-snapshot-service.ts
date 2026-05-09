@@ -6,6 +6,8 @@ import type {
   CodexAppProjectSummary,
   CodexCompletionState
 } from "../codex-app";
+import { DEFAULT_DB_OPERATION_TIMEOUT_MS, retryDbOperation } from "../db/operation";
+import type { SignedHostTokenActor } from "./host-service";
 
 interface HostMachineRecord {
   id: string;
@@ -43,10 +45,34 @@ interface HostCodexSnapshotInput {
   syncedAt?: string;
 }
 
+const DEFAULT_HOST_FEATURES = ["codex", "claude", "screen_capture", "input_control"];
+const MAX_SNAPSHOT_COMPLETIONS = 80;
+const MAX_SNAPSHOT_CONVERSATIONS = 80;
+const MAX_SNAPSHOT_MESSAGES_PER_CONVERSATION = 80;
+const MAX_SNAPSHOT_MESSAGE_CONTENT_LENGTH = 4_000;
+const MAX_SNAPSHOT_MODELS = 40;
+const MAX_SNAPSHOT_PROJECTS = 80;
+const SNAPSHOT_DB_RETRIES = 2;
+const SNAPSHOT_DB_TIMEOUT_MS = DEFAULT_DB_OPERATION_TIMEOUT_MS;
+
 export function createHostCodexSnapshotService(db: HostCodexSnapshotDb) {
   return {
-    async recordSnapshot(input: { machineId: string; snapshot: HostCodexSnapshotInput }) {
-      const host = await db.machine.findUnique({ where: { id: input.machineId } });
+    async recordSnapshot(input: {
+      machineId: string;
+      signedHost?: SignedHostTokenActor | null;
+      snapshot: HostCodexSnapshotInput;
+    }) {
+      const host =
+        input.signedHost?.machineId === input.machineId
+          ? signedHostRecord(input.signedHost)
+          : await retryDbOperation(
+              "host_codex_snapshot_find_host",
+              () => db.machine.findUnique({ where: { id: input.machineId } }),
+              {
+                retries: SNAPSHOT_DB_RETRIES,
+                timeoutMs: SNAPSHOT_DB_TIMEOUT_MS
+              }
+            );
 
       if (!host || host.type !== "host") {
         throw new Error("Host machine not found");
@@ -55,17 +81,25 @@ export function createHostCodexSnapshotService(db: HostCodexSnapshotDb) {
       const capabilities = normalizeHostCapabilities(host.capabilitiesJson);
       const snapshot = scopeSnapshot(host, input.snapshot);
 
-      await db.machine.update({
-        where: { id: host.id },
-        data: {
-          capabilitiesJson: {
-            ...capabilities,
-            codexAppSnapshot: snapshot
-          },
-          lastSeenAt: new Date(),
-          status: "online"
+      await retryDbOperation(
+        "host_codex_snapshot_update_host",
+        () =>
+          db.machine.update({
+            where: { id: host.id },
+            data: {
+              capabilitiesJson: {
+                ...capabilities,
+                codexAppSnapshot: snapshot
+              },
+              lastSeenAt: new Date(),
+              status: "online"
+            }
+          }),
+        {
+          retries: SNAPSHOT_DB_RETRIES,
+          timeoutMs: SNAPSHOT_DB_TIMEOUT_MS
         }
-      });
+      );
 
       return snapshot;
     },
@@ -75,7 +109,15 @@ export function createHostCodexSnapshotService(db: HostCodexSnapshotDb) {
         return null;
       }
 
-      const host = await db.machine.findUnique({ where: { id: input.hostMachineId } });
+      const hostMachineId = input.hostMachineId;
+      const host = await retryDbOperation(
+        "host_codex_snapshot_get_host",
+        () => db.machine.findUnique({ where: { id: hostMachineId } }),
+        {
+          retries: SNAPSHOT_DB_RETRIES,
+          timeoutMs: SNAPSHOT_DB_TIMEOUT_MS
+        }
+      );
       if (!host || host.type !== "host" || host.workspaceId !== input.workspaceId) {
         return null;
       }
@@ -161,6 +203,16 @@ export function createHostCodexSnapshotService(db: HostCodexSnapshotDb) {
   };
 }
 
+function signedHostRecord(host: SignedHostTokenActor): HostMachineRecord {
+  return {
+    id: host.machineId,
+    workspaceId: host.workspaceId,
+    ownerUserId: null,
+    type: "host",
+    capabilitiesJson: DEFAULT_HOST_FEATURES
+  };
+}
+
 function scopeSnapshot(
   host: Pick<HostMachineRecord, "ownerUserId" | "workspaceId">,
   input: HostCodexSnapshotInput
@@ -170,34 +222,57 @@ function scopeSnapshot(
       ? input.syncedAt
       : new Date().toISOString();
   const userId = host.ownerUserId ?? "user_demo";
+  const projects = (input.projects ?? []).slice(0, MAX_SNAPSHOT_PROJECTS);
+  const projectIds = new Set(projects.map((project) => project.id));
+  const conversations = (input.conversations ?? [])
+    .filter((conversation) => projectIds.size === 0 || projectIds.has(conversation.projectId))
+    .slice(0, MAX_SNAPSHOT_CONVERSATIONS);
+  const conversationIds = new Set(conversations.map((conversation) => conversation.id));
 
   return {
-    completions: (input.completions ?? []).map((completion) => ({
-      ...completion,
-      workspaceId: host.workspaceId
-    })),
-    conversations: (input.conversations ?? []).map((conversation) => ({
+    completions: (input.completions ?? [])
+      .filter((completion) => conversationIds.has(completion.conversationId))
+      .slice(0, MAX_SNAPSHOT_COMPLETIONS)
+      .map((completion) => ({
+        ...completion,
+        workspaceId: host.workspaceId
+      })),
+    conversations: conversations.map((conversation) => ({
       ...conversation,
       createdByUserId: userId,
       workspaceId: host.workspaceId
     })),
     messages: Object.fromEntries(
-      Object.entries(input.messages ?? {}).map(([conversationId, messages]) => [
-        conversationId,
-        messages.map((message) => ({
-          ...message,
-          conversationId
-        }))
-      ])
+      Object.entries(input.messages ?? {})
+        .filter(([conversationId]) => conversationIds.has(conversationId))
+        .map(([conversationId, messages]) => [
+          conversationId,
+          messages
+            .filter((message) => message.role !== "runtime")
+            .slice(-MAX_SNAPSHOT_MESSAGES_PER_CONVERSATION)
+            .map((message) => ({
+              ...message,
+              content: truncateSnapshotMessage(message.content),
+              conversationId
+            }))
+        ])
     ),
-    models: input.models ?? [],
-    projects: (input.projects ?? []).map((project) => ({
+    models: (input.models ?? []).slice(0, MAX_SNAPSHOT_MODELS),
+    projects: projects.map((project) => ({
       ...project,
       createdByUserId: userId,
       workspaceId: host.workspaceId
     })),
     syncedAt
   };
+}
+
+function truncateSnapshotMessage(content: string) {
+  if (content.length <= MAX_SNAPSHOT_MESSAGE_CONTENT_LENGTH) {
+    return content;
+  }
+
+  return `${content.slice(0, MAX_SNAPSHOT_MESSAGE_CONTENT_LENGTH)}\n\n[truncated for mobile sync]`;
 }
 
 function normalizeHostCapabilities(value: unknown) {

@@ -55,7 +55,7 @@ export type FetchFn = (
 }>;
 
 export function defaultApiUrl(env: Partial<Record<string, string | undefined>>) {
-  return env.ABITAT_API_URL ?? "https://workspace.abitat.io";
+  return env.ABITAT_API_URL ?? "http://127.0.0.1:3901";
 }
 
 export function sessionConfigPath(homeDir: string) {
@@ -191,7 +191,7 @@ async function pollDeviceLogin(apiUrl: string, deviceLoginId: string, fetchFn: F
 }
 
 function isTransientHostedStatus(status: number) {
-  return status === 429 || status === 502 || status === 503 || status === 504;
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
 function isTransientFetchError(error: unknown) {
