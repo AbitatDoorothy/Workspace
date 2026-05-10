@@ -37,7 +37,7 @@ Notifications.setNotificationHandler({
 });
 
 export function rememberRunningConversation(_conversationId: string) {
-  // Server-side Expo push is the single user-visible completion notification source.
+  // The paired Mac sends Expo push notifications when Codex turns finish.
 }
 
 export function useThreadCompletionNotifications(

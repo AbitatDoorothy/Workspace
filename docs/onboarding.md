@@ -76,6 +76,10 @@ abitat iphone --transport quick-tunnel
 4. Send a message from the chat screen.
 5. Keep `abitat iphone` running on the Mac while Codex works.
 
+When the Abitat app asks for notification permission, allow it. The paired Mac stores that phone's
+Expo push subscription locally and sends Codex completion alerts directly through Expo/APNs, so the
+iPhone can receive sound/vibration notifications even if Abitat is in the background or closed.
+
 After pairing, the iPhone reconnects with the stored Mac endpoint and device token. Another phone cannot control the Mac unless this Mac creates and consumes a new pairing payload for it.
 
 ## Troubleshooting

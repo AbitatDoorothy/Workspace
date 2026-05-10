@@ -189,15 +189,17 @@ The Mac helper remains responsible for:
 
 ## Push And Notifications
 
-Without a hosted Abitat server, server-originated push notifications are not available in the same way.
+Completion push is sent by the paired Mac, not by an Abitat database-backed control plane. After
+pairing, the iPhone registers its Expo push token with the Mac-local server. The Mac stores the
+subscription locally and sends Codex completion pushes directly through Expo/APNs.
 
-Options:
+Supported behavior:
 
 - Rely on in-app polling while the iPhone app is open.
-- Use local notifications scheduled by the iPhone while actively watching a task.
-- Add optional direct push later through a provider-specific integration, but do not make it required for the core no-domain/no-database method.
+- Send sound/vibration completion alerts while the iPhone app is backgrounded or closed.
+- Mirror foreground completion pushes into local notifications so custom sounds still play while the app is open.
 
-The core product should work without push notifications.
+Push subscriptions remain local to the paired Mac and are only accepted from already-paired phones.
 
 ## Attachments
 

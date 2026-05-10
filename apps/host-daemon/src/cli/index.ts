@@ -10,6 +10,10 @@ import { defaultConfigPath, loadHostConfig, saveHostConfig } from "../config/hos
 import { collectChangeset } from "../git/changeset.js";
 import { branchNameForConversation, resolveRepoPath } from "../git/paths.js";
 import { createLocalCodexBridge } from "../local-control/codex-bridge.js";
+import {
+  createLocalCodexCompletionNotifier,
+  createLocalMobilePushService
+} from "../local-control/push-notifications.js";
 import { startRelayClient } from "../local-control/relay-client.js";
 import { startLocalControlServer } from "../local-control/server.js";
 import { createLocalControlStore, type LocalControlTransport } from "../local-control/state.js";
@@ -105,9 +109,10 @@ async function startIphoneControl(args: string[]) {
   });
   const store = createLocalControlStore();
   const relayId = transport.transport === "relay" ? await store.getRelayId() : undefined;
+  const codex = createLocalCodexBridge({ serverUrl: codexServerUrl });
   const server = await startLocalControlServer({
     bindHost: transport.bindHost,
-    codex: createLocalCodexBridge({ serverUrl: codexServerUrl }),
+    codex,
     endpoint: transport.endpoint,
     port,
     store,
@@ -117,10 +122,12 @@ async function startIphoneControl(args: string[]) {
   let fallbackTunnel: SshTunnel | null = null;
   let endpointMonitor: EndpointHealthMonitor | null = null;
   let relayClient: { close(): void } | null = null;
+  let stopCompletionNotifier: (() => void) | null = null;
   let publicEndpoint = server.endpoint;
   let pairingTransport = transport.transport;
   const stop = async (exitCode = 0) => {
     endpointMonitor?.stop();
+    stopCompletionNotifier?.();
     relayClient?.close();
     await quickTunnel?.close().catch(() => undefined);
     await fallbackTunnel?.close().catch(() => undefined);
@@ -128,6 +135,11 @@ async function startIphoneControl(args: string[]) {
     console.log("status=stopped");
     process.exit(exitCode);
   };
+  stopCompletionNotifier = createLocalCodexCompletionNotifier({
+    codex,
+    logger: console,
+    mobilePushService: createLocalMobilePushService(store, { logger: console })
+  }).start();
 
   if (!endpoint && transport.transport === "relay") {
     if (!relayId || !transport.relayEndpoint) {

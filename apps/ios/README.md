@@ -21,8 +21,9 @@ app. The relay transports encrypted envelopes; the Mac still grants pairing and 
 
 Codex completion sounds use the bundled `codex-done-*.wav` files declared in `app.json` through the
 `expo-notifications` config plugin. Expo copies these files into the native iOS app at build time.
-Without a hosted Abitat push service, core status updates come from foreground polling or an active
-connection to the paired Mac.
+After pairing, the iPhone registers its Expo push token with the paired Mac. The Mac stores that
+subscription locally and sends Codex completion pushes directly through Expo/APNs, so completion
+alerts can play sound and vibrate while the app is backgrounded or closed.
 
 Changing, adding, or removing these sounds requires rebuilding and reinstalling the iPhone app.
 JavaScript-only reloads cannot add new native notification sound assets to an already installed iOS

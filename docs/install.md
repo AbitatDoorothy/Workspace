@@ -59,6 +59,13 @@ The Mac still requires Abitat device-token auth for every iPhone request. The tu
 
 Hosted `workspace.abitat.io` mobile-control APIs are not the authority for core control. It is a relay endpoint; the paired Mac remains the authorization boundary.
 
+## Completion Notifications
+
+After pairing, the iPhone registers its Expo push token with the paired Mac. The Mac stores push
+subscriptions in local Abitat state and sends Codex completion notifications directly through
+Expo/APNs. This keeps completion sound/vibration alerts working when the iPhone app is backgrounded
+or closed, without storing push subscriptions in a hosted Abitat database.
+
 ## Maintainer Release Check
 
 Before publishing, run:

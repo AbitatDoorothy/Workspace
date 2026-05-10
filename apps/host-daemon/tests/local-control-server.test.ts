@@ -97,6 +97,14 @@ describe("local control server", () => {
           provider: "expo"
         }
       });
+      await expect(store.listPushSubscriptions()).resolves.toEqual([
+        expect.objectContaining({
+          deviceId: "phone_test",
+          platform: "ios",
+          provider: "expo",
+          token: "ExponentPushToken[demo]"
+        })
+      ]);
       await expect(
         fetchJson(`${endpoint}/api/mobile/notifications/diagnostics`, {
           body: JSON.stringify({

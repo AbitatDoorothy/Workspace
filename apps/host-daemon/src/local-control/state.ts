@@ -22,10 +22,22 @@ export interface LocalPairedDevice {
   id: string;
   name: string;
   platform: "ios" | string;
+  pushSubscriptions?: LocalPushSubscription[];
   tokenHash: string;
   pairedAt: string;
   lastSeenAt: string;
   relayId?: string | null;
+  revokedAt?: string | null;
+}
+
+export interface LocalPushSubscription {
+  deviceId: string;
+  id: string;
+  lastSeenAt: string;
+  platform: "ios" | string;
+  provider: "expo" | string;
+  registeredAt: string;
+  token: string;
   revokedAt?: string | null;
 }
 
@@ -72,6 +84,12 @@ interface ConsumePairingInput {
   manualCode?: string;
   code?: string;
   platform: "ios" | string;
+}
+
+interface RegisterPushSubscriptionInput {
+  platform: "ios" | string;
+  provider: "expo" | string;
+  token: string;
 }
 
 const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
@@ -249,6 +267,7 @@ export function createLocalControlStore(options: CreateLocalControlStoreOptions 
         id: idGenerator("phone"),
         name: input.deviceName,
         platform: input.platform,
+        pushSubscriptions: [],
         tokenHash: hashLocalControlToken(clientToken),
         pairedAt: pairedAt.toISOString(),
         lastSeenAt: pairedAt.toISOString(),
@@ -301,6 +320,85 @@ export function createLocalControlStore(options: CreateLocalControlStoreOptions 
       return [...pairingMaterials, ...deviceMaterials];
     },
 
+    async listPushSubscriptions() {
+      const state = await loadState();
+      return state.pairedDevices
+        .filter((device) => !device.revokedAt)
+        .flatMap((device) =>
+          (device.pushSubscriptions ?? [])
+            .filter((subscription) => !subscription.revokedAt)
+            .map((subscription) => ({
+              ...subscription,
+              deviceId: device.id
+            }))
+        );
+    },
+
+    async registerPushSubscription(
+      deviceId: string,
+      input: RegisterPushSubscriptionInput
+    ): Promise<LocalPushSubscription> {
+      const state = await loadState();
+      const device = state.pairedDevices.find(
+        (candidate) => candidate.id === deviceId && !candidate.revokedAt
+      );
+      const token = input.token.trim();
+      const provider = input.provider.trim() || "expo";
+      const platform = input.platform.trim() || "ios";
+
+      if (!device) {
+        throw new Error("Paired device not found");
+      }
+      if (provider !== "expo" || !isExpoPushToken(token)) {
+        throw new Error("Invalid Expo push token");
+      }
+
+      const seenAt = now().toISOString();
+      const subscriptions = device.pushSubscriptions ?? [];
+      const existing = subscriptions.find(
+        (subscription) =>
+          !subscription.revokedAt &&
+          subscription.provider === provider &&
+          subscription.platform === platform &&
+          subscription.token === token
+      );
+      const subscription: LocalPushSubscription = existing
+        ? {
+            ...existing,
+            deviceId: device.id,
+            lastSeenAt: seenAt
+          }
+        : {
+            deviceId: device.id,
+            id: `${idGenerator("push")}_${hashLocalControlToken(token).slice(0, 8)}`,
+            lastSeenAt: seenAt,
+            platform,
+            provider,
+            registeredAt: seenAt,
+            token,
+            revokedAt: null
+          };
+
+      await saveState({
+        ...state,
+        pairedDevices: state.pairedDevices.map((candidate) =>
+          candidate.id === device.id
+            ? {
+                ...candidate,
+                pushSubscriptions: [
+                  ...subscriptions.filter(
+                    (candidateSubscription) => candidateSubscription.id !== subscription.id
+                  ),
+                  subscription
+                ]
+              }
+            : candidate
+        )
+      });
+
+      return subscription;
+    },
+
     async requireDeviceByToken(token: string) {
       const state = await loadState();
       const device = state.pairedDevices.find(
@@ -347,6 +445,10 @@ async function readStateFile(path: string): Promise<LocalControlStateFile | null
 
     throw error;
   }
+}
+
+function isExpoPushToken(token: string) {
+  return /^(Expo|Exponent)PushToken\[[^\]]+\]$/u.test(token);
 }
 
 function manualCodeFromSeed(seed: string) {

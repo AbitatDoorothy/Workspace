@@ -325,19 +325,21 @@ Permissions:
 
 ## Notifications
 
-Without an Abitat-hosted server, reliable server-originated iPhone push is not part of the core design.
+Completion push is Mac-owned in the local-first design. After pairing, the iPhone registers its Expo
+push token with the paired Mac. The Mac stores that subscription locally and sends Codex completion
+pushes directly through Expo/APNs when a new turn finishes.
 
 Supported core behavior:
 
 - In-app status polling while the iPhone app is open.
-- Local iOS notifications while the app is actively watching a Mac task.
-- Optional Mac-to-phone notification through the active WebSocket when the app is foregrounded or connected.
+- Remote Expo/APNs completion notifications while the iPhone app is backgrounded or closed.
+- Foreground notification mirroring so completion alerts still play a bundled sound while Abitat is open.
 
 Optional future behavior:
 
-- User-owned push relay.
+- Additional provider-specific push transports.
 - Tailscale-aware background refresh where iOS allows it.
-- Reintroduced hosted notification service only if we intentionally add a small cloud component later.
+- Hosted notification fanout only if we intentionally add account-level cloud state later.
 
 ## Attachments
 

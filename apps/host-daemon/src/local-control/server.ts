@@ -226,11 +226,16 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
 
       if (request.method === "POST" && path === "/api/mobile/notifications/register") {
         const body = await readJson(request);
+        const subscription = await input.store.registerPushSubscription(actor.id, {
+          platform: stringValue(body.platform) || "ios",
+          provider: stringValue(body.provider) || "expo",
+          token: requiredString(body.token, "Push token is required")
+        });
         writeJson(response, 200, {
           ok: true,
           subscription: {
-            platform: stringValue(body.platform) || "ios",
-            provider: stringValue(body.provider) || "expo"
+            platform: subscription.platform,
+            provider: subscription.provider
           }
         });
         return;
@@ -573,6 +578,14 @@ function safeFileName(value: string) {
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function requiredString(value: unknown, message: string) {
+  const parsed = stringValue(value);
+  if (!parsed) {
+    throw Object.assign(new Error(message), { statusCode: 400 });
+  }
+  return parsed;
 }
 
 function recordValue(value: unknown) {

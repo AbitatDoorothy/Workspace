@@ -143,6 +143,77 @@ describe("local control state", () => {
     }
   });
 
+  it("persists Expo push subscriptions for paired phones", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "abitat-local-control-push-state-"));
+    const statePath = join(directory, "state.json");
+    let now = new Date("2026-05-09T12:00:00.000Z");
+    let secretIndex = 0;
+    const store = createLocalControlStore({
+      idGenerator: (prefix) => `${prefix}_test`,
+      now: () => now,
+      randomSecret: () => `secret_${++secretIndex}`,
+      statePath
+    });
+
+    try {
+      const pairing = await store.createPairing({
+        endpoint: "https://workspace.abitat.io",
+        relayId: "relay_push_test",
+        transport: "relay"
+      });
+      const paired = await store.consumePairing({
+        deviceName: "Push iPhone",
+        pairingSecret: pairing.pairingSecret,
+        platform: "ios"
+      });
+
+      await expect(
+        store.registerPushSubscription(paired.machineId, {
+          platform: "ios",
+          provider: "expo",
+          token: "ExponentPushToken[first]"
+        })
+      ).resolves.toMatchObject({
+        deviceId: "phone_test",
+        platform: "ios",
+        provider: "expo",
+        token: "ExponentPushToken[first]"
+      });
+
+      now = new Date("2026-05-09T12:05:00.000Z");
+      await store.registerPushSubscription(paired.machineId, {
+        platform: "ios",
+        provider: "expo",
+        token: "ExponentPushToken[first]"
+      });
+      await store.registerPushSubscription(paired.machineId, {
+        platform: "ios",
+        provider: "expo",
+        token: "ExponentPushToken[second]"
+      });
+
+      await expect(store.listPushSubscriptions()).resolves.toEqual([
+        expect.objectContaining({
+          deviceId: "phone_test",
+          lastSeenAt: "2026-05-09T12:05:00.000Z",
+          provider: "expo",
+          token: "ExponentPushToken[first]"
+        }),
+        expect.objectContaining({
+          deviceId: "phone_test",
+          registeredAt: "2026-05-09T12:05:00.000Z",
+          provider: "expo",
+          token: "ExponentPushToken[second]"
+        })
+      ]);
+
+      const restarted = createLocalControlStore({ statePath });
+      await expect(restarted.listPushSubscriptions()).resolves.toHaveLength(2);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("persists one relay id per Mac so paired phones can reconnect after restart", async () => {
     const directory = await mkdtemp(join(tmpdir(), "abitat-local-control-relay-id-state-"));
     const statePath = join(directory, "state.json");
