@@ -14,8 +14,11 @@ import { startLocalControlServer } from "../local-control/server.js";
 import { createLocalControlStore, type LocalControlTransport } from "../local-control/state.js";
 import {
   resolveLocalControlTransport,
+  startLocalhostRunTunnel,
   startQuickTunnel,
-  type QuickTunnel
+  waitForQuickTunnelReady,
+  type QuickTunnel,
+  type SshTunnel
 } from "../local-control/transport.js";
 import { commitAndPushWorktree, tryCreatePullRequest } from "../git/publish.js";
 import { cleanupConversationWorktree, setupConversationWorktree } from "../git/worktree.js";
@@ -102,18 +105,41 @@ async function startIphoneControl(args: string[]) {
     transport: transport.transport
   });
   let quickTunnel: QuickTunnel | null = null;
+  let fallbackTunnel: SshTunnel | null = null;
   let publicEndpoint = server.endpoint;
+  let pairingTransport = transport.transport;
   if (transport.transport === "quick-tunnel") {
     console.log("Starting Cloudflare Quick Tunnel from this Mac...");
-    quickTunnel = await startQuickTunnel({ localUrl: server.endpoint }).catch(async (error) => {
-      await server.close().catch(() => undefined);
-      throw error;
-    });
-    publicEndpoint = quickTunnel.endpoint;
+    try {
+      quickTunnel = await startQuickTunnel({ localUrl: server.endpoint });
+      publicEndpoint = quickTunnel.endpoint;
+      console.log("Waiting for Cloudflare Quick Tunnel to become reachable...");
+      await waitForQuickTunnelReady(publicEndpoint);
+    } catch (error) {
+      console.log(
+        `Cloudflare Quick Tunnel is unavailable (${errorMessage(error)}). Falling back to localhost.run over SSH from this Mac...`
+      );
+      await quickTunnel?.close().catch(() => undefined);
+      quickTunnel = null;
+      fallbackTunnel = await startLocalhostRunTunnel({ localUrl: server.endpoint }).catch(
+        async (fallbackError) => {
+          await server.close().catch(() => undefined);
+          throw fallbackError;
+        }
+      );
+      publicEndpoint = fallbackTunnel.endpoint;
+      pairingTransport = "manual";
+      console.log("Waiting for fallback tunnel to become reachable...");
+      await waitForQuickTunnelReady(publicEndpoint).catch(async (fallbackError) => {
+        await fallbackTunnel?.close().catch(() => undefined);
+        await server.close().catch(() => undefined);
+        throw fallbackError;
+      });
+    }
   }
   const pairing = await store.createPairing({
     endpoint: publicEndpoint,
-    transport: transport.transport
+    transport: pairingTransport
   });
   const qrPayload = JSON.stringify(pairing);
 
@@ -123,7 +149,7 @@ async function startIphoneControl(args: string[]) {
   if (transport.transport === "quick-tunnel") {
     console.log(`localEndpoint=${server.endpoint}`);
   }
-  console.log(`transport=${transport.transport}`);
+  console.log(`transport=${pairingTransport}`);
   if (transport.warning) {
     console.log(`warning=${transport.warning}`);
   }
@@ -140,6 +166,7 @@ async function startIphoneControl(args: string[]) {
 
   const stop = async () => {
     await quickTunnel?.close().catch(() => undefined);
+    await fallbackTunnel?.close().catch(() => undefined);
     await server.close().catch(() => undefined);
     console.log("status=stopped");
     process.exit(0);
@@ -607,6 +634,10 @@ function transportOption(value: string) {
   }
 
   return "auto";
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function stopDaemon(

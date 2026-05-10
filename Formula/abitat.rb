@@ -1,8 +1,8 @@
 class Abitat < Formula
   desc "Remote Codex control from Mac and iPhone"
   homepage "https://github.com/AbitatDoorothy/Workspace"
-  url "https://registry.npmjs.org/@abitat_reece/cli/-/cli-0.1.6.tgz"
-  sha256 "9bf4b0e538c0cf4ec588b951fd05d39174e9c415fc70350ac5e7384bc689c54d"
+  url "https://registry.npmjs.org/@abitat_reece/cli/-/cli-0.1.7.tgz"
+  sha256 "ff12138da08ca9ff212f561a20693e2d7b4c8e13d8e444ba141627c6eb02637b"
 
   depends_on "python" => :build
   depends_on "cloudflared"

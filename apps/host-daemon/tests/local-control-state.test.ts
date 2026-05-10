@@ -59,6 +59,17 @@ describe("local control state", () => {
         })
       ).rejects.toThrow("Pairing code has already been used");
 
+      const manualPairing = await store.createPairing({
+        endpoint: "https://demo.lhr.life",
+        transport: "manual"
+      });
+      const manuallyPaired = await store.consumePairing({
+        code: manualPairing.manualCode.toLowerCase().replaceAll("-", " - "),
+        deviceName: "Manual iPhone",
+        platform: "ios"
+      });
+      expect(manuallyPaired.machineId).toBe("phone_test");
+
       const persisted = createLocalControlStore({ statePath });
       await expect(persisted.requireDeviceByToken(paired.clientToken)).resolves.toMatchObject({
         id: "phone_test"

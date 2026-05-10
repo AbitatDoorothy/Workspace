@@ -44,10 +44,10 @@ export function PairingScreen({ api, apiUrl, onApiUrlChange, onPaired }: Pairing
     setIsPairing(true);
 
     try {
-      const client = pairingPayload ? createPairingClient(pairingPayload.endpoint) : api;
+      const client = createPairingClient(endpoint);
       const pairing = await client.completePairing({
         appVersion: "0.1.0",
-        code: pairingPayload?.manualCode ?? pairingInput,
+        code: pairingPayload?.manualCode ?? pairingInput.trim(),
         deviceName,
         endpoint,
         pairingSecret: pairingPayload?.pairingSecret

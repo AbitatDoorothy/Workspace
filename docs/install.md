@@ -55,6 +55,7 @@ Remote control works off-network through the Mac-side Quick Tunnel:
 - `abitat iphone` defaults to `--transport quick-tunnel`.
 - The tunnel URL is temporary and can change when the Mac command restarts.
 - The iPhone only needs the Abitat app because the tunnel terminates on the Mac side.
+- If Cloudflare Quick Tunnel is unavailable on the current Mac/network, Abitat automatically falls back to a temporary `localhost.run` HTTPS tunnel over the Mac's built-in SSH client.
 - `abitat iphone --transport tailscale` remains available for users who already run Tailscale on both devices.
 - `abitat iphone --transport manual --endpoint <url>` lets advanced users provide their own endpoint.
 

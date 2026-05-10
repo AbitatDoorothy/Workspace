@@ -113,6 +113,9 @@ if (!pairingScreen.includes("CameraView") || !pairingScreen.includes("onBarcodeS
 if (!pairingScreen.includes("pairingSecret")) {
   throw new Error("Expected PairingScreen to exchange the Mac-issued pairing secret");
 }
+if (!pairingScreen.includes("createPairingClient(endpoint)")) {
+  throw new Error("Expected manual pairing to post to the currently visible Mac endpoint");
+}
 if (!conversationScreen.includes("mergeConversationMessages")) {
   throw new Error("Expected ConversationScreen to merge refreshed messages without duplicates");
 }

@@ -40,6 +40,8 @@ abitat iphone
 
 This starts the Mac-local Abitat control server, starts or connects to the local Codex app-server, starts a Cloudflare Quick Tunnel from the Mac, and prints a QR code plus a manual JSON payload. The pairing payload expires quickly and can be used only once.
 
+If Cloudflare Quick Tunnel cannot connect from the current network, Abitat falls back to a temporary `localhost.run` HTTPS tunnel over the Mac's built-in SSH client. The iPhone still only needs the Abitat app.
+
 For a same-machine/local test, use:
 
 ```sh

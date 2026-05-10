@@ -301,7 +301,11 @@ function manualCodeFromSeed(seed: string) {
 }
 
 function normalizeManualCode(code: string) {
-  return code.trim().toUpperCase();
+  return code
+    .trim()
+    .replace(/[\u2010-\u2015\u2212]/gu, "-")
+    .replace(/\s+/gu, "")
+    .toUpperCase();
 }
 
 function isExpired(pairing: Pick<LocalActivePairing, "expiresAt">, now: Date) {
