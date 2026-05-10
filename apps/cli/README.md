@@ -5,7 +5,7 @@
 ## Install
 
 ```sh
-brew tap Abitat/abitat
+brew tap AbitatDoorothy/abitat
 brew install abitat
 ```
 

@@ -16,7 +16,7 @@ Abitat lets an iPhone control Codex running on a paired Mac. The Mac is the cont
 ## Install On Mac
 
 ```sh
-brew tap Abitat/abitat
+brew tap AbitatDoorothy/abitat
 brew install abitat
 ```
 

@@ -7,7 +7,7 @@ Abitat’s public mobile-control flow is local-first. The Mac runs the control s
 Install the CLI with Homebrew:
 
 ```sh
-brew tap Abitat/abitat
+brew tap AbitatDoorothy/abitat
 brew install abitat
 ```
 
@@ -73,4 +73,4 @@ pnpm test:homebrew
 
 This builds and packs `@abitat_reece/shared`, `@abitat_reece/host-daemon`, and `@abitat_reece/cli`, installs them into a clean temporary npm project, verifies `abitat doctor`, and verifies that the CLI can resolve the packaged host daemon entrypoint.
 
-The Homebrew formula lives at `Formula/abitat.rb`. Release it by copying that file to the `Abitat/homebrew-abitat` tap repository, then update the formula URL and SHA when publishing a new `@abitat_reece/cli` version.
+The Homebrew formula lives at `Formula/abitat.rb`. Release it by copying that file to the `AbitatDoorothy/homebrew-abitat` tap repository, then update the formula URL and SHA when publishing a new `@abitat_reece/cli` version.

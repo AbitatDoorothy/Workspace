@@ -1,6 +1,6 @@
-# Hosted Deployment
+# Legacy Hosted Deployment
 
-`workspace.abitat.io` must run the web app and API with persistent database storage. Public Mac and iPhone clients should use this hosted URL by default.
+`workspace.abitat.io` is a legacy hosted dashboard/development deployment target. Public iPhone control is local-first: the Mac runs the control server, issues pairing payloads, and accepts paired-device requests through the selected Mac-side transport. Core mobile control must not depend on this hosted deployment, a hosted account, or a hosted database.
 
 ## Required Environment
 
@@ -33,12 +33,11 @@ DATABASE_URL="<supabase-pooled-url>" DIRECT_URL="<supabase-direct-or-session-url
 
 ## Required Behaviors
 
-- Account registration and login must be enabled.
-- CLI device login routes must be publicly reachable.
-- Host registration must require a valid CLI token.
-- Pairing codes must be scoped to the signed-in account workspace.
-- Mobile API requests must route phone-started Codex jobs to the paired Mac host.
-- The host daemon must connect outbound to the hosted API; the hosted API must not require inbound access to the Mac.
+- Hosted account registration and login may be enabled for dashboard development.
+- Hosted APIs must not be required by `abitat iphone` or the Abitat iPhone app's local-first pairing flow.
+- Production mobile pairing must be issued by the Mac-local server.
+- Production mobile API requests must be authenticated with Mac-local paired-device tokens.
+- Codex execution and state remain owned by the Mac.
 
 ## Release Checks
 
@@ -50,4 +49,4 @@ curl https://workspace.abitat.io/api/health
 
 The response must include `"ok":true` and `"database":"ok"` before local development tunnels are stopped.
 
-Before publishing a public CLI or iPhone build, run the full project verification suite and complete the manual acceptance checklist in `docs/acceptance/public-hosted-mobile-control.md`.
+Before publishing a public CLI or iPhone build, run the full project verification suite and complete the manual acceptance checklist in `docs/acceptance/local-first-mobile-control.md`.

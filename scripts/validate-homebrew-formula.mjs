@@ -36,7 +36,7 @@ if (!shaMatch) {
 }
 
 for (const expected of [
-  "brew tap Abitat/abitat",
+  "brew tap AbitatDoorothy/abitat",
   "brew install abitat",
   "brew install cloudflared",
   "abitat iphone",
@@ -49,7 +49,7 @@ for (const expected of [
 
 for (const expected of [
   "# Abitat User Onboarding",
-  "brew tap Abitat/abitat",
+  "brew tap AbitatDoorothy/abitat",
   "brew install abitat",
   "brew install cloudflared",
   "abitat iphone",

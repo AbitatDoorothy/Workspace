@@ -33,8 +33,8 @@ The formula source lives at `Formula/abitat.rb` and installs the published `@abi
 
 For the first public Homebrew release:
 
-1. Create or use a public GitHub organization named `Abitat`.
-2. Create a public tap repository named `Abitat/homebrew-abitat`.
+1. Create or use the public GitHub owner `AbitatDoorothy`.
+2. Create or use the public tap repository named `AbitatDoorothy/homebrew-abitat`.
 3. Copy `Formula/abitat.rb` into that repository.
 4. Publish the npm packages listed above.
 5. Download the published `@abitat_reece/cli` tarball and update the formula `sha256` if it differs from the local `pnpm pack` output.
@@ -48,7 +48,7 @@ abitat doctor
 Users can then install with:
 
 ```sh
-brew tap Abitat/abitat
+brew tap AbitatDoorothy/abitat
 brew install abitat
 ```
 
@@ -67,7 +67,7 @@ Ship a TestFlight or App Store build with the local-first pairing screen. The ap
 After release, a new user can:
 
 ```sh
-brew tap Abitat/abitat
+brew tap AbitatDoorothy/abitat
 brew install abitat
 abitat doctor
 abitat iphone
