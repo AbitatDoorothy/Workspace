@@ -10,4 +10,5 @@ apps/mac-remote-helper/.build
 dist
 *.tsbuildinfo
 node_modules
+.worktrees
 pnpm-debug.log*

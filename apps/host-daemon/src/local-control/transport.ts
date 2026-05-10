@@ -492,6 +492,10 @@ export function startEndpointHealthMonitor(
   };
 }
 
+export function shouldStartEndpointHealthMonitor(transport: LocalControlTransport) {
+  return transport !== "relay";
+}
+
 async function resolveTailscaleEndpoint(
   port: number,
   run: ExecFile

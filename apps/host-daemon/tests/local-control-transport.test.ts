@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   resolveLocalControlTransport,
+  shouldStartEndpointHealthMonitor,
   startEndpointHealthMonitor,
   startLocalhostRunTunnel,
   startPinggyTunnel,
@@ -14,6 +15,14 @@ import {
 } from "../src/local-control/transport";
 
 describe("local control transport", () => {
+  it("does not use the fatal endpoint health monitor for relay transport", () => {
+    expect(shouldStartEndpointHealthMonitor("relay")).toBe(false);
+    expect(shouldStartEndpointHealthMonitor("manual")).toBe(true);
+    expect(shouldStartEndpointHealthMonitor("quick-tunnel")).toBe(true);
+    expect(shouldStartEndpointHealthMonitor("tailscale")).toBe(true);
+    expect(shouldStartEndpointHealthMonitor("local")).toBe(true);
+  });
+
   it("prefers a Tailscale IPv4 endpoint when Tailscale is available", async () => {
     await expect(
       resolveLocalControlTransport({

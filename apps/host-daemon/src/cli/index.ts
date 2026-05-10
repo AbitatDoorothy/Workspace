@@ -19,6 +19,7 @@ import { startLocalControlServer } from "../local-control/server.js";
 import { createLocalControlStore, type LocalControlTransport } from "../local-control/state.js";
 import {
   resolveLocalControlTransport,
+  shouldStartEndpointHealthMonitor,
   startEndpointHealthMonitor,
   startQuickTunnel,
   startTemporarySshTunnel,
@@ -217,15 +218,17 @@ async function startIphoneControl(args: string[]) {
       });
     }
   }
-  endpointMonitor = startEndpointHealthMonitor(publicEndpoint, {
-    healthPath: pairingTransport === "relay" ? "/relay/health" : "/health",
-    intervalMs: 5_000,
-    maxFailures: 2,
-    onUnhealthy(error) {
-      console.error(error.message);
-      void stop(1);
-    }
-  });
+  if (shouldStartEndpointHealthMonitor(pairingTransport)) {
+    endpointMonitor = startEndpointHealthMonitor(publicEndpoint, {
+      healthPath: "/health",
+      intervalMs: 5_000,
+      maxFailures: 2,
+      onUnhealthy(error) {
+        console.error(error.message);
+        void stop(1);
+      }
+    });
+  }
   const pairing = await store.createPairing({
     endpoint: publicEndpoint,
     relayId,
