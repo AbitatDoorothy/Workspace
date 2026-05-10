@@ -26,6 +26,7 @@ const DEFAULT_CODEX_BINARY = "/Applications/Codex.app/Contents/Resources/codex";
 const REQUEST_TIMEOUT_MS = 30_000;
 const START_TIMEOUT_MS = 15_000;
 const TURN_KEEPALIVE_TIMEOUT_MS = 30 * 60_000;
+const QUEUED_TURN_POLL_INTERVAL_MS = 250;
 const MAX_CODEX_MESSAGE_CONTENT_LENGTH = 12_000;
 const PHONE_FULL_ACCESS_TURN_OPTIONS = {
   approvalPolicy: "never",
@@ -114,6 +115,12 @@ interface CodexAppThreadListResponse {
   nextCursor: string | null;
 }
 
+interface QueuedCodexTurnInput {
+  attachments?: LocalAttachmentReference[];
+  modelSettings?: CodexMobileModelSettings;
+  prompt: string;
+}
+
 interface JsonRpcMessage {
   id?: number | string;
   method?: string;
@@ -139,6 +146,8 @@ export function createLocalCodexBridge(
   const client = createCodexAppClient(options);
   const workspaceId = options.workspaceId ?? "local";
   const userId = options.userId ?? "local";
+  const queuedTurnsByThread = new Map<string, QueuedCodexTurnInput[]>();
+  const queueDrainTimers = new Map<string, NodeJS.Timeout>();
 
   async function listAllThreads(params: CodexAppThreadListParams = {}) {
     const stateThreads = await listAllThreadsOnce({ ...params, useStateDbOnly: true });
@@ -199,6 +208,80 @@ export function createLocalCodexBridge(
       }));
   }
 
+  function enqueueTurn(threadId: string, input: QueuedCodexTurnInput, options = { front: false }) {
+    const existing = queuedTurnsByThread.get(threadId) ?? [];
+    const next = options.front ? [input, ...existing] : [...existing, input];
+    queuedTurnsByThread.set(threadId, next);
+    scheduleQueueDrain(threadId);
+  }
+
+  function scheduleQueueDrain(threadId: string, delayMs = QUEUED_TURN_POLL_INTERVAL_MS) {
+    if (queueDrainTimers.has(threadId)) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      queueDrainTimers.delete(threadId);
+      void drainQueuedTurns(threadId);
+    }, delayMs);
+    timer.unref?.();
+    queueDrainTimers.set(threadId, timer);
+  }
+
+  async function drainQueuedTurns(threadId: string) {
+    const queue = queuedTurnsByThread.get(threadId);
+    if (!queue?.length) {
+      queuedTurnsByThread.delete(threadId);
+      return;
+    }
+
+    let thread: CodexAppThread;
+    try {
+      thread = await client.readThread(threadId, true);
+    } catch {
+      scheduleQueueDrain(threadId);
+      return;
+    }
+
+    if (isCodexThreadBusy(thread)) {
+      scheduleQueueDrain(threadId);
+      return;
+    }
+
+    const nextInput = queue.shift();
+    if (!nextInput) {
+      queuedTurnsByThread.delete(threadId);
+      return;
+    }
+
+    if (queue.length === 0) {
+      queuedTurnsByThread.delete(threadId);
+    }
+
+    await startConversationTurn(threadId, thread, nextInput);
+
+    if ((queuedTurnsByThread.get(threadId)?.length ?? 0) > 0) {
+      scheduleQueueDrain(threadId);
+    }
+  }
+
+  async function startConversationTurn(
+    threadId: string,
+    thread: CodexAppThread,
+    input: QueuedCodexTurnInput
+  ) {
+    let activeThread = thread;
+    if (threadStatusType(activeThread.status) !== "active") {
+      activeThread = (await client.resumeThread({ excludeTurns: false, threadId })).thread;
+    }
+
+    await client.startTurn(threadId, userInput(input.prompt, input.attachments), {
+      ...PHONE_FULL_ACCESS_TURN_OPTIONS,
+      cwd: activeThread.cwd,
+      ...turnModelSettings(input.modelSettings)
+    });
+  }
+
   return {
     async bootstrap() {
       try {
@@ -211,21 +294,34 @@ export function createLocalCodexBridge(
 
     async continueConversation(conversationId, input) {
       const threadId = toCodexThreadId(conversationId);
-      let thread = await client.readThread(threadId, true);
+      const thread = await client.readThread(threadId, true);
+      const delivery = input.delivery ?? "queue";
 
       if (isCodexThreadBusy(thread)) {
-        throw new LocalCodexConversationBusyError();
+        if (delivery === "steer") {
+          await client.injectItems(threadId, steerItems(input.prompt, input.attachments));
+          return {
+            conversationId: externalCodexConversationId(threadId),
+            status: "running"
+          };
+        }
+
+        enqueueTurn(threadId, input);
+        return {
+          conversationId: externalCodexConversationId(threadId),
+          status: "queued"
+        };
       }
 
-      if (threadStatusType(thread.status) !== "active") {
-        thread = (await client.resumeThread({ excludeTurns: false, threadId })).thread;
+      if ((queuedTurnsByThread.get(threadId)?.length ?? 0) > 0) {
+        enqueueTurn(threadId, input, { front: delivery === "steer" });
+        return {
+          conversationId: externalCodexConversationId(threadId),
+          status: "queued"
+        };
       }
 
-      await client.startTurn(threadId, userInput(input.prompt, input.attachments), {
-        ...PHONE_FULL_ACCESS_TURN_OPTIONS,
-        cwd: thread.cwd,
-        ...turnModelSettings(input.modelSettings)
-      });
+      await startConversationTurn(threadId, thread, input);
 
       return {
         conversationId: externalCodexConversationId(threadId),
@@ -325,6 +421,12 @@ function createCodexAppClient(options: CreateLocalCodexBridgeOptions) {
 
       return models;
     },
+
+    injectItems: (threadId: string, items: CodexAppResponseItem[]) =>
+      callCodexApp(serverUrl, codexBinaryPath, "thread/inject_items", {
+        items,
+        threadId
+      }),
 
     listThreads: (params: CodexAppThreadListParams = {}) =>
       callCodexApp<CodexAppThreadListResponse>(serverUrl, codexBinaryPath, "thread/list", {
@@ -925,6 +1027,21 @@ function userInputToText(input: CodexAppUserInput) {
     case "mention":
       return `[Mention: ${input.name}]`;
   }
+}
+
+function steerItems(
+  prompt: string,
+  attachments: LocalAttachmentReference[] = []
+): CodexAppResponseItem[] {
+  const text = userInput(prompt, attachments).map(userInputToText).filter(Boolean).join("\n");
+
+  return [
+    {
+      content: [{ text, type: "input_text" }],
+      role: "user",
+      type: "message"
+    }
+  ];
 }
 
 function turnModelSettings(modelSettings: CodexMobileModelSettings | undefined) {

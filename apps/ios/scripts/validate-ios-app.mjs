@@ -234,15 +234,11 @@ if (!conversationScreen.includes("shouldForceMessageRefreshAfterStatusPoll")) {
     "Expected ConversationScreen to force a message refresh from desktop status updates"
   );
 }
-if (
-  !conversationScreen.includes(
-    "const canSendNow = canAcceptConversationInput(status) && !isSending;"
-  )
-) {
-  throw new Error("Expected ConversationScreen to block phone sends while a Codex turn is running");
+if (!conversationScreen.includes("const canSendNow = !isSending;")) {
+  throw new Error("Expected ConversationScreen to allow queued phone sends while Codex is running");
 }
 if (!conversationScreen.includes("{sendButtonLabel(status, isSending)}")) {
-  throw new Error("Expected ConversationScreen to label blocked Codex turns as running");
+  throw new Error("Expected ConversationScreen to label busy Codex turns as queueable");
 }
 if (conversationScreen.includes('source === "codex_app" && status === "running"')) {
   throw new Error("Expected ConversationScreen not to allow sends into running Codex app turns");
@@ -370,7 +366,12 @@ for (const expected of [
   "createOptimisticMessage",
   "localStatus",
   "markLocalMessageFailed",
+  "markLocalMessageQueued",
   "markLocalMessageSent",
+  "steerConversation",
+  'delivery: "queue"',
+  'delivery: "steer"',
+  'accessibilityLabel="Steer running Codex turn"',
   "sendGitShortcut",
   "pickImageAttachment",
   "pickFileAttachment",
@@ -504,6 +505,12 @@ if (notificationWatcher.includes("isNotificationMessageFromCompletedTurn")) {
 for (const expected of ["listCodexModels", "model?: string", "effort?: CodexReasoningEffort"]) {
   if (!apiClient.includes(expected)) {
     throw new Error(`Expected API client to support Codex model control: ${expected}`);
+  }
+}
+
+for (const expected of ['delivery?: "queue" | "steer"', "delivery"]) {
+  if (!apiClient.includes(expected)) {
+    throw new Error(`Expected API client to support queued and steer delivery: ${expected}`);
   }
 }
 

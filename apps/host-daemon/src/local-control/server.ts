@@ -58,6 +58,8 @@ export interface LocalCodexMessage {
   createdAt: string;
 }
 
+export type LocalCodexDeliveryMode = "queue" | "steer";
+
 export interface LocalCodexCompletionState {
   conversationId: string;
   failed: boolean;
@@ -79,6 +81,7 @@ export interface LocalCodexBridge {
     conversationId: string,
     input: {
       attachments?: LocalAttachmentReference[];
+      delivery?: LocalCodexDeliveryMode;
       modelSettings?: CodexMobileModelSettings;
       prompt: string;
     }
@@ -287,6 +290,7 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       if (messageMatch && request.method === "POST") {
         const body = await readJson(request);
         const continued = await input.codex.continueConversation(messageMatch.conversationId, {
+          delivery: deliveryMode(body.delivery),
           prompt: stringValue(body.content) || requiredPrompt(body)
         });
         const messages = await input.codex.listMessages(continued.conversationId);
@@ -299,6 +303,7 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
         const body = await readJson(request);
         const continued = await input.codex.continueConversation(continueMatch.conversationId, {
           attachments: attachmentReferences(body.attachments),
+          delivery: deliveryMode(body.delivery),
           modelSettings: modelSettings(body),
           prompt: requiredPrompt(body)
         });
@@ -570,6 +575,10 @@ async function saveAttachment(directory: string, body: Record<string, unknown>) 
     path,
     size: bytes.byteLength
   };
+}
+
+function deliveryMode(input: unknown): LocalCodexDeliveryMode | undefined {
+  return input === "queue" || input === "steer" ? input : undefined;
 }
 
 function safeFileName(value: string) {
