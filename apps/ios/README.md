@@ -14,7 +14,8 @@ The app pairs from a Mac-generated QR/manual payload. The payload provides the M
 Mac identity, and one-time pairing secret; after pairing, the app stores the endpoint and device
 token locally for reconnects. The default development endpoint is `http://127.0.0.1:3901`, but real
 devices should pair from the QR payload printed by `abitat iphone`. Off-network pairing uses a
-Mac-side Quick Tunnel, so the iPhone only needs the Abitat app.
+Mac outbound relay connection through `workspace.abitat.io`, so the iPhone only needs the Abitat
+app. The relay transports encrypted envelopes; the Mac still grants pairing and validates tokens.
 
 ## Notification Sounds
 

@@ -12,6 +12,8 @@ export interface PairingState {
   hostMachineId: string;
   macId?: string;
   machineId: string;
+  relayId?: string;
+  transport?: "local" | "tailscale" | "quick-tunnel" | "manual" | "relay";
   workspaceId: string;
 }
 
@@ -23,7 +25,8 @@ export interface LocalPairingPayload {
   pairingSecret: string;
   manualCode?: string;
   expiresAt: string;
-  transport: "local" | "tailscale" | "quick-tunnel" | "manual";
+  relayId?: string;
+  transport: "local" | "tailscale" | "quick-tunnel" | "manual" | "relay";
   capabilities?: string[];
 }
 

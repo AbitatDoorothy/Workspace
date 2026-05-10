@@ -4,16 +4,16 @@
 
 Abitat should support a local-first remote-control mode where every user's Mac acts as the control plane for that user's phone.
 
-This plan does not require an Abitat-owned domain, Abitat-hosted API, or shared hosted database. It still requires a network path from the phone to the Mac when the devices are not on the same network. That path should be supplied by a per-user private overlay network or tunnel provider.
+This plan does not require an Abitat-hosted database or shared hosted workspace state. It uses `workspace.abitat.io` as a packet relay by default, while keeping the Mac as the authority for pairing, phone tokens, Codex state, and every control decision.
 
-The product default is Cloudflare Quick Tunnel from the Mac side because it gives off-network reachability without asking the iPhone user to install a second networking app. Tailscale remains the durable private-network option for users who already have it on both devices.
+The product default is a Mac outbound WebSocket relay through `workspace.abitat.io`. This gives off-network reachability without asking the iPhone user to install a second networking app and without requiring `cloudflared`. Tailscale remains the durable private-network option for users who already have it on both devices.
 
 ## Goals
 
 - Let anyone install Abitat on their Mac and pair their own iPhone.
 - Keep Codex execution, filesystem access, project discovery, and thread state owned by the Mac.
 - Let the iPhone control Codex on the Mac while on cellular or another network.
-- Avoid Abitat-owned domain names, hosted databases, shared workspace state, and central pairing records.
+- Avoid hosted databases, shared workspace state, and central pairing records.
 - Prevent one user's phone from ever controlling another user's Mac unless that Mac explicitly pairs it.
 - Keep the user flow close to the current experience: install, run one Mac command, scan a pairing code, start controlling Codex.
 
@@ -22,7 +22,7 @@ The product default is Cloudflare Quick Tunnel from the Mac side because it give
 - Shared team workspaces.
 - A central account system.
 - Server-originated push notifications from Abitat infrastructure.
-- A browser-hosted control plane at `workspace.abitat.io`.
+- A browser-hosted authority that can grant control of a user's Mac.
 - Cross-user project or conversation sync.
 - A guaranteed off-network connection without any overlay or tunnel provider.
 
@@ -34,7 +34,7 @@ iPhone app
   calls the Mac-local Abitat API through the selected transport
 
 Per-user transport
-  Mac-side Quick Tunnel, Tailscale private network, or user-managed endpoint
+  Abitat relay, Tailscale private network, Mac-side temporary tunnel, or user-managed endpoint
   provides reachability between iPhone and Mac
   stores no Abitat product state
 
@@ -48,40 +48,78 @@ Codex app on Mac
   stores Codex threads and runtime state locally
 ```
 
-The important shift is that the iPhone no longer talks to an Abitat cloud API for pairing, projects, conversations, or remote control. It talks to the paired Mac.
+The important shift is that the iPhone no longer talks to an Abitat cloud API as the control authority. In relay mode it sends encrypted envelopes through `workspace.abitat.io`; the paired Mac decrypts them, validates the phone token locally, and executes Codex locally.
 
 ## Transport Strategy
 
-### 1. Default: Mac-Side Cloudflare Quick Tunnel
+### 1. Default: Abitat Relay
 
 User setup:
 
-1. Install `cloudflared` on the Mac.
-2. Install only the Abitat app on the iPhone.
-3. Run `abitat iphone` on the Mac.
-4. Scan the QR code in the iPhone app.
+1. Install only the Abitat app on the iPhone.
+2. Run `abitat iphone` on the Mac.
+3. Scan the QR code in the iPhone app.
 
 Mac behavior:
 
 - Start the local Abitat control server on `127.0.0.1`.
-- Start `cloudflared tunnel --url <local-control-url>`.
-- Parse the generated `https://*.trycloudflare.com` URL.
-- Embed that URL in the pairing payload.
+- Open an outbound WebSocket to `workspace.abitat.io`.
+- Create a unique relay id for this Mac pairing session.
+- Embed the relay endpoint and relay id in the pairing payload.
+- Decrypt relay envelopes locally and forward them to the Mac-local API.
 
 Why this is the default:
 
 - Works when the phone and Mac are not on the same Wi-Fi.
-- Does not require an Abitat-owned domain.
 - Does not require an Abitat-hosted database.
 - Does not require the user to install Tailscale or another app on the iPhone.
+- Does not require `cloudflared`, which can be unreliable on Macs using fake-IP DNS or packet-tunnel proxies.
+- Prevents the website from controlling Macs because only the Mac can consume pairings and mint/validate phone tokens.
+
+Tradeoffs:
+
+- Abitat must operate the `workspace.abitat.io` relay Worker.
+- The relay must be treated as a router, not as a trusted authorization boundary.
+- Public relay reachability requires strong envelope encryption and Mac-side request authentication.
+
+### 2. Optional Temporary Tunnel
+
+User setup:
+
+1. Run `abitat iphone --transport temporary-tunnel`.
+
+Mac behavior:
+
+- Start a temporary HTTPS tunnel over the Mac's built-in SSH client.
+- Prefer `localhost.run`, then fall back to Pinggy if needed.
+- Parse the generated public tunnel URL.
+- Embed that URL in the pairing payload.
+
+Tradeoffs:
+
+- Tunnel URLs are temporary and can change when the Mac command restarts.
+- Provider availability is outside Abitat's control.
+
+### 3. Optional Cloudflare Quick Tunnel
+
+User setup:
+
+1. Install `cloudflared` on the Mac.
+2. Run `abitat iphone --transport quick-tunnel`.
+
+Mac behavior:
+
+- Start `cloudflared tunnel --url <local-control-url>`.
+- Parse the generated `https://*.trycloudflare.com` URL.
+- Fall back to the default temporary SSH tunnel if Cloudflare is unavailable.
 
 Tradeoffs:
 
 - The Mac needs `cloudflared`.
+- Some network stacks resolve Cloudflare tunnel edges to fake `198.18.x.x` addresses and prevent `cloudflared` from connecting.
 - Tunnel URLs are temporary and can change when the Mac command restarts.
-- Public tunnel URLs require strong Abitat request authentication.
 
-### 2. Optional Durable Private Overlay: Tailscale
+### 4. Optional Durable Private Overlay: Tailscale
 
 User setup:
 
@@ -112,22 +150,6 @@ Tradeoffs:
 - The user needs Tailscale installed on both devices.
 - The user needs a Tailscale account or organization.
 - If Tailscale is disconnected, the phone cannot reach the Mac off-network.
-
-### 3. Explicit Temporary Tunnel Mode
-
-User setup:
-
-1. Run `abitat iphone --transport quick-tunnel`.
-2. Abitat starts a temporary tunnel to the local Mac control server.
-3. Abitat embeds the generated tunnel URL in the pairing QR code.
-4. The iPhone pairs through that URL.
-
-This is now the default public user path. The explicit flag remains useful for clarity and scripting.
-
-Tradeoffs:
-
-- Tunnel URLs can change.
-- Provider availability and limits are outside Abitat's control.
 - Public tunnel URLs need stronger request authentication and rate limiting.
 - Users who need stable private reachability can opt into Tailscale or a manual endpoint.
 
@@ -340,9 +362,8 @@ Recommended user-facing flow:
    brew install abitatdoorothy/abitat/abitat
    ```
 
-2. Install `cloudflared` on the Mac.
-3. Install the Abitat iPhone app.
-4. Run:
+2. Install the Abitat iPhone app.
+3. Run:
 
    ```bash
    abitat iphone
@@ -359,7 +380,7 @@ If the user prefers Tailscale:
 abitat iphone --transport tailscale
 ```
 
-The CLI should clearly label Quick Tunnel URLs as temporary.
+The CLI should clearly label tunnel URLs as temporary.
 
 ## Scaling Model
 
@@ -379,11 +400,12 @@ This does not create a shared multi-user workspace product. If team collaboratio
 
 ## Failure Modes
 
-### cloudflared Not Installed
+### Temporary Tunnel Unavailable
 
-`abitat iphone` should explain that off-network use without another iPhone app needs `cloudflared`, then offer:
+`abitat iphone` should explain that off-network use needs a reachable Mac-side transport, then offer:
 
-- install instructions,
+- relay mode,
+- rerunning temporary tunnel fallback,
 - same-network local pairing,
 - Tailscale mode.
 

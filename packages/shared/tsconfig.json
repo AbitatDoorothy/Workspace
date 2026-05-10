@@ -3,7 +3,7 @@
   "compilerOptions": {
     "declaration": true,
     "declarationMap": true,
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "noEmit": false,
@@ -12,5 +12,5 @@
     "sourceMap": true
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["dist", "node_modules"]
+  "exclude": ["dist", "node_modules", "src/**/*.native.ts"]
 }

@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 
-export type LocalControlTransport = "local" | "tailscale" | "quick-tunnel" | "manual";
+export type LocalControlTransport = "local" | "tailscale" | "quick-tunnel" | "manual" | "relay";
 
 export interface LocalPairingPayload {
   version: 1;
@@ -14,6 +14,7 @@ export interface LocalPairingPayload {
   manualCode: string;
   expiresAt: string;
   transport: LocalControlTransport;
+  relayId?: string;
   capabilities: string[];
 }
 
@@ -24,6 +25,7 @@ export interface LocalPairedDevice {
   tokenHash: string;
   pairedAt: string;
   lastSeenAt: string;
+  relayId?: string | null;
   revokedAt?: string | null;
 }
 
@@ -36,6 +38,7 @@ interface LocalActivePairing {
   expiresAt: string;
   consumedAt?: string | null;
   createdAt: string;
+  relayId?: string | null;
   transport: LocalControlTransport;
 }
 
@@ -44,6 +47,7 @@ interface LocalControlStateFile {
   macId: string;
   macName: string;
   hostTokenHash: string;
+  relayId?: string;
   pairedDevices: LocalPairedDevice[];
   activePairings: LocalActivePairing[];
 }
@@ -57,6 +61,7 @@ interface CreateLocalControlStoreOptions {
 
 interface CreatePairingInput {
   endpoint: string;
+  relayId?: string;
   transport: LocalControlTransport;
   ttlMs?: number;
 }
@@ -150,6 +155,27 @@ export function createLocalControlStore(options: CreateLocalControlStoreOptions 
       return hostToken;
     },
 
+    async getRelayId() {
+      const state = await loadState();
+      const existingRelayId = state.relayId ?? latestStoredRelayId(state);
+      if (existingRelayId) {
+        if (!state.relayId) {
+          await saveState({
+            ...state,
+            relayId: existingRelayId
+          });
+        }
+        return existingRelayId;
+      }
+
+      const relayId = idGenerator("relay");
+      await saveState({
+        ...state,
+        relayId
+      });
+      return relayId;
+    },
+
     async createPairing(input: CreatePairingInput): Promise<LocalPairingPayload> {
       const state = await loadState();
       const createdAt = now();
@@ -166,6 +192,7 @@ export function createLocalControlStore(options: CreateLocalControlStoreOptions 
         ).toISOString(),
         consumedAt: null,
         createdAt: createdAt.toISOString(),
+        relayId: input.relayId ?? null,
         transport: input.transport
       };
 
@@ -186,6 +213,7 @@ export function createLocalControlStore(options: CreateLocalControlStoreOptions 
         manualCode,
         expiresAt: pairing.expiresAt,
         transport: input.transport,
+        relayId: input.relayId,
         capabilities: [...PAIRING_CAPABILITIES]
       };
     },
@@ -224,6 +252,7 @@ export function createLocalControlStore(options: CreateLocalControlStoreOptions 
         tokenHash: hashLocalControlToken(clientToken),
         pairedAt: pairedAt.toISOString(),
         lastSeenAt: pairedAt.toISOString(),
+        relayId: pairing.relayId ?? null,
         revokedAt: null
       };
       const nextPairings = state.activePairings.map((candidate) =>
@@ -246,6 +275,30 @@ export function createLocalControlStore(options: CreateLocalControlStoreOptions 
         endpoint: pairing.endpoint,
         macId: state.macId
       };
+    },
+
+    async getRelayKeyMaterials(relayId: string) {
+      const state = await loadState();
+      const checkedAt = now();
+      const pairingMaterials = state.activePairings
+        .filter(
+          (pairing) =>
+            pairing.relayId === relayId && !pairing.consumedAt && !isExpired(pairing, checkedAt)
+        )
+        .map((pairing) => ({
+          id: pairing.id,
+          kind: "pairing" as const,
+          keyMaterial: pairing.secretHash
+        }));
+      const deviceMaterials = state.pairedDevices
+        .filter((device) => device.relayId === relayId && !device.revokedAt)
+        .map((device) => ({
+          id: device.id,
+          kind: "device" as const,
+          keyMaterial: device.tokenHash
+        }));
+
+      return [...pairingMaterials, ...deviceMaterials];
     },
 
     async requireDeviceByToken(token: string) {
@@ -283,6 +336,7 @@ async function readStateFile(path: string): Promise<LocalControlStateFile | null
       macId: parsed.macId,
       macName: typeof parsed.macName === "string" ? parsed.macName : hostname() || "Abitat Mac",
       hostTokenHash: typeof parsed.hostTokenHash === "string" ? parsed.hostTokenHash : "",
+      relayId: typeof parsed.relayId === "string" ? parsed.relayId : undefined,
       pairedDevices: Array.isArray(parsed.pairedDevices) ? parsed.pairedDevices : [],
       activePairings: Array.isArray(parsed.activePairings) ? parsed.activePairings : []
     };
@@ -310,6 +364,21 @@ function normalizeManualCode(code: string) {
 
 function isExpired(pairing: Pick<LocalActivePairing, "expiresAt">, now: Date) {
   return Date.parse(pairing.expiresAt) <= now.getTime();
+}
+
+function latestStoredRelayId(state: LocalControlStateFile) {
+  return [
+    ...state.pairedDevices.flatMap((device) =>
+      device.relayId ? [{ relayId: device.relayId, timestamp: Date.parse(device.pairedAt) }] : []
+    ),
+    ...state.activePairings.flatMap((pairing) =>
+      pairing.relayId
+        ? [{ relayId: pairing.relayId, timestamp: Date.parse(pairing.createdAt) }]
+        : []
+    )
+  ]
+    .sort((left, right) => right.timestamp - left.timestamp)
+    .at(0)?.relayId;
 }
 
 function tokenMatchesHash(token: string, expectedHash: string) {

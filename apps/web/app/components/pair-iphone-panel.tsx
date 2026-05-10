@@ -21,8 +21,8 @@ export function PairIphonePanel() {
       <div className="phone-pair-code" aria-live="polite">
         <span>Mac command</span>
         <strong>abitat iphone</strong>
-        <small>Uses a Mac-side Quick Tunnel for off-network control.</small>
-        <code>brew install cloudflared && abitat iphone</code>
+        <small>Uses the Abitat relay for off-network control.</small>
+        <code>abitat iphone</code>
       </div>
     </section>
   );

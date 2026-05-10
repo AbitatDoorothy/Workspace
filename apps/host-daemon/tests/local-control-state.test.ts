@@ -93,4 +93,106 @@ describe("local control state", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("tracks relay pairing and device key material without storing mobile tokens", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "abitat-local-control-relay-state-"));
+    const statePath = join(directory, "state.json");
+    let secretIndex = 0;
+    const store = createLocalControlStore({
+      idGenerator: (prefix) => `${prefix}_test`,
+      randomSecret: () => `secret_${++secretIndex}`,
+      statePath
+    });
+
+    try {
+      const pairing = await store.createPairing({
+        endpoint: "https://workspace.abitat.io",
+        relayId: "relay_test",
+        transport: "relay"
+      });
+
+      expect(pairing).toMatchObject({
+        endpoint: "https://workspace.abitat.io",
+        relayId: "relay_test",
+        transport: "relay"
+      });
+
+      await expect(store.getRelayKeyMaterials("relay_test")).resolves.toEqual([
+        {
+          id: "pairing_test",
+          kind: "pairing",
+          keyMaterial: hashLocalControlToken(pairing.pairingSecret)
+        }
+      ]);
+
+      const paired = await store.consumePairing({
+        deviceName: "Relay iPhone",
+        pairingSecret: pairing.pairingSecret,
+        platform: "ios"
+      });
+
+      await expect(store.getRelayKeyMaterials("relay_test")).resolves.toEqual([
+        {
+          id: "phone_test",
+          kind: "device",
+          keyMaterial: hashLocalControlToken(paired.clientToken)
+        }
+      ]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("persists one relay id per Mac so paired phones can reconnect after restart", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "abitat-local-control-relay-id-state-"));
+    const statePath = join(directory, "state.json");
+    const store = createLocalControlStore({
+      idGenerator: (prefix) => `${prefix}_stable_test`,
+      statePath
+    });
+
+    try {
+      await expect(store.getRelayId()).resolves.toBe("relay_stable_test");
+
+      const restarted = createLocalControlStore({
+        idGenerator: (prefix) => `${prefix}_new_test`,
+        statePath
+      });
+      await expect(restarted.getRelayId()).resolves.toBe("relay_stable_test");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reuses an existing relay device room when upgrading older local state", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "abitat-local-control-relay-id-migration-"));
+    const statePath = join(directory, "state.json");
+    let secretIndex = 0;
+    const store = createLocalControlStore({
+      idGenerator: (prefix) => `${prefix}_test`,
+      randomSecret: () => `secret_${++secretIndex}`,
+      statePath
+    });
+
+    try {
+      const pairing = await store.createPairing({
+        endpoint: "https://workspace.abitat.io",
+        relayId: "relay_existing_device",
+        transport: "relay"
+      });
+      await store.consumePairing({
+        deviceName: "Existing Relay iPhone",
+        pairingSecret: pairing.pairingSecret,
+        platform: "ios"
+      });
+
+      const upgraded = createLocalControlStore({
+        idGenerator: (prefix) => `${prefix}_new_test`,
+        statePath
+      });
+      await expect(upgraded.getRelayId()).resolves.toBe("relay_existing_device");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });

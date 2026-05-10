@@ -1,9 +1,17 @@
-export type IphoneTransport = "auto" | "local" | "tailscale" | "quick-tunnel" | "manual";
+export type IphoneTransport =
+  | "auto"
+  | "local"
+  | "tailscale"
+  | "relay"
+  | "temporary-tunnel"
+  | "quick-tunnel"
+  | "manual";
 
 export interface IphoneStartupInput {
   codexServerUrl: string;
   endpoint?: string;
   port: number;
+  relayEndpoint?: string;
   transport: IphoneTransport;
 }
 
@@ -27,6 +35,7 @@ export function createIphoneStartupPlan(input: IphoneStartupInput): StartupProce
         input.transport,
         "--codex-server-url",
         input.codexServerUrl,
+        ...(input.relayEndpoint ? ["--relay-endpoint", input.relayEndpoint] : []),
         ...(input.endpoint ? ["--endpoint", input.endpoint] : [])
       ]
     }

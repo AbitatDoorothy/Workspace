@@ -94,6 +94,9 @@ importers:
       expo-constants:
         specifier: ^55.0.15
         version: 55.0.15(expo@55.0.19)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.5))
+      expo-crypto:
+        specifier: 55.0.14
+        version: 55.0.14(expo@55.0.19)
       expo-document-picker:
         specifier: ^55.0.13
         version: 55.0.13(expo@55.0.19)
@@ -123,6 +126,25 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  apps/relay:
+    dependencies:
+      '@abitat_reece/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20260510.1
+        version: 4.20260510.1
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 4.1.5
+        version: 4.1.5(@types/node@25.6.0)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4))
+      wrangler:
+        specifier: ^4.90.0
+        version: 4.90.0(@cloudflare/workers-types@4.20260510.1)
+
   apps/web:
     dependencies:
       '@abitat_reece/shared':
@@ -133,7 +155,7 @@ importers:
         version: 1.8.0
       '@opennextjs/cloudflare':
         specifier: ^1.19.8
-        version: 1.19.8(next@16.2.6(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(wrangler@4.90.0)
+        version: 1.19.8(next@16.2.6(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(wrangler@4.90.0(@cloudflare/workers-types@4.20260510.1))
       '@prisma/adapter-pg':
         specifier: ^7.8.0
         version: 7.8.0
@@ -182,10 +204,16 @@ importers:
         version: 4.21.0
       wrangler:
         specifier: ^4.90.0
-        version: 4.90.0
+        version: 4.90.0(@cloudflare/workers-types@4.20260510.1)
 
   packages/shared:
     dependencies:
+      '@noble/ciphers':
+        specifier: 2.2.0
+        version: 2.2.0
+      '@noble/hashes':
+        specifier: 2.2.0
+        version: 2.2.0
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -985,6 +1013,9 @@ packages:
     engines: {node: '>=16'}
     cpu: [x64]
     os: [win32]
+
+  '@cloudflare/workers-types@4.20260510.1':
+    resolution: {integrity: sha512-Wcmb56nJMHw1BLpArV3RSmWb/z0Zx3S8OJ5mVUTb+AVTbyopU9iJzZrFGlYX18Ju9hXxqak2mhFMq6sCaFssag==}
 
   '@cspotcode/source-map-support@0.8.1':
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
@@ -1987,6 +2018,10 @@ packages:
     resolution: {integrity: sha512-2I0gnIVPtfnMw9ee9h1dJG7tp81+8Ob3OJb3Mv37rx5L40/b0i7djjCVvGOVqc9AEIQyvyu1i6ypKdFw8R8gQw==}
     engines: {node: ^14.21.3 || >=16}
 
+  '@noble/ciphers@2.2.0':
+    resolution: {integrity: sha512-Z6pjIZ/8IJcCGzb2S/0Px5J81yij85xASuk1teLNeg75bfT07MV3a/O2Mtn1I2se43k3lkVEcFaR10N4cgQcZA==}
+    engines: {node: '>= 20.19.0'}
+
   '@noble/curves@1.9.7':
     resolution: {integrity: sha512-gbKGcRUYIjA3/zCCNaWDciTMFI0dCkvou3TL8Zmy5Nc7sJ47a0jtOeZoTaMxkuqRo9cRhjOdZJXegxYE5FN/xw==}
     engines: {node: ^14.21.3 || >=16}
@@ -1994,6 +2029,10 @@ packages:
   '@noble/hashes@1.8.0':
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
+
+  '@noble/hashes@2.2.0':
+    resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
+    engines: {node: '>= 20.19.0'}
 
   '@nodable/entities@2.1.0':
     resolution: {integrity: sha512-nyT7T3nbMyBI/lvr6L5TyWbFJAI9FTgVRakNoBqCD+PmID8DzFrrNdLLtHMwMszOtqZa8PAOV24ZqDnQrhQINA==}
@@ -3437,6 +3476,11 @@ packages:
     peerDependencies:
       expo: '*'
       react-native: '*'
+
+  expo-crypto@55.0.14:
+    resolution: {integrity: sha512-TfAADBGZNNv9OOmdKFJCz54wDj87ufxtzQNSY+Roycpm8e5tuCnDIL7EjqUOmNTGH99Jj8ftPGFt4KGG2Ii2fg==}
+    peerDependencies:
+      expo: '*'
 
   expo-document-picker@55.0.13:
     resolution: {integrity: sha512-IhswJElhdzs3fKDEKW8KXYRoFkWGEsXRMYAZT46Yo56zqqy8yQXrczo33RSwD2hFzNQBdLT97SJL9N311UyS3g==}
@@ -6788,6 +6832,8 @@ snapshots:
   '@cloudflare/workerd-windows-64@1.20260507.1':
     optional: true
 
+  '@cloudflare/workers-types@4.20260510.1': {}
+
   '@cspotcode/source-map-support@0.8.1':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
@@ -7675,11 +7721,15 @@ snapshots:
 
   '@noble/ciphers@1.3.0': {}
 
+  '@noble/ciphers@2.2.0': {}
+
   '@noble/curves@1.9.7':
     dependencies:
       '@noble/hashes': 1.8.0
 
   '@noble/hashes@1.8.0': {}
+
+  '@noble/hashes@2.2.0': {}
 
   '@nodable/entities@2.1.0': {}
 
@@ -7722,7 +7772,7 @@ snapshots:
       - aws-crt
       - supports-color
 
-  '@opennextjs/cloudflare@1.19.8(next@16.2.6(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(wrangler@4.90.0)':
+  '@opennextjs/cloudflare@1.19.8(next@16.2.6(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(wrangler@4.90.0(@cloudflare/workers-types@4.20260510.1))':
     dependencies:
       '@ast-grep/napi': 0.40.5
       '@dotenvx/dotenvx': 1.31.0
@@ -7734,7 +7784,7 @@ snapshots:
       glob: 12.0.0
       next: 16.2.6(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       ts-tqdm: 0.8.6
-      wrangler: 4.90.0
+      wrangler: 4.90.0(@cloudflare/workers-types@4.20260510.1)
       yargs: 18.0.0
     transitivePeerDependencies:
       - aws-crt
@@ -9394,6 +9444,10 @@ snapshots:
       react-native: 0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.5)
     transitivePeerDependencies:
       - supports-color
+
+  expo-crypto@55.0.14(expo@55.0.19):
+    dependencies:
+      expo: 55.0.19(@babel/core@7.29.0)(@expo/dom-webview@55.0.5)(react-dom@19.2.5(react@19.2.5))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.5))(react@19.2.5)(typescript@6.0.3)
 
   expo-document-picker@55.0.13(expo@55.0.19):
     dependencies:
@@ -11357,7 +11411,7 @@ snapshots:
       '@cloudflare/workerd-linux-arm64': 1.20260507.1
       '@cloudflare/workerd-windows-64': 1.20260507.1
 
-  wrangler@4.90.0:
+  wrangler@4.90.0(@cloudflare/workers-types@4.20260510.1):
     dependencies:
       '@cloudflare/kv-asset-handler': 0.5.0
       '@cloudflare/unenv-preset': 2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260507.1)
@@ -11368,6 +11422,7 @@ snapshots:
       unenv: 2.0.0-rc.24
       workerd: 1.20260507.1
     optionalDependencies:
+      '@cloudflare/workers-types': 4.20260510.1
       fsevents: 2.3.3
     transitivePeerDependencies:
       - bufferutil

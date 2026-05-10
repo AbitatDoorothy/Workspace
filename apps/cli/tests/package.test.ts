@@ -44,11 +44,13 @@ describe("cli package", () => {
       files?: string[];
       name?: string;
       private?: boolean;
+      "react-native"?: string;
     };
 
     expect(pkg.name).toBe("@abitat_reece/shared");
     expect(pkg.private).toBe(false);
     expect(pkg.exports?.["."]).toBeTruthy();
-    expect(pkg.files).toEqual(["dist"]);
+    expect(pkg.files).toEqual(["dist", "src"]);
+    expect(pkg["react-native"]).toBe("./src/index.native.ts");
   });
 });

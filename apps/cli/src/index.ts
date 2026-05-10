@@ -94,7 +94,8 @@ export async function runCli(args: string[], input: RunCliInput = {}) {
     codexServerUrl: env.CODEX_APP_SERVER_URL ?? DEFAULT_CODEX_APP_SERVER_URL,
     endpoint: readOption(args, "--endpoint") ?? env.ABITAT_LOCAL_CONTROL_ENDPOINT,
     port: numberOption(args, "--port", Number(env.ABITAT_LOCAL_CONTROL_PORT ?? 3901)),
-    transport: transportOption(readOption(args, "--transport") ?? "quick-tunnel")
+    relayEndpoint: readOption(args, "--relay-endpoint") ?? env.ABITAT_RELAY_ENDPOINT,
+    transport: transportOption(readOption(args, "--transport") ?? "relay")
   });
 
   output("Starting local-first iPhone control on this Mac.");
@@ -166,6 +167,8 @@ function transportOption(value: string): IphoneTransport {
     value === "auto" ||
     value === "local" ||
     value === "tailscale" ||
+    value === "relay" ||
+    value === "temporary-tunnel" ||
     value === "quick-tunnel" ||
     value === "manual"
   ) {

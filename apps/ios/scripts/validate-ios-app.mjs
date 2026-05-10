@@ -30,6 +30,9 @@ if (!packageJson.dependencies?.["expo-notifications"]) {
 if (!packageJson.dependencies?.["expo-constants"]) {
   throw new Error("Expected abitat-ios to depend on expo-constants for push registration");
 }
+if (!packageJson.dependencies?.["expo-crypto"]) {
+  throw new Error("Expected abitat-ios to depend on expo-crypto for relay envelope nonces");
+}
 if (!packageJson.dependencies?.["@expo/vector-icons"]) {
   throw new Error("Expected abitat-ios to depend on @expo/vector-icons for bottom navigation");
 }
@@ -83,6 +86,10 @@ for (const mode of ["fetch", "remote-notification"]) {
     throw new Error(`Expected native Info.plist to enable the ${mode} background mode`);
   }
 }
+const podfileLock = await readFile(join(process.cwd(), "ios/Podfile.lock"), "utf8");
+if (!podfileLock.includes("ExpoCrypto (55.0.14)")) {
+  throw new Error("Expected native iOS Pods to include ExpoCrypto for relay request nonces");
+}
 
 const conversationScreen = await readFile(
   join(process.cwd(), "src/screens/ConversationScreen.tsx"),
@@ -106,6 +113,12 @@ if (!apiClient.includes('"/pairing/consume"')) {
 }
 if (!apiClient.includes("parsePairingPayload")) {
   throw new Error("Expected iOS API client to parse Mac QR pairing payloads");
+}
+if (!apiClient.includes('transport !== "relay"')) {
+  throw new Error("Expected iOS API client to parse relay pairing payloads");
+}
+if (!apiClient.includes("postRelay(") || !apiClient.includes("encryptRelayEnvelope")) {
+  throw new Error("Expected iOS API client to route relay requests through encrypted envelopes");
 }
 if (!pairingScreen.includes("CameraView") || !pairingScreen.includes("onBarcodeScanned")) {
   throw new Error("Expected PairingScreen to scan Mac-generated QR payloads");

@@ -5,8 +5,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   resolveLocalControlTransport,
+  startEndpointHealthMonitor,
   startLocalhostRunTunnel,
+  startPinggyTunnel,
   startQuickTunnel,
+  startTemporarySshTunnel,
   waitForQuickTunnelReady
 } from "../src/local-control/transport";
 
@@ -46,6 +49,36 @@ describe("local control transport", () => {
       endpoint: "http://127.0.0.1:3901",
       transport: "local",
       warning: expect.stringContaining("Tailscale")
+    });
+  });
+
+  it("uses a local placeholder until a temporary tunnel URL is resolved", async () => {
+    await expect(
+      resolveLocalControlTransport({
+        port: 3901,
+        requestedTransport: "temporary-tunnel"
+      })
+    ).resolves.toMatchObject({
+      bindHost: "127.0.0.1",
+      endpoint: "http://127.0.0.1:3901",
+      transport: "manual",
+      warning: expect.stringContaining("Temporary tunnel endpoint")
+    });
+  });
+
+  it("uses a local placeholder until the relay connection is established", async () => {
+    await expect(
+      resolveLocalControlTransport({
+        port: 3901,
+        relayEndpoint: "https://workspace.abitat.io",
+        requestedTransport: "relay"
+      })
+    ).resolves.toMatchObject({
+      bindHost: "127.0.0.1",
+      endpoint: "https://workspace.abitat.io",
+      relayEndpoint: "https://workspace.abitat.io",
+      transport: "relay",
+      warning: expect.stringContaining("Relay endpoint")
     });
   });
 
@@ -118,6 +151,62 @@ describe("local control transport", () => {
     ]);
   });
 
+  it("starts a Pinggy tunnel and resolves the generated URL", async () => {
+    const child = createFakeTunnelProcess();
+    const spawned: Array<{ args: string[]; file: string }> = [];
+    const tunnelPromise = startPinggyTunnel({
+      localUrl: "http://127.0.0.1:3901",
+      spawnProcess: (file, args) => {
+        spawned.push({ file, args });
+        return child;
+      },
+      timeoutMs: 1000
+    });
+
+    child.stdout.write("https://demo-23-144-4-43.run.pinggy-free.link");
+
+    await expect(tunnelPromise).resolves.toMatchObject({
+      endpoint: "https://demo-23-144-4-43.run.pinggy-free.link"
+    });
+    expect(spawned).toEqual([
+      {
+        file: "ssh",
+        args: expect.arrayContaining(["-p", "443", "-R", "0:127.0.0.1:3901", "a.pinggy.io"])
+      }
+    ]);
+  });
+
+  it("falls back from localhost.run to Pinggy for temporary tunnel startup", async () => {
+    const firstChild = createFakeTunnelProcess();
+    const secondChild = createFakeTunnelProcess();
+    const spawned: Array<{ args: string[]; file: string }> = [];
+    const tunnelPromise = startTemporarySshTunnel({
+      localUrl: "http://127.0.0.1:3901",
+      spawnProcess: (file, args) => {
+        spawned.push({ file, args });
+        return spawned.length === 1 ? firstChild : secondChild;
+      },
+      timeoutMs: 1000
+    });
+
+    firstChild.emit("exit", 255, null);
+    secondChild.stdout.write("https://demo-23-144-4-43.run.pinggy-free.link");
+
+    await expect(tunnelPromise).resolves.toMatchObject({
+      endpoint: "https://demo-23-144-4-43.run.pinggy-free.link"
+    });
+    expect(spawned).toEqual([
+      {
+        file: "ssh",
+        args: expect.arrayContaining(["-R", "80:127.0.0.1:3901", "nokey@localhost.run"])
+      },
+      {
+        file: "ssh",
+        args: expect.arrayContaining(["-p", "443", "-R", "0:127.0.0.1:3901", "a.pinggy.io"])
+      }
+    ]);
+  });
+
   it("waits for the Quick Tunnel health endpoint before pairing is shown", async () => {
     const requests: string[] = [];
 
@@ -144,6 +233,46 @@ describe("local control transport", () => {
       "https://demo-abitat.trycloudflare.com/health"
     ]);
   });
+
+  it("reports an endpoint that becomes unhealthy after startup", async () => {
+    const failures: Error[] = [];
+    const monitor = startEndpointHealthMonitor("https://demo-abitat.example", {
+      fetch: async () =>
+        new Response("No Tunnel", {
+          status: 503,
+          statusText: "Service Unavailable"
+        }),
+      intervalMs: 1,
+      maxFailures: 2,
+      onUnhealthy: (error) => failures.push(error)
+    });
+
+    await waitFor(() => failures.length > 0);
+    monitor.stop();
+
+    expect(failures[0]?.message).toContain("Tunnel endpoint is no longer reachable");
+  });
+
+  it("can monitor relay health under the relay route namespace", async () => {
+    const requests: string[] = [];
+    const monitor = startEndpointHealthMonitor("https://workspace.abitat.io", {
+      fetch: async (url) => {
+        requests.push(String(url));
+        return Response.json({ ok: true });
+      },
+      healthPath: "/relay/health",
+      intervalMs: 50,
+      maxFailures: 1,
+      onUnhealthy: (error) => {
+        throw error;
+      }
+    });
+
+    await waitFor(() => requests.length > 0);
+    monitor.stop();
+
+    expect(requests[0]).toBe("https://workspace.abitat.io/relay/health");
+  });
 });
 
 function createFakeTunnelProcess() {
@@ -162,4 +291,15 @@ function createFakeTunnelProcess() {
     return true;
   };
   return process;
+}
+
+async function waitFor(predicate: () => boolean) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("Timed out waiting for condition");
 }

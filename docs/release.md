@@ -27,9 +27,23 @@ pnpm smoke:public-install
 pnpm test:homebrew
 ```
 
+## Cloudflare Relay
+
+The relay Worker lives in `apps/relay` and should be deployed to Cloudflare before shipping relay-mode clients:
+
+```sh
+pnpm --filter @abitat_reece/relay test
+pnpm --filter @abitat_reece/relay typecheck
+pnpm --filter @abitat_reece/relay exec wrangler whoami
+pnpm --filter @abitat_reece/relay exec wrangler deploy
+curl https://workspace.abitat.io/relay/health
+```
+
+The relay is intentionally not a hosted workspace database. It only routes encrypted envelopes between a phone and the Mac connected to the matching relay id.
+
 ## Homebrew
 
-The formula source lives at `Formula/abitat.rb` and installs the published `@abitat_reece/cli` npm tarball with `node@22`. It declares Python as a build dependency because the packaged host daemon includes the native `node-pty` dependency, and it depends on `cloudflared` so off-network iPhone control works without any second iPhone networking app.
+The formula source lives at `Formula/abitat.rb` and installs the published `@abitat_reece/cli` npm tarball with `node@22`. It declares Python as a build dependency because the packaged host daemon includes the native `node-pty` dependency. Off-network iPhone control uses the Abitat relay by default, so `cloudflared` is not a Homebrew dependency.
 
 For the first public Homebrew release:
 
@@ -56,7 +70,7 @@ If the formula is later accepted into Homebrew core, users can install with `bre
 
 ## Hosted Web
 
-Hosted web deployment is optional for dashboard development and legacy hosted flows. Core iPhone control no longer depends on `workspace.abitat.io` or a hosted database.
+Hosted web deployment is optional for dashboard development and legacy hosted flows. Core iPhone control uses `workspace.abitat.io` only as a relay; it does not depend on a hosted database.
 
 ## iPhone App
 
@@ -73,4 +87,4 @@ abitat doctor
 abitat iphone
 ```
 
-Then they open the iPhone app and scan the QR code printed by the Mac. The phone and Mac can be on different networks because the Mac starts a Cloudflare Quick Tunnel and embeds that temporary URL in the pairing payload.
+Then they open the iPhone app and scan the QR code printed by the Mac. The phone and Mac can be on different networks because the Mac connects outbound to the Abitat relay and embeds the relay id in the pairing payload.

@@ -23,12 +23,6 @@ The npm package remains available as an alternate install path:
 npm install -g @abitat_reece/cli
 ```
 
-Install the Mac-side tunnel helper. The iPhone does not need Cloudflare, Tailscale, or any other networking app:
-
-```sh
-brew install cloudflared
-```
-
 Start the Mac host:
 
 ```sh
@@ -39,9 +33,9 @@ This command:
 
 1. Starts the packaged `@abitat_reece/host-daemon` local-control server.
 2. Starts or connects to the local Codex app-server.
-3. Starts `cloudflared tunnel --url <local-control-url>` on the Mac.
+3. Connects the Mac outbound to the Abitat relay at `workspace.abitat.io`.
 4. Creates a short-lived, single-use pairing secret on the Mac.
-5. Prints a QR code and manual pairing payload containing the temporary `trycloudflare.com` URL.
+5. Prints a QR code and manual pairing payload containing the relay endpoint and relay id.
 6. Stores paired device records and token hashes under `~/Library/Application Support/Abitat/`.
 
 ## iPhone
@@ -50,18 +44,20 @@ Install the Abitat iPhone app, scan the QR code from the Mac command, or paste t
 
 ## Network Model
 
-Remote control works off-network through the Mac-side Quick Tunnel:
+Remote control works off-network through the Abitat relay:
 
-- `abitat iphone` defaults to `--transport quick-tunnel`.
-- The tunnel URL is temporary and can change when the Mac command restarts.
-- The iPhone only needs the Abitat app because the tunnel terminates on the Mac side.
-- If Cloudflare Quick Tunnel is unavailable on the current Mac/network, Abitat automatically falls back to a temporary `localhost.run` HTTPS tunnel over the Mac's built-in SSH client.
+- `abitat iphone` defaults to `--transport relay`.
+- The relay URL is stable, but the relay id and pairing secret are Mac-generated and short-lived.
+- The iPhone only needs the Abitat app because the Mac keeps an outbound relay connection open.
+- The relay forwards encrypted envelopes only. The Mac still creates pairing secrets, mints phone tokens, validates requests, and owns Codex execution.
+- `abitat iphone --transport temporary-tunnel` remains available as a fallback/demo path using `localhost.run` and Pinggy.
+- `abitat iphone --transport quick-tunnel` remains available for users who install `cloudflared` and are on a network where Cloudflare Quick Tunnel works.
 - `abitat iphone --transport tailscale` remains available for users who already run Tailscale on both devices.
 - `abitat iphone --transport manual --endpoint <url>` lets advanced users provide their own endpoint.
 
 The Mac still requires Abitat device-token auth for every iPhone request. The tunnel only provides reachability; it is not the product authorization boundary.
 
-Hosted `workspace.abitat.io` mobile-control APIs are no longer the public control path.
+Hosted `workspace.abitat.io` mobile-control APIs are not the authority for core control. It is a relay endpoint; the paired Mac remains the authorization boundary.
 
 ## Maintainer Release Check
 

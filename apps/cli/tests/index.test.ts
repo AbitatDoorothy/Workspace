@@ -127,7 +127,7 @@ describe("abitat cli", () => {
           "--port",
           "3901",
           "--transport",
-          "quick-tunnel",
+          "relay",
           "--codex-server-url",
           "ws://127.0.0.1:17321"
         ]
@@ -165,7 +165,7 @@ describe("abitat cli", () => {
           "--port",
           "3901",
           "--transport",
-          "quick-tunnel",
+          "relay",
           "--codex-server-url",
           "ws://127.0.0.1:47777"
         ]

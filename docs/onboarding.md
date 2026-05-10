@@ -4,13 +4,12 @@ Share this guide with a new Mac and iPhone user.
 
 ## What Abitat Does
 
-Abitat lets an iPhone control Codex running on a paired Mac. The Mac is the control plane: it owns Codex execution, local project discovery, pairing, and device-token auth. The iPhone connects directly to that Mac through Tailscale, a temporary tunnel, or another user-managed endpoint.
+Abitat lets an iPhone control Codex running on a paired Mac. The Mac is the control plane: it owns Codex execution, local project discovery, pairing, and device-token auth. The iPhone reaches that Mac through the Abitat relay, Tailscale, a temporary tunnel, or another user-managed endpoint.
 
 ## Requirements
 
 - A Mac with Homebrew installed.
 - Codex installed and signed in on the Mac.
-- `cloudflared` installed on the Mac for off-network control without another iPhone app.
 - The Abitat iPhone app installed.
 
 ## Install On Mac
@@ -18,12 +17,6 @@ Abitat lets an iPhone control Codex running on a paired Mac. The Mac is the cont
 ```sh
 brew tap AbitatDoorothy/abitat
 brew install abitat
-```
-
-Install the Mac-side tunnel helper:
-
-```sh
-brew install cloudflared
 ```
 
 If the formula has been accepted into Homebrew core, use:
@@ -38,9 +31,15 @@ brew install abitat
 abitat iphone
 ```
 
-This starts the Mac-local Abitat control server, starts or connects to the local Codex app-server, starts a Cloudflare Quick Tunnel from the Mac, and prints a QR code plus a manual JSON payload. The pairing payload expires quickly and can be used only once.
+This starts the Mac-local Abitat control server, starts or connects to the local Codex app-server, connects the Mac outbound to the Abitat relay at `workspace.abitat.io`, and prints a QR code plus a manual JSON payload. The pairing payload expires quickly and can be used only once. The iPhone still only needs the Abitat app.
 
-If Cloudflare Quick Tunnel cannot connect from the current network, Abitat falls back to a temporary `localhost.run` HTTPS tunnel over the Mac's built-in SSH client. The iPhone still only needs the Abitat app.
+The relay routes encrypted envelopes. It cannot mint phone tokens, list projects, or control Codex by itself; the paired Mac validates every request locally.
+
+The default is equivalent to:
+
+```sh
+abitat iphone --transport relay
+```
 
 For a same-machine/local test, use:
 
@@ -48,10 +47,18 @@ For a same-machine/local test, use:
 abitat iphone --transport local
 ```
 
-For Tailscale instead of a temporary tunnel, use:
+For Tailscale instead of the relay, use:
 
 ```sh
 abitat iphone --transport tailscale
+```
+
+Temporary tunnels remain available as fallback/demo modes:
+
+```sh
+abitat iphone --transport temporary-tunnel
+brew install cloudflared
+abitat iphone --transport quick-tunnel
 ```
 
 ## Pair The iPhone
@@ -74,8 +81,7 @@ After pairing, the iPhone reconnects with the stored Mac endpoint and device tok
 ## Troubleshooting
 
 - Run `abitat doctor` to confirm the CLI is installed.
-- If `cloudflared` is missing, install it with `brew install cloudflared` and run `abitat iphone` again.
-- If the phone cannot pair off-network, rerun `abitat iphone`; Quick Tunnel URLs are temporary and change between runs.
+- If the phone cannot pair off-network, keep `abitat iphone` running and check that the relay endpoint is reachable.
 - If the pairing payload expired, run `abitat iphone` again and scan the new code.
 - If no projects appear, keep the Mac command running and refresh the iPhone Projects screen.
 - If Codex does not start, open Codex on the Mac or set `CODEX_APP_SERVER_URL` to a reachable local Codex app-server.

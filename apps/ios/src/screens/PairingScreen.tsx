@@ -50,12 +50,16 @@ export function PairingScreen({ api, apiUrl, onApiUrlChange, onPaired }: Pairing
         code: pairingPayload?.manualCode ?? pairingInput.trim(),
         deviceName,
         endpoint,
-        pairingSecret: pairingPayload?.pairingSecret
+        pairingSecret: pairingPayload?.pairingSecret,
+        relayId: pairingPayload?.relayId,
+        transport: pairingPayload?.transport
       });
       onPaired({
         ...pairing,
         apiUrl: endpoint,
-        macId: pairingPayload?.macId ?? pairing.macId
+        macId: pairingPayload?.macId ?? pairing.macId,
+        relayId: pairingPayload?.relayId ?? pairing.relayId,
+        transport: pairingPayload?.transport ?? pairing.transport
       });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to pair iPhone");

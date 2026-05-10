@@ -18,7 +18,6 @@ for (const expected of [
   'homepage "https://github.com/AbitatDoorothy/Workspace"',
   `url "${npmTarballUrl}"`,
   'depends_on "node@22"',
-  'depends_on "cloudflared"',
   'depends_on "python" => :build',
   "std_npm_args",
   'bin.install_symlink libexec/"bin/abitat"',
@@ -38,7 +37,8 @@ if (!shaMatch) {
 for (const expected of [
   "brew tap AbitatDoorothy/abitat",
   "brew install abitat",
-  "brew install cloudflared",
+  "workspace.abitat.io",
+  "--transport relay",
   "abitat iphone",
   "Install the Abitat iPhone app"
 ]) {
@@ -51,9 +51,9 @@ for (const expected of [
   "# Abitat User Onboarding",
   "brew tap AbitatDoorothy/abitat",
   "brew install abitat",
-  "brew install cloudflared",
   "abitat iphone",
-  "Cloudflare Quick Tunnel"
+  "workspace.abitat.io",
+  "--transport relay"
 ]) {
   if (!onboardingDocs.includes(expected)) {
     throw new Error(`Expected docs/onboarding.md to include ${expected}`);

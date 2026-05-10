@@ -1,3 +1,14 @@
+import * as Crypto from "expo-crypto";
+
+import {
+  decryptRelayEnvelope,
+  encryptRelayEnvelope,
+  relaySessionKey,
+  sha256Hex,
+  type RelayEncryptedEnvelope,
+  type RelayPlainResponse
+} from "@abitat_reece/shared";
+
 import type {
   CodexCompletionSummary,
   CodexModelOption,
@@ -21,6 +32,8 @@ export interface ApiClient {
     deviceName: string;
     endpoint?: string;
     pairingSecret?: string;
+    relayId?: string;
+    transport?: LocalPairingPayload["transport"];
   }): Promise<PairingState>;
   continueConversation(
     conversationId: string,
@@ -72,13 +85,24 @@ export function createApiClient(pairing: PairingState): ApiClient {
     bootstrap: () => get(pairing, "/api/mobile/bootstrap").then((body) => body as MobileBootstrap),
     async completePairing(input) {
       const endpoint = input.endpoint ?? pairing.apiUrl;
-      const response = await postUnauthed(endpoint, "/pairing/consume", {
+      const requestBody = {
         appVersion: input.appVersion,
         code: input.code,
         deviceName: input.deviceName,
         pairingSecret: input.pairingSecret,
         platform: "ios"
-      });
+      };
+      const response = (
+        input.transport === "relay" && input.relayId && input.pairingSecret
+          ? relayBodyOrThrow(
+              await postRelay(endpoint, input.relayId, sha256Hex(input.pairingSecret), {
+                body: requestBody,
+                method: "POST",
+                path: "/pairing/consume"
+              })
+            )
+          : await postUnauthed(endpoint, "/pairing/consume", requestBody)
+      ) as Record<string, string>;
 
       return {
         apiUrl: endpoint,
@@ -86,6 +110,8 @@ export function createApiClient(pairing: PairingState): ApiClient {
         hostMachineId: response.hostMachineId,
         macId: response.macId ?? response.hostMachineId,
         machineId: response.machineId,
+        relayId: input.relayId,
+        transport: input.transport,
         workspaceId: response.workspaceId
       };
     },
@@ -189,6 +215,10 @@ async function del(pairing: PairingState, path: string) {
 }
 
 async function request(pairing: PairingState, path: string, init: RequestInit) {
+  if (pairing.transport === "relay" && pairing.relayId) {
+    return relayRequest(pairing, path, init);
+  }
+
   const response = await fetch(new URL(path, pairing.apiUrl).toString(), {
     ...init,
     headers: {
@@ -202,6 +232,73 @@ async function request(pairing: PairingState, path: string, init: RequestInit) {
   }
 
   return readJsonBody(response, path) as Promise<Record<string, any>>;
+}
+
+async function relayRequest(pairing: PairingState, path: string, init: RequestInit) {
+  const response = await postRelay(
+    pairing.apiUrl,
+    pairing.relayId ?? "",
+    sha256Hex(pairing.clientToken),
+    {
+      body: parseRequestBody(init.body),
+      headers: {
+        authorization: `Bearer ${pairing.clientToken}`,
+        ...headersObject(init.headers)
+      },
+      method: init.method ?? "GET",
+      path
+    }
+  );
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(readableRelayError(response));
+  }
+
+  return response.body as Record<string, any>;
+}
+
+async function postRelay(
+  apiUrl: string,
+  relayId: string,
+  keyMaterial: string,
+  request: {
+    body?: unknown;
+    headers?: Record<string, string>;
+    method: string;
+    path: string;
+  }
+) {
+  const key = await relaySessionKey(keyMaterial, relayId);
+  const requestId = createRequestId();
+  const envelope = await encryptRelayEnvelope(
+    key,
+    {
+      ...request,
+      requestId
+    },
+    { nonce: Crypto.getRandomBytes(12) }
+  );
+  const response = await fetch(
+    new URL(`/relay/${encodeURIComponent(relayId)}/request`, apiUrl).toString(),
+    {
+      body: JSON.stringify({ envelope }),
+      headers: { "content-type": "application/json" },
+      method: "POST"
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await readableError(response));
+  }
+
+  const relayBody = (await readJsonBody(response, `/relay/${relayId}/request`)) as {
+    envelope?: RelayEncryptedEnvelope;
+  };
+  if (!relayBody.envelope) {
+    throw new Error("Relay response did not include an envelope");
+  }
+
+  return decryptRelayEnvelope<RelayPlainResponse>(key, relayBody.envelope);
 }
 
 async function postUnauthed(apiUrl: string, path: string, body: unknown) {
@@ -245,6 +342,7 @@ function parsePairingPayloadUrl(value: string): LocalPairingPayload | null {
     macId: params.macId,
     pairingSecret: params.pairingSecret,
     manualCode: params.manualCode ?? params.code,
+    relayId: params.relayId,
     expiresAt: params.expiresAt,
     transport: params.transport ?? "manual"
   });
@@ -256,7 +354,8 @@ function normalizePairingPayload(value: Record<string, unknown>): LocalPairingPa
     transport !== "local" &&
     transport !== "tailscale" &&
     transport !== "quick-tunnel" &&
-    transport !== "manual"
+    transport !== "manual" &&
+    transport !== "relay"
   ) {
     return null;
   }
@@ -279,6 +378,7 @@ function normalizePairingPayload(value: Record<string, unknown>): LocalPairingPa
     macId: value.macId,
     pairingSecret: value.pairingSecret,
     manualCode: typeof value.manualCode === "string" ? value.manualCode : undefined,
+    relayId: typeof value.relayId === "string" ? value.relayId : undefined,
     expiresAt: value.expiresAt,
     transport,
     capabilities: Array.isArray(value.capabilities)
@@ -299,6 +399,63 @@ function parseQuery(query: string) {
         return [decodeURIComponent(rawKey), decodeURIComponent(rawValue.replace(/\+/g, " "))];
       })
   ) as Record<string, string>;
+}
+
+function relayBodyOrThrow(response: RelayPlainResponse) {
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(readableRelayError(response));
+  }
+
+  return response.body;
+}
+
+function parseRequestBody(body: RequestInit["body"] | null | undefined) {
+  if (typeof body !== "string" || !body.trim()) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    return body;
+  }
+}
+
+function headersObject(headers: RequestInit["headers"] | undefined) {
+  if (!headers) {
+    return {};
+  }
+
+  if (headers instanceof Headers) {
+    return Object.fromEntries((headers as any).entries()) as Record<string, string>;
+  }
+
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+
+  return headers;
+}
+
+function readableRelayError(response: RelayPlainResponse) {
+  if (typeof response.body === "string" && response.body.trim()) {
+    return response.body;
+  }
+
+  if (
+    response.body &&
+    typeof response.body === "object" &&
+    "error" in response.body &&
+    typeof response.body.error === "string"
+  ) {
+    return response.body.error;
+  }
+
+  return `${response.status} Relay response`;
+}
+
+function createRequestId() {
+  return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
 async function readableError(response: Response) {

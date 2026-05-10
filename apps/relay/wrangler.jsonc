@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "abitat-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-10",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RELAY_ROOMS",
+        "class_name": "RelayRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RelayRoom"]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "routes": [
+    {
+      "pattern": "workspace.abitat.io/relay*",
+      "zone_name": "abitat.io"
+    }
+  ]
+}

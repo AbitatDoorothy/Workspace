@@ -10,13 +10,16 @@ import { defaultConfigPath, loadHostConfig, saveHostConfig } from "../config/hos
 import { collectChangeset } from "../git/changeset.js";
 import { branchNameForConversation, resolveRepoPath } from "../git/paths.js";
 import { createLocalCodexBridge } from "../local-control/codex-bridge.js";
+import { startRelayClient } from "../local-control/relay-client.js";
 import { startLocalControlServer } from "../local-control/server.js";
 import { createLocalControlStore, type LocalControlTransport } from "../local-control/state.js";
 import {
   resolveLocalControlTransport,
-  startLocalhostRunTunnel,
+  startEndpointHealthMonitor,
   startQuickTunnel,
+  startTemporarySshTunnel,
   waitForQuickTunnelReady,
+  type EndpointHealthMonitor,
   type QuickTunnel,
   type SshTunnel
 } from "../local-control/transport.js";
@@ -60,7 +63,7 @@ async function main() {
 
   console.error(`Unknown command: ${command}`);
   console.error(
-    "Usage: abitat-host iphone [--transport quick-tunnel|local|tailscale|manual] | abitat-host pair --code ABITAT-123456 | abitat-host start --mock"
+    "Usage: abitat-host iphone [--transport relay|temporary-tunnel|quick-tunnel|local|tailscale|manual] | abitat-host pair --code ABITAT-123456 | abitat-host start --mock"
   );
   process.exitCode = 1;
 }
@@ -84,8 +87,12 @@ async function pairDaemon(args: string[]) {
 
 async function startIphoneControl(args: string[]) {
   const port = numberOption(args, "--port", Number(process.env.ABITAT_LOCAL_CONTROL_PORT ?? 3901));
-  const requestedTransport = transportOption(readOption(args, "--transport") ?? "quick-tunnel");
+  const requestedTransport = transportOption(readOption(args, "--transport") ?? "relay");
   const endpoint = readOption(args, "--endpoint") ?? process.env.ABITAT_LOCAL_CONTROL_ENDPOINT;
+  const relayEndpoint =
+    readOption(args, "--relay-endpoint") ??
+    process.env.ABITAT_RELAY_ENDPOINT ??
+    "https://workspace.abitat.io";
   const codexServerUrl =
     readOption(args, "--codex-server-url") ??
     process.env.CODEX_APP_SERVER_URL ??
@@ -93,9 +100,11 @@ async function startIphoneControl(args: string[]) {
   const transport = await resolveLocalControlTransport({
     endpoint,
     port,
+    relayEndpoint,
     requestedTransport
   });
   const store = createLocalControlStore();
+  const relayId = transport.transport === "relay" ? await store.getRelayId() : undefined;
   const server = await startLocalControlServer({
     bindHost: transport.bindHost,
     codex: createLocalCodexBridge({ serverUrl: codexServerUrl }),
@@ -106,9 +115,61 @@ async function startIphoneControl(args: string[]) {
   });
   let quickTunnel: QuickTunnel | null = null;
   let fallbackTunnel: SshTunnel | null = null;
+  let endpointMonitor: EndpointHealthMonitor | null = null;
+  let relayClient: { close(): void } | null = null;
   let publicEndpoint = server.endpoint;
   let pairingTransport = transport.transport;
-  if (transport.transport === "quick-tunnel") {
+  const stop = async (exitCode = 0) => {
+    endpointMonitor?.stop();
+    relayClient?.close();
+    await quickTunnel?.close().catch(() => undefined);
+    await fallbackTunnel?.close().catch(() => undefined);
+    await server.close().catch(() => undefined);
+    console.log("status=stopped");
+    process.exit(exitCode);
+  };
+
+  if (!endpoint && transport.transport === "relay") {
+    if (!relayId || !transport.relayEndpoint) {
+      throw new Error("Relay transport is missing relay configuration");
+    }
+    console.log(`Connecting this Mac to Abitat relay at ${transport.relayEndpoint}...`);
+    relayClient = startRelayClient({
+      localEndpoint: localServerEndpoint(port),
+      relayEndpoint: transport.relayEndpoint,
+      relayId,
+      store
+    });
+    publicEndpoint = transport.relayEndpoint;
+    pairingTransport = "relay";
+  }
+
+  if (!endpoint && requestedTransport === "temporary-tunnel") {
+    console.log("Starting temporary HTTPS tunnel through localhost.run from this Mac...");
+    fallbackTunnel = await startTemporarySshTunnel({
+      localUrl: server.endpoint,
+      onFallback(error) {
+        console.log(
+          `localhost.run is unavailable (${errorMessage(
+            error
+          )}). Trying Pinggy over SSH from this Mac...`
+        );
+      }
+    }).catch(async (error) => {
+      await server.close().catch(() => undefined);
+      throw error;
+    });
+    publicEndpoint = fallbackTunnel.endpoint;
+    pairingTransport = "manual";
+    console.log("Waiting for temporary tunnel to become reachable...");
+    await waitForQuickTunnelReady(publicEndpoint).catch(async (error) => {
+      await fallbackTunnel?.close().catch(() => undefined);
+      await server.close().catch(() => undefined);
+      throw error;
+    });
+  }
+
+  if (!endpoint && transport.transport === "quick-tunnel") {
     console.log("Starting Cloudflare Quick Tunnel from this Mac...");
     try {
       quickTunnel = await startQuickTunnel({ localUrl: server.endpoint });
@@ -121,12 +182,19 @@ async function startIphoneControl(args: string[]) {
       );
       await quickTunnel?.close().catch(() => undefined);
       quickTunnel = null;
-      fallbackTunnel = await startLocalhostRunTunnel({ localUrl: server.endpoint }).catch(
-        async (fallbackError) => {
-          await server.close().catch(() => undefined);
-          throw fallbackError;
+      fallbackTunnel = await startTemporarySshTunnel({
+        localUrl: server.endpoint,
+        onFallback(localhostRunError) {
+          console.log(
+            `localhost.run fallback is unavailable (${errorMessage(
+              localhostRunError
+            )}). Trying Pinggy over SSH from this Mac...`
+          );
         }
-      );
+      }).catch(async (fallbackError) => {
+        await server.close().catch(() => undefined);
+        throw fallbackError;
+      });
       publicEndpoint = fallbackTunnel.endpoint;
       pairingTransport = "manual";
       console.log("Waiting for fallback tunnel to become reachable...");
@@ -137,8 +205,18 @@ async function startIphoneControl(args: string[]) {
       });
     }
   }
+  endpointMonitor = startEndpointHealthMonitor(publicEndpoint, {
+    healthPath: pairingTransport === "relay" ? "/relay/health" : "/health",
+    intervalMs: 5_000,
+    maxFailures: 2,
+    onUnhealthy(error) {
+      console.error(error.message);
+      void stop(1);
+    }
+  });
   const pairing = await store.createPairing({
     endpoint: publicEndpoint,
+    relayId,
     transport: pairingTransport
   });
   const qrPayload = JSON.stringify(pairing);
@@ -146,10 +224,13 @@ async function startIphoneControl(args: string[]) {
   console.log("Abitat local iPhone control");
   console.log(`status=online`);
   console.log(`endpoint=${publicEndpoint}`);
-  if (transport.transport === "quick-tunnel") {
+  if (publicEndpoint !== server.endpoint) {
     console.log(`localEndpoint=${server.endpoint}`);
   }
   console.log(`transport=${pairingTransport}`);
+  if (relayId) {
+    console.log(`relayId=${relayId}`);
+  }
   if (transport.warning) {
     console.log(`warning=${transport.warning}`);
   }
@@ -164,13 +245,6 @@ async function startIphoneControl(args: string[]) {
   console.log("");
   console.log("Keep this command running while pairing and using the phone.");
 
-  const stop = async () => {
-    await quickTunnel?.close().catch(() => undefined);
-    await fallbackTunnel?.close().catch(() => undefined);
-    await server.close().catch(() => undefined);
-    console.log("status=stopped");
-    process.exit(0);
-  };
   process.once("SIGINT", () => void stop());
   process.once("SIGTERM", () => void stop());
 
@@ -627,13 +701,19 @@ function transportOption(value: string) {
     normalized === "auto" ||
     normalized === "local" ||
     normalized === "tailscale" ||
+    normalized === "temporary-tunnel" ||
+    normalized === "relay" ||
     normalized === "quick-tunnel" ||
     normalized === "manual"
   ) {
-    return normalized as "auto" | LocalControlTransport;
+    return normalized as "auto" | LocalControlTransport | "temporary-tunnel";
   }
 
   return "auto";
+}
+
+function localServerEndpoint(port: number) {
+  return `http://127.0.0.1:${port}`;
 }
 
 function errorMessage(error: unknown) {

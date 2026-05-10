@@ -7,7 +7,6 @@ Abitat Workspace is a web-controlled local coding-agent runtime. This scaffold i
 - Node.js 24 or newer
 - pnpm 10.33.0 or newer
 - Codex installed and signed in on the Mac
-- `cloudflared` on the Mac for off-network iPhone control without another iPhone app
 - PostgreSQL running on `localhost:5432` only when developing the web app
 
 ## Local Setup
@@ -60,22 +59,23 @@ pnpm format
 
 ## Local-First iPhone Control
 
-Core iPhone control is local-first. The Mac runs the Abitat control server, owns Codex execution and state, and issues the short-lived pairing payload. The iPhone stores the paired Mac endpoint and token locally, then calls that Mac directly through Tailscale, a temporary tunnel, or a user-managed endpoint. No Abitat-hosted domain or hosted database is required for pairing, projects, conversations, messages, attachments, or remote control.
+Core iPhone control is local-first. The Mac runs the Abitat control server, owns Codex execution and state, and issues the short-lived pairing payload. The iPhone stores the paired Mac endpoint and token locally, then reaches that Mac through the Abitat relay, Tailscale, a temporary tunnel, or a user-managed endpoint. No hosted database is required for pairing, projects, conversations, messages, attachments, or remote control.
 
 Recommended public flow:
 
 ```bash
-brew install cloudflared
 abitat iphone
 ```
 
-The command starts the Mac-local control server, starts a Cloudflare Quick Tunnel from the Mac, prints a QR/manual pairing payload with the generated `trycloudflare.com` URL, and bridges requests to the local Codex app-server. The iPhone only needs the Abitat app.
+The command starts the Mac-local control server, connects the Mac outbound to the `workspace.abitat.io` relay, prints a QR/manual pairing payload with a relay id, and bridges encrypted iPhone requests to the local Codex app-server. The relay routes packets only; the Mac still creates pairings, mints phone tokens, validates every request, and owns Codex.
 
 Same-Wi-Fi, Tailscale, and manual endpoint modes are still available:
 
 ```bash
 abitat iphone --transport local
 abitat iphone --transport tailscale
+abitat iphone --transport temporary-tunnel
+abitat iphone --transport quick-tunnel
 abitat iphone --transport manual --endpoint https://your-endpoint.example
 ```
 
