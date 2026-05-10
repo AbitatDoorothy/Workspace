@@ -26,6 +26,7 @@ const DEFAULT_CODEX_BINARY = "/Applications/Codex.app/Contents/Resources/codex";
 const REQUEST_TIMEOUT_MS = 30_000;
 const START_TIMEOUT_MS = 15_000;
 const TURN_KEEPALIVE_TIMEOUT_MS = 30 * 60_000;
+const THREAD_LIST_CACHE_TTL_MS = 2_500;
 const MAX_CODEX_MESSAGE_CONTENT_LENGTH = 12_000;
 const PHONE_FULL_ACCESS_TURN_OPTIONS = {
   approvalPolicy: "never",
@@ -139,8 +140,31 @@ export function createLocalCodexBridge(
   const client = createCodexAppClient(options);
   const workspaceId = options.workspaceId ?? "local";
   const userId = options.userId ?? "local";
+  const threadListCache = new Map<
+    string,
+    { expiresAt: number; promise: Promise<CodexAppThread[]> }
+  >();
 
   async function listAllThreads(params: CodexAppThreadListParams = {}) {
+    const cacheKey = threadListCacheKey(params);
+    const cached = threadListCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) {
+      return cached.promise;
+    }
+
+    const promise = loadAllThreads(params).catch((error) => {
+      threadListCache.delete(cacheKey);
+      throw error;
+    });
+    threadListCache.set(cacheKey, {
+      expiresAt: now + THREAD_LIST_CACHE_TTL_MS,
+      promise
+    });
+    return promise;
+  }
+
+  async function loadAllThreads(params: CodexAppThreadListParams = {}) {
     const stateThreads = await listAllThreadsOnce({ ...params, useStateDbOnly: true });
 
     if (stateThreads.length > 0 || params.useStateDbOnly !== undefined) {
@@ -164,11 +188,13 @@ export function createLocalCodexBridge(
   }
 
   async function resolveProjectCwd(projectId: string) {
-    const project = (await listProjects()).find((candidate) => candidate.id === projectId);
-    if (!project) {
-      throw Object.assign(new Error("Codex project not found"), { statusCode: 404 });
+    for (const thread of await listAllThreads()) {
+      if (externalCodexProjectId(thread.cwd) === projectId) {
+        return thread.cwd;
+      }
     }
-    return project.hostLocalPath;
+
+    throw Object.assign(new Error("Codex project not found"), { statusCode: 404 });
   }
 
   async function listProjects(): Promise<LocalCodexProjectSummary[]> {
@@ -266,7 +292,7 @@ export function createLocalCodexBridge(
 
     async listProjectConversations(projectId) {
       const cwd = await resolveProjectCwd(projectId);
-      const threads = await readThreadsWithTurns(await listAllThreads({ cwd }));
+      const threads = await listAllThreads({ cwd });
       return threads
         .filter((thread) => externalCodexProjectId(thread.cwd) === projectId)
         .sort((left, right) => right.updatedAt - left.updatedAt)
@@ -704,6 +730,17 @@ function toCodexThreadId(conversationId: string) {
   return conversationId.startsWith(CODEX_THREAD_PREFIX)
     ? decodeURIComponent(conversationId.slice(CODEX_THREAD_PREFIX.length))
     : conversationId;
+}
+
+function threadListCacheKey(params: CodexAppThreadListParams) {
+  return JSON.stringify({
+    archived: params.archived ?? null,
+    cursor: params.cursor ?? null,
+    cwd: params.cwd ?? null,
+    limit: params.limit ?? null,
+    sortDirection: params.sortDirection ?? null,
+    useStateDbOnly: params.useStateDbOnly ?? null
+  });
 }
 
 function codexThreadToConversation(

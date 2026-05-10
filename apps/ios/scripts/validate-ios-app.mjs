@@ -287,6 +287,28 @@ const projectDetailScreen = await readFile(
   join(process.cwd(), "src/screens/ProjectDetailScreen.tsx"),
   "utf8"
 );
+const projectsScreen = await readFile(
+  join(process.cwd(), "src/screens/ProjectsScreen.tsx"),
+  "utf8"
+);
+for (const expected of ["initialProjects", "onProjectsLoaded", "setProjects(initialProjects)"]) {
+  if (!projectsScreen.includes(expected)) {
+    throw new Error(
+      `Expected ProjectsScreen to keep warm project data while refreshing: ${expected}`
+    );
+  }
+}
+for (const expected of [
+  "initialConversations",
+  "onConversationsLoaded",
+  "setConversations(initialConversations)"
+]) {
+  if (!projectDetailScreen.includes(expected)) {
+    throw new Error(
+      `Expected ProjectDetailScreen to keep warm conversation data while refreshing: ${expected}`
+    );
+  }
+}
 if (!projectDetailScreen.includes("const timer = setInterval(loadConversations, 1800);")) {
   throw new Error("Expected ProjectDetailScreen to refresh conversation statuses");
 }
@@ -405,6 +427,9 @@ for (const expected of [
   "openConversationFromNotification",
   "api.listProjects()",
   "api.listConversations(target.projectId)",
+  "cachedProjects",
+  "cachedConversationsByProject",
+  "updateCachedConversations",
   'setRoute("conversation")'
 ]) {
   if (!appScreen.includes(expected)) {

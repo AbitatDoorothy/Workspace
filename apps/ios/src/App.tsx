@@ -51,6 +51,10 @@ export default function App() {
   const [route, setRoute] = useState<RouteName>("workspace");
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
+  const [cachedProjects, setCachedProjects] = useState<ProjectSummary[]>([]);
+  const [cachedConversationsByProject, setCachedConversationsByProject] = useState<
+    Record<string, ConversationSummary[]>
+  >({});
   const shouldShowBottomNav = route !== "conversation";
   const openConversationFromNotification = useCallback(
     async (target: CodexCompletionNotificationTarget) => {
@@ -91,6 +95,15 @@ export default function App() {
       setRoute("conversation");
     },
     [store.api, store.pairing?.workspaceId]
+  );
+  const updateCachedConversations = useCallback(
+    (projectId: string, nextConversations: ConversationSummary[]) => {
+      setCachedConversationsByProject((current) => ({
+        ...current,
+        [projectId]: nextConversations
+      }));
+    },
+    []
   );
   useThreadCompletionNotifications(store.api, store.isPaired, openConversationFromNotification);
 
@@ -135,6 +148,8 @@ export default function App() {
       {route === "projects" ? (
         <ProjectsScreen
           api={store.api}
+          initialProjects={cachedProjects}
+          onProjectsLoaded={setCachedProjects}
           onProject={(nextProject) => {
             setProject(nextProject);
             setRoute("project");
@@ -144,11 +159,13 @@ export default function App() {
       {route === "project" && project ? (
         <ProjectDetailScreen
           api={store.api}
+          initialConversations={cachedConversationsByProject[project.id] ?? []}
           onBack={() => setRoute("projects")}
           onConversation={(nextConversation) => {
             setConversation(nextConversation);
             setRoute("conversation");
           }}
+          onConversationsLoaded={updateCachedConversations}
           project={project}
         />
       ) : null}
