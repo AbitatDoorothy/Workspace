@@ -234,6 +234,16 @@ if (!conversationScreen.includes("shouldForceMessageRefreshAfterStatusPoll")) {
     "Expected ConversationScreen to force a message refresh from desktop status updates"
   );
 }
+for (const expected of [
+  "const nextStatus = latestConversation?.status ?? activeConversation.status;",
+  "latestStatusRef.current = nextStatus;",
+  "setStatus(nextStatus);",
+  "isConversationBusyStatus(input.previousStatus) && !isConversationBusyStatus(input.nextStatus)"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected ConversationScreen to preserve live Mac status sync: ${expected}`);
+  }
+}
 if (
   !conversationScreen.includes(
     "const canSendNow = !isDraftConversation(activeConversation) || !isSending;"

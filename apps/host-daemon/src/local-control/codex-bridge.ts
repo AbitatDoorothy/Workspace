@@ -973,7 +973,9 @@ function codexThreadToConversation(
 function codexThreadToCompletionState(thread: CodexAppThread, workspaceId: string) {
   const latestTurn = thread.turns.at(-1) ?? null;
   const status = codexThreadToConversationStatus(thread);
-  const failed = Boolean(latestTurn?.error) || Boolean(latestTurn && isTurnInterrupted(latestTurn));
+  const failed =
+    status !== "running" &&
+    (Boolean(latestTurn?.error) || Boolean(latestTurn && isTurnInterrupted(latestTurn)));
   const latestTurnCompletedAt = latestTurnCompletedAtIso(thread, latestTurn);
   const latestTurnFinished = Boolean(latestTurn && isTurnTerminal(latestTurn));
 
@@ -1082,24 +1084,28 @@ export function flattenThreadMessages(
 function codexThreadToConversationStatus(thread: CodexAppThread): ConversationStatus {
   const latestTurn = thread.turns.at(-1) ?? null;
 
+  if (threadStatusType(thread.status) === "active") {
+    if (latestTurn?.error) {
+      return "failed";
+    }
+
+    if (latestTurn && isTurnCompleted(latestTurn)) {
+      return "approved";
+    }
+
+    if (hasActiveFlag(thread.status, "waitingOnApproval")) {
+      return latestTurn && isTurnInterrupted(latestTurn) ? "cancelled" : "awaiting_approval";
+    }
+
+    return "running";
+  }
+
   if (latestTurn?.error) {
     return "failed";
   }
 
   if (latestTurn && isTurnInterrupted(latestTurn)) {
     return "cancelled";
-  }
-
-  if (threadStatusType(thread.status) === "active") {
-    if (latestTurn && isTurnTerminal(latestTurn)) {
-      return "approved";
-    }
-
-    if (hasActiveFlag(thread.status, "waitingOnApproval")) {
-      return "awaiting_approval";
-    }
-
-    return "running";
   }
 
   return "approved";
@@ -1111,7 +1117,19 @@ function isCodexThreadBusy(thread: CodexAppThread) {
   }
 
   const latestTurn = thread.turns.at(-1) ?? null;
-  return !(latestTurn && isTurnTerminal(latestTurn));
+  if (!latestTurn) {
+    return true;
+  }
+
+  if (isTurnCompleted(latestTurn)) {
+    return false;
+  }
+
+  if (isTurnInterrupted(latestTurn)) {
+    return !hasActiveFlag(thread.status, "waitingOnApproval");
+  }
+
+  return true;
 }
 
 function latestTurnCompletedAtIso(thread: CodexAppThread, turn: CodexAppTurn | null) {
