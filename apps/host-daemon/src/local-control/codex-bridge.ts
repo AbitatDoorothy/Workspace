@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { basename, normalize } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { basename, extname, isAbsolute, join, normalize } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import type {
@@ -16,7 +17,8 @@ import type {
   LocalCodexBridge,
   LocalCodexConversationSummary,
   LocalCodexMessage,
-  LocalCodexProjectSummary
+  LocalCodexProjectSummary,
+  LocalGeneratedFileSummary
 } from "./server.js";
 
 const CODEX_PROJECT_PREFIX = "codex_project_";
@@ -258,6 +260,28 @@ export function createLocalCodexBridge(
       return messageOptions.afterSequence > maxSequence
         ? filtered
         : filtered.filter((message) => message.sequence > messageOptions.afterSequence!);
+    },
+
+    async listGeneratedFiles(conversationId) {
+      return generatedFilesForThread(
+        await client.readThread(toCodexThreadId(conversationId), true)
+      );
+    },
+
+    async downloadGeneratedFile(conversationId, fileId) {
+      const files = await generatedFilesForThread(
+        await client.readThread(toCodexThreadId(conversationId), true)
+      );
+      const file = files.find((candidate) => candidate.id === fileId);
+      if (!file) {
+        throw Object.assign(new Error("Generated file not found"), { statusCode: 404 });
+      }
+
+      const data = await readFile(file.path);
+      return {
+        ...file,
+        dataBase64: data.toString("base64")
+      };
     },
 
     listModelOptions() {
@@ -800,6 +824,108 @@ function flattenThreadMessages(
   }
 
   return messages;
+}
+
+async function generatedFilesForThread(
+  thread: CodexAppThread
+): Promise<LocalGeneratedFileSummary[]> {
+  const paths = new Set<string>();
+
+  for (const turn of thread.turns) {
+    for (const item of turn.items) {
+      if (item.type !== "fileChange") {
+        continue;
+      }
+
+      const fileChange = item as { changes?: unknown[] };
+      for (const change of fileChange.changes ?? []) {
+        const path = generatedFilePath(thread.cwd, change);
+        if (path) {
+          paths.add(path);
+        }
+      }
+    }
+  }
+
+  const files = await Promise.all(
+    Array.from(paths)
+      .sort()
+      .map(async (path): Promise<LocalGeneratedFileSummary | null> => {
+        const stats = await stat(path).catch(() => null);
+        if (!stats?.isFile()) {
+          return null;
+        }
+
+        return {
+          id: generatedFileId(thread.id, path),
+          mimeType: mimeTypeForPath(path),
+          name: basename(path),
+          path,
+          size: stats.size
+        };
+      })
+  );
+
+  return files.filter((file): file is LocalGeneratedFileSummary => Boolean(file));
+}
+
+function generatedFilePath(cwd: string, change: unknown) {
+  if (!change || typeof change !== "object") {
+    return null;
+  }
+
+  const candidate = change as Record<string, unknown>;
+  const value =
+    stringField(candidate, "path") ??
+    stringField(candidate, "filePath") ??
+    stringField(candidate, "absolutePath") ??
+    stringField(candidate, "relativePath");
+  if (!value) {
+    return null;
+  }
+
+  return isAbsolute(value) ? normalize(value) : normalize(join(cwd, value));
+}
+
+function generatedFileId(threadId: string, path: string) {
+  return `file_${createHash("sha256")
+    .update(`${threadId}\0${normalize(path)}`)
+    .digest("hex")
+    .slice(0, 24)}`;
+}
+
+function stringField(value: Record<string, unknown>, key: string) {
+  const field = value[key];
+  return typeof field === "string" && field.trim() ? field.trim() : null;
+}
+
+function mimeTypeForPath(path: string) {
+  switch (extname(path).toLowerCase()) {
+    case ".html":
+      return "text/html";
+    case ".md":
+    case ".markdown":
+      return "text/markdown";
+    case ".mp4":
+      return "video/mp4";
+    case ".mov":
+      return "video/quicktime";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".pdf":
+      return "application/pdf";
+    case ".json":
+      return "application/json";
+    case ".txt":
+      return "text/plain";
+    default:
+      return "application/octet-stream";
+  }
 }
 
 function codexThreadToConversationStatus(thread: CodexAppThread): ConversationStatus {

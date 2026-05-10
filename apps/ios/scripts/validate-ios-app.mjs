@@ -36,9 +36,16 @@ if (!packageJson.dependencies?.["expo-crypto"]) {
 if (!packageJson.dependencies?.["@expo/vector-icons"]) {
   throw new Error("Expected abitat-ios to depend on @expo/vector-icons for bottom navigation");
 }
-for (const dependency of ["expo-document-picker", "expo-file-system", "expo-image-picker"]) {
+for (const dependency of [
+  "expo-document-picker",
+  "expo-file-system",
+  "expo-image-picker",
+  "expo-sharing"
+]) {
   if (!packageJson.dependencies?.[dependency]) {
-    throw new Error(`Expected abitat-ios to depend on ${dependency} for mobile attachments`);
+    throw new Error(
+      `Expected abitat-ios to depend on ${dependency} for mobile attachments and downloads`
+    );
   }
 }
 
@@ -371,6 +378,13 @@ for (const expected of [
   "localStatus",
   "markLocalMessageFailed",
   "markLocalMessageSent",
+  "refreshGeneratedFiles",
+  "downloadGeneratedFile",
+  "generatedFiles",
+  "GeneratedFileSummary",
+  "FileSystem.writeAsStringAsync",
+  "Sharing.isAvailableAsync",
+  "Sharing.shareAsync",
   "sendGitShortcut",
   "pickImageAttachment",
   "pickFileAttachment",
@@ -504,6 +518,19 @@ if (notificationWatcher.includes("isNotificationMessageFromCompletedTurn")) {
 for (const expected of ["listCodexModels", "model?: string", "effort?: CodexReasoningEffort"]) {
   if (!apiClient.includes(expected)) {
     throw new Error(`Expected API client to support Codex model control: ${expected}`);
+  }
+}
+
+for (const expected of [
+  "GeneratedFileDownload",
+  "GeneratedFileSummary",
+  "listGeneratedFiles",
+  "downloadGeneratedFile",
+  "/api/mobile/conversations/${conversationId}/files",
+  "/api/mobile/conversations/${conversationId}/files/${fileId}/download"
+]) {
+  if (!apiClient.includes(expected)) {
+    throw new Error(`Expected API client to support generated file downloads: ${expected}`);
   }
 }
 

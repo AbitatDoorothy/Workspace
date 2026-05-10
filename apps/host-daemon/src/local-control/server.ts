@@ -58,6 +58,18 @@ export interface LocalCodexMessage {
   createdAt: string;
 }
 
+export interface LocalGeneratedFileSummary {
+  id: string;
+  mimeType: string;
+  name: string;
+  path: string;
+  size: number;
+}
+
+export interface LocalGeneratedFileDownload extends LocalGeneratedFileSummary {
+  dataBase64: string;
+}
+
 export interface LocalCodexCompletionState {
   conversationId: string;
   failed: boolean;
@@ -84,10 +96,15 @@ export interface LocalCodexBridge {
     }
   ): Promise<{ conversationId: string; status: ConversationStatus | string }>;
   listCompletionStates(): Promise<LocalCodexCompletionState[]>;
+  downloadGeneratedFile(
+    conversationId: string,
+    fileId: string
+  ): Promise<LocalGeneratedFileDownload>;
   listMessages(
     conversationId: string,
     options?: { afterSequence?: number; includeRuntime?: boolean }
   ): Promise<LocalCodexMessage[]>;
+  listGeneratedFiles(conversationId: string): Promise<LocalGeneratedFileSummary[]>;
   listModelOptions(): Promise<CodexModelOption[]>;
   listProjectConversations(projectId: string): Promise<LocalCodexConversationSummary[]>;
   listProjects(): Promise<LocalCodexProjectSummary[]>;
@@ -280,6 +297,31 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
             afterSequence,
             includeRuntime
           })
+        });
+        return;
+      }
+
+      const generatedFilesMatch = matchPath(
+        path,
+        "/api/mobile/conversations/:conversationId/files"
+      );
+      if (generatedFilesMatch && request.method === "GET") {
+        writeJson(response, 200, {
+          files: await input.codex.listGeneratedFiles(generatedFilesMatch.conversationId)
+        });
+        return;
+      }
+
+      const generatedFileDownloadMatch = matchPath(
+        path,
+        "/api/mobile/conversations/:conversationId/files/:fileId/download"
+      );
+      if (generatedFileDownloadMatch && request.method === "GET") {
+        writeJson(response, 200, {
+          file: await input.codex.downloadGeneratedFile(
+            generatedFileDownloadMatch.conversationId,
+            generatedFileDownloadMatch.fileId
+          )
         });
         return;
       }
