@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
@@ -70,6 +71,7 @@ export function ConversationScreen({
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [showScrollToLatestButton, setShowScrollToLatestButton] = useState(false);
   const listRef = useRef<FlatList<ConversationMessage> | null>(null);
   const newestFirstMessages = useMemo(
@@ -122,6 +124,7 @@ export function ConversationScreen({
     setAttachments([]);
     setStatus(conversation.status);
     setIsHeaderExpanded(false);
+    setCopiedMessageId(null);
     pendingAutoScrollRef.current = true;
     latestSequenceRef.current = 0;
     latestConversationUpdatedAtRef.current = conversation.updatedAt ?? null;
@@ -364,6 +367,19 @@ export function ConversationScreen({
     void sendConversation({ prompt: "git" });
   }
 
+  async function copyMessageText(message: ConversationMessage) {
+    const text = safeMessageContent(message.content);
+    if (!text) {
+      return;
+    }
+
+    await Clipboard.setStringAsync(text);
+    setCopiedMessageId(message.id);
+    setTimeout(() => {
+      setCopiedMessageId((current) => (current === message.id ? null : current));
+    }, 1600);
+  }
+
   async function pickImageAttachment() {
     try {
       setError(null);
@@ -487,6 +503,16 @@ export function ConversationScreen({
               >
                 <View style={styles.messageMetaRow}>
                   <Text style={sharedStyles.label}>{message.role}</Text>
+                  <Pressable
+                    accessibilityLabel={`Copy ${message.role} message`}
+                    accessibilityRole="button"
+                    onPress={() => void copyMessageText(message)}
+                    style={styles.copyButton}
+                  >
+                    <Text style={styles.copyButtonText}>
+                      {copiedMessageId === message.id ? "Copied" : "Copy"}
+                    </Text>
+                  </Pressable>
                   {message.metadata?.localStatus === "sending" ? (
                     <Text style={styles.sendingLabel}>Sending</Text>
                   ) : null}
@@ -496,7 +522,10 @@ export function ConversationScreen({
                     </Text>
                   ) : null}
                 </View>
-                <Text style={{ color: colors.text, fontSize: 15, lineHeight: 21, marginTop: 6 }}>
+                <Text
+                  selectable
+                  style={{ color: colors.text, fontSize: 15, lineHeight: 21, marginTop: 6 }}
+                >
                   {safeMessageContent(message.content)}
                 </Text>
               </View>
@@ -580,6 +609,7 @@ export function ConversationScreen({
           </View>
           <View style={styles.composerRow}>
             <TextInput
+              contextMenuHidden={false}
               multiline
               onChangeText={setPrompt}
               placeholder="Continue this Codex thread"
@@ -688,6 +718,20 @@ const styles = StyleSheet.create({
   },
   composerShell: {
     gap: 10
+  },
+  copyButton: {
+    backgroundColor: colors.surfaceHigh,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    minHeight: 28,
+    paddingHorizontal: 10,
+    paddingVertical: 5
+  },
+  copyButtonText: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: "800"
   },
   disabledAction: {
     opacity: 0.55
