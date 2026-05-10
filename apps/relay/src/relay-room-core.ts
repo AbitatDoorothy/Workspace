@@ -37,11 +37,30 @@ interface RelayHostErrorMessage {
   type: "error";
 }
 
+interface RelayHostHeartbeatMessage {
+  sentAt?: string;
+  type: "heartbeat";
+}
+
+interface RelayRoomCoreOptions {
+  hostStaleMs?: number;
+  now?: () => number;
+}
+
 const OPEN = 1;
+const DEFAULT_HOST_STALE_MS = 45_000;
 
 export class RelayRoomCore {
   private host: RelayHostSocket | null = null;
+  private lastHostSeenAtMs = 0;
   private readonly pending = new Map<string, PendingRelayRequest>();
+  private readonly hostStaleMs: number;
+  private readonly now: () => number;
+
+  constructor(options: RelayRoomCoreOptions = {}) {
+    this.hostStaleMs = options.hostStaleMs ?? DEFAULT_HOST_STALE_MS;
+    this.now = options.now ?? Date.now;
+  }
 
   connectHost(socket: RelayHostSocket) {
     if (this.isConnected()) {
@@ -50,6 +69,7 @@ export class RelayRoomCore {
     }
 
     this.host = socket;
+    this.lastHostSeenAtMs = this.now();
     socket.addEventListener("message", (event) => this.handleHostMessage(event.data));
     socket.addEventListener("close", () => this.disconnectHost(socket, "Mac relay disconnected"));
     socket.addEventListener("error", () => this.disconnectHost(socket, "Mac relay errored"));
@@ -58,13 +78,14 @@ export class RelayRoomCore {
 
   status(): RelayRoomStatus {
     return {
-      connected: this.isConnected(),
+      connected: Boolean(this.connectedHost()),
       pending: this.pending.size
     };
   }
 
   request(envelope: RelayEncryptedEnvelope, input: { timeoutMs?: number } = {}) {
-    if (!this.isConnected() || !this.host) {
+    const host = this.connectedHost();
+    if (!host) {
       throw new RelayOfflineError("Mac is offline");
     }
 
@@ -83,12 +104,27 @@ export class RelayRoomCore {
       }, timeoutMs);
 
       this.pending.set(requestId, { reject, resolve, timer });
-      this.host?.send(JSON.stringify(message));
+      host.send(JSON.stringify(message));
     });
   }
 
   private isConnected() {
     return this.host?.readyState === OPEN;
+  }
+
+  private connectedHost() {
+    if (!this.isConnected() || !this.host) {
+      return null;
+    }
+
+    if (this.now() - this.lastHostSeenAtMs > this.hostStaleMs) {
+      const staleHost = this.host;
+      staleHost.close(1011, "Mac relay heartbeat timed out");
+      this.disconnectHost(staleHost, "Mac relay heartbeat timed out");
+      return null;
+    }
+
+    return this.host;
   }
 
   private disconnectHost(socket: RelayHostSocket, reason: string) {
@@ -111,6 +147,18 @@ export class RelayRoomCore {
   private handleHostMessage(raw: unknown) {
     const message = parseHostMessage(raw);
     if (!message) {
+      return;
+    }
+
+    this.lastHostSeenAtMs = this.now();
+    if (message.type === "heartbeat") {
+      this.host?.send(
+        JSON.stringify({
+          sentAt: message.sentAt,
+          serverTime: new Date(this.now()).toISOString(),
+          type: "heartbeat_ack"
+        })
+      );
       return;
     }
 
@@ -146,13 +194,22 @@ export class RelayHostRejectedError extends Error {
   }
 }
 
-function parseHostMessage(raw: unknown): RelayHostResponseMessage | RelayHostErrorMessage | null {
+function parseHostMessage(
+  raw: unknown
+): RelayHostResponseMessage | RelayHostErrorMessage | RelayHostHeartbeatMessage | null {
   if (typeof raw !== "string") {
     return null;
   }
 
   try {
     const parsed = JSON.parse(raw) as Record<string, any>;
+    if (parsed.type === "heartbeat") {
+      return {
+        sentAt: typeof parsed.sentAt === "string" ? parsed.sentAt : undefined,
+        type: "heartbeat"
+      };
+    }
+
     if (
       parsed.type === "error" &&
       typeof parsed.requestId === "string" &&

@@ -33,6 +33,8 @@ interface HandleRelayRequestInput {
 
 interface StartRelayClientInput {
   fetch?: typeof fetch;
+  heartbeatIntervalMs?: number;
+  heartbeatStaleMs?: number;
   localEndpoint: string;
   reconnectIntervalMs?: number;
   relayEndpoint: string;
@@ -52,6 +54,19 @@ interface RelayHostErrorMessage {
   status: number;
   type: "error";
 }
+
+interface RelayHeartbeatControllerInput {
+  clearIntervalFn?: (timer: ReturnType<typeof setInterval>) => void;
+  heartbeatIntervalMs?: number;
+  now?: () => number;
+  onStale?: () => void;
+  setIntervalFn?: (callback: () => void, intervalMs: number) => ReturnType<typeof setInterval>;
+  socket: Pick<WebSocket, "close" | "readyState" | "send"> & Partial<Pick<WebSocket, "terminate">>;
+  staleAfterMs?: number;
+}
+
+const RELAY_HEARTBEAT_INTERVAL_MS = 15_000;
+const RELAY_HEARTBEAT_STALE_MS = 45_000;
 
 export { createRelayReplayCache };
 
@@ -90,6 +105,7 @@ export async function handleRelayRequest(input: HandleRelayRequestInput) {
 export function startRelayClient(input: StartRelayClientInput) {
   const replayCache = createRelayReplayCache();
   let stopped = false;
+  let heartbeat: ReturnType<typeof createRelayHeartbeatController> | null = null;
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -99,20 +115,57 @@ export function startRelayClient(input: StartRelayClientInput) {
     }
 
     const url = relayWebSocketUrl(input.relayEndpoint, input.relayId);
-    socket = new WebSocket(url);
-    socket.on("message", (data) => {
+    const activeSocket = new WebSocket(url);
+    socket = activeSocket;
+    activeSocket.on("open", () => {
+      if (socket !== activeSocket || stopped) {
+        return;
+      }
+
+      heartbeat?.stop();
+      heartbeat = createRelayHeartbeatController({
+        heartbeatIntervalMs: input.heartbeatIntervalMs,
+        onStale: () => {
+          if (socket === activeSocket) {
+            scheduleReconnect();
+          }
+        },
+        socket: activeSocket,
+        staleAfterMs: input.heartbeatStaleMs
+      });
+      heartbeat.start();
+    });
+    activeSocket.on("message", (data) => {
+      if (socket !== activeSocket) {
+        return;
+      }
+
+      if (isRelayHeartbeatAck(String(data)) || isRelayConnected(String(data))) {
+        heartbeat?.handleHeartbeatAck();
+        return;
+      }
+
       void handleRelaySocketMessage(String(data), {
         fetch: input.fetch,
         localEndpoint: input.localEndpoint,
         relayId: input.relayId,
         replayCache,
-        socket,
+        socket: activeSocket,
         store: input.store
       });
     });
-    socket.on("close", () => scheduleReconnect());
-    socket.on("error", () => {
-      socket?.close();
+    activeSocket.on("close", () => {
+      if (socket !== activeSocket) {
+        return;
+      }
+
+      heartbeat?.stop();
+      heartbeat = null;
+      socket = null;
+      scheduleReconnect();
+    });
+    activeSocket.on("error", () => {
+      activeSocket.close();
     });
   };
 
@@ -132,6 +185,8 @@ export function startRelayClient(input: StartRelayClientInput) {
   return {
     close() {
       stopped = true;
+      heartbeat?.stop();
+      heartbeat = null;
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -139,6 +194,62 @@ export function startRelayClient(input: StartRelayClientInput) {
       socket?.close();
     }
   };
+}
+
+export function createRelayHeartbeatController(input: RelayHeartbeatControllerInput) {
+  const heartbeatIntervalMs = input.heartbeatIntervalMs ?? RELAY_HEARTBEAT_INTERVAL_MS;
+  const staleAfterMs = input.staleAfterMs ?? RELAY_HEARTBEAT_STALE_MS;
+  const now = input.now ?? Date.now;
+  const setIntervalFn = input.setIntervalFn ?? setInterval;
+  const clearIntervalFn = input.clearIntervalFn ?? clearInterval;
+  let lastHeartbeatAckAt = now();
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  function tick() {
+    if (input.socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    if (now() - lastHeartbeatAckAt > staleAfterMs) {
+      stop();
+      if (typeof input.socket.terminate === "function") {
+        input.socket.terminate();
+      } else {
+        input.socket.close(1011, "Relay heartbeat timed out");
+      }
+      input.onStale?.();
+      return;
+    }
+
+    input.socket.send(
+      JSON.stringify({
+        sentAt: new Date(now()).toISOString(),
+        type: "heartbeat"
+      })
+    );
+  }
+
+  return {
+    handleHeartbeatAck() {
+      lastHeartbeatAckAt = now();
+    },
+    start() {
+      if (timer) {
+        return;
+      }
+      timer = setIntervalFn(tick, heartbeatIntervalMs);
+      timer.unref?.();
+    },
+    stop
+  };
+
+  function stop() {
+    if (!timer) {
+      return;
+    }
+    clearIntervalFn(timer);
+    timer = null;
+  }
 }
 
 export async function handleRelaySocketMessage(
@@ -218,6 +329,23 @@ function parseRelayHostRequest(raw: string): RelayHostRequestMessage | null {
     return parsed as RelayHostRequestMessage;
   } catch {
     return null;
+  }
+}
+
+function isRelayConnected(raw: string) {
+  return relayMessageType(raw) === "connected";
+}
+
+function isRelayHeartbeatAck(raw: string) {
+  return relayMessageType(raw) === "heartbeat_ack";
+}
+
+function relayMessageType(raw: string) {
+  try {
+    const parsed = JSON.parse(raw) as { type?: unknown };
+    return typeof parsed.type === "string" ? parsed.type : "";
+  } catch {
+    return "";
   }
 }
 

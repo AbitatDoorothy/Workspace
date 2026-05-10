@@ -12,6 +12,7 @@ import {
 } from "@abitat_reece/shared";
 
 import {
+  createRelayHeartbeatController,
   createRelayReplayCache,
   handleRelayRequest,
   handleRelaySocketMessage
@@ -19,6 +20,87 @@ import {
 import { createLocalControlStore, hashLocalControlToken } from "../src/local-control/state";
 
 describe("local relay client", () => {
+  it("closes stale relay sockets when heartbeat acknowledgements stop", () => {
+    let now = 1_000;
+    const scheduled: Array<() => void> = [];
+    const clearedTimers: number[] = [];
+    const socket = {
+      closed: false,
+      readyState: 1,
+      sent: [] as string[],
+      close() {
+        this.closed = true;
+        this.readyState = 3;
+      },
+      send(message: string) {
+        this.sent.push(message);
+      }
+    };
+    const controller = createRelayHeartbeatController({
+      clearIntervalFn: (timer) => clearedTimers.push(timer as number),
+      heartbeatIntervalMs: 10_000,
+      now: () => now,
+      setIntervalFn: (callback) => {
+        scheduled.push(callback);
+        return scheduled.length;
+      },
+      socket: socket as any,
+      staleAfterMs: 30_000
+    });
+
+    controller.start();
+    scheduled[0]?.();
+    expect(JSON.parse(socket.sent[0] ?? "{}")).toMatchObject({ type: "heartbeat" });
+
+    controller.handleHeartbeatAck();
+    now = 40_001;
+    scheduled[0]?.();
+
+    expect(socket.closed).toBe(true);
+    controller.stop();
+    expect(clearedTimers).toContain(1);
+  });
+
+  it("terminates stale relay sockets when force close is available", () => {
+    let now = 1_000;
+    const scheduled: Array<() => void> = [];
+    const socket = {
+      closed: false,
+      readyState: 1,
+      sent: [] as string[],
+      close() {
+        this.closed = true;
+        this.readyState = 3;
+      },
+      send(message: string) {
+        this.sent.push(message);
+      },
+      terminated: false,
+      terminate() {
+        this.terminated = true;
+        this.readyState = 3;
+      }
+    };
+    const controller = createRelayHeartbeatController({
+      heartbeatIntervalMs: 10_000,
+      now: () => now,
+      setIntervalFn: (callback) => {
+        scheduled.push(callback);
+        return scheduled.length;
+      },
+      socket: socket as any,
+      staleAfterMs: 30_000
+    });
+
+    controller.start();
+    controller.handleHeartbeatAck();
+    now = 40_001;
+    scheduled[0]?.();
+
+    expect(socket.terminated).toBe(true);
+    expect(socket.closed).toBe(false);
+  });
+
   it("decrypts relay requests, forwards them to the local API, and encrypts responses", async () => {
     const directory = await mkdtemp(join(tmpdir(), "abitat-relay-client-state-"));
     const store = createLocalControlStore({

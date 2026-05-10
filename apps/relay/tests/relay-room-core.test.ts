@@ -3,6 +3,47 @@ import { describe, expect, it } from "vitest";
 import { RelayHostRejectedError, RelayOfflineError, RelayRoomCore } from "../src/relay-room-core";
 
 describe("RelayRoomCore", () => {
+  it("acknowledges Mac host heartbeats", () => {
+    const room = new RelayRoomCore();
+    const host = new FakeRelaySocket();
+    room.connectHost(host);
+
+    host.receive({
+      sentAt: "2026-05-10T20:00:00.000Z",
+      type: "heartbeat"
+    });
+
+    expect(JSON.parse(host.sent[1] ?? "{}")).toMatchObject({
+      sentAt: "2026-05-10T20:00:00.000Z",
+      type: "heartbeat_ack"
+    });
+    expect(room.status()).toMatchObject({ connected: true, pending: 0 });
+  });
+
+  it("reports stale Mac host sockets offline instead of timing out phone requests", () => {
+    let now = 1_000;
+    const room = new RelayRoomCore({
+      hostStaleMs: 10_000,
+      now: () => now
+    });
+    const host = new FakeRelaySocket();
+    room.connectHost(host);
+
+    now = 12_000;
+
+    expect(room.status()).toMatchObject({ connected: false, pending: 0 });
+    expect(() =>
+      room.request({
+        ciphertext: "request-ciphertext",
+        createdAt: "2026-05-10T10:00:00.000Z",
+        nonce: "request-nonce",
+        requestId: "req_stale",
+        version: 1
+      })
+    ).toThrow(RelayOfflineError);
+    expect(host.closeReason).toBe("Mac relay heartbeat timed out");
+  });
+
   it("forwards an opaque phone request to the connected Mac host", async () => {
     const room = new RelayRoomCore();
     const host = new FakeRelaySocket();
@@ -126,6 +167,7 @@ describe("RelayRoomCore", () => {
 
 class FakeRelaySocket implements RelayRoomCoreSocket {
   private readonly listeners = new Map<string, Array<(event: any) => void>>();
+  closeReason = "";
   readyState = 1;
   sent: string[] = [];
 
@@ -133,7 +175,8 @@ class FakeRelaySocket implements RelayRoomCoreSocket {
     this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener]);
   }
 
-  close() {
+  close(_code?: number, reason?: string) {
+    this.closeReason = reason ?? "";
     this.readyState = 3;
     this.emit("close", {});
   }

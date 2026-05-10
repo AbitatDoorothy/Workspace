@@ -1,14 +1,18 @@
 class Abitat < Formula
   desc "Remote Codex control from Mac and iPhone"
-  homepage "https://github.com/AbitatDoorothy/Workspace"
-  url "https://registry.npmjs.org/@abitat_reece/cli/-/cli-0.1.7.tgz"
-  sha256 "4cbe35793058fd5a8c804416140face8d16b12aa4196849d20caa441ce34732a"
+  homepage "https://github.com/AbitatDoorothy/homebrew-abitat"
+  url "https://registry.npmjs.org/@abitat_reece/cli/-/cli-0.1.8.tgz"
+  sha256 "93da57e5d6112045b2ac09edb663371014327f88d6204362229885bf739d0e00"
 
   depends_on "python" => :build
   depends_on "node@22"
 
   def install
     system Formula["node@22"].opt_bin/"npm", "install", *std_npm_args
+    prebuilds = libexec/"lib/node_modules/@abitat_reece/cli/node_modules/node-pty/prebuilds"
+    rm_r prebuilds/"win32-arm64"
+    rm_r prebuilds/"win32-x64"
+    rm_r prebuilds/(Hardware::CPU.arm? ? "darwin-x64" : "darwin-arm64")
     bin.install_symlink libexec/"bin/abitat"
   end
 
