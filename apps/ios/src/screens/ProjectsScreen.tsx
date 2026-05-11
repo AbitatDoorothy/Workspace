@@ -20,6 +20,7 @@ interface ProjectsScreenProps {
   onProject(project: ProjectSummary): void;
   onProjectsLoaded?(projects: ProjectSummary[]): void;
   onSettings(): void;
+  refreshEnabled?: boolean;
 }
 
 const CELESTIAL_STARS = [
@@ -68,7 +69,8 @@ export function ProjectsScreen({
   initialProjects = [],
   onProject,
   onProjectsLoaded,
-  onSettings
+  onSettings,
+  refreshEnabled = true
 }: ProjectsScreenProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>(initialProjects);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +80,10 @@ export function ProjectsScreen({
   }, [initialProjects]);
 
   useEffect(() => {
+    if (!refreshEnabled) {
+      return;
+    }
+
     let cancelled = false;
 
     async function loadProjects() {
@@ -103,7 +109,7 @@ export function ProjectsScreen({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [api, onProjectsLoaded]);
+  }, [api, onProjectsLoaded, refreshEnabled]);
 
   return (
     <SafeAreaView style={styles.voidScreen}>

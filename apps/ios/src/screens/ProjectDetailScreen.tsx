@@ -14,6 +14,7 @@ interface ProjectDetailScreenProps {
   onConversation(conversation: ConversationSummary): void;
   onConversationsLoaded?(projectId: string, conversations: ConversationSummary[]): void;
   project: ProjectSummary;
+  refreshEnabled?: boolean;
 }
 
 export function ProjectDetailScreen({
@@ -22,7 +23,8 @@ export function ProjectDetailScreen({
   onBack,
   onConversation,
   onConversationsLoaded,
-  project
+  project,
+  refreshEnabled = true
 }: ProjectDetailScreenProps) {
   const [conversations, setConversations] = useState<ConversationSummary[]>(initialConversations);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +34,10 @@ export function ProjectDetailScreen({
   }, [initialConversations, project.id]);
 
   useEffect(() => {
+    if (!refreshEnabled) {
+      return;
+    }
+
     let cancelled = false;
 
     async function loadConversations() {
@@ -56,7 +62,7 @@ export function ProjectDetailScreen({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [api, project.id, onConversationsLoaded]);
+  }, [api, project.id, onConversationsLoaded, refreshEnabled]);
 
   function startNewThread() {
     onConversation({

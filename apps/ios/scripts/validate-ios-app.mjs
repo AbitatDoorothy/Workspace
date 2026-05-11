@@ -330,15 +330,17 @@ if (
     "Expected ConversationScreen to keep existing Codex threads queueable while a send is in flight"
   );
 }
-if (!conversationScreen.includes("{sendButtonLabel(status, isSending)}")) {
-  throw new Error("Expected ConversationScreen to label busy Codex turns as queueable");
-}
-if (
-  !conversationScreen.includes(
-    'if (!canAcceptConversationInput(status)) {\n    return "Queue";\n  }\n\n  if (isSending) {'
-  )
-) {
-  throw new Error("Expected ConversationScreen to prefer Queue over Sending for busy turns");
+for (const expected of [
+  "const hasComposerPayload = canSendPrompt(prompt, attachments);",
+  "const showComposerSpinner =",
+  "(isConversationBusyStatus(status) || isSending) && !hasComposerPayload;",
+  "const sendButtonIconName",
+  '? "arrow-up"',
+  ': "send"'
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected ConversationScreen to render stateful send controls: ${expected}`);
+  }
 }
 if (conversationScreen.includes('source === "codex_app" && status === "running"')) {
   throw new Error("Expected ConversationScreen not to allow sends into running Codex app turns");
@@ -352,9 +354,9 @@ if (!conversationScreen.includes('variant="compact"')) {
 if (
   !conversationScreen.includes("<CodexModelControls") ||
   conversationScreen.indexOf("<CodexModelControls") >
-    conversationScreen.indexOf('accessibilityLabel="Commit and push with git"')
+    conversationScreen.indexOf('accessibilityLabel="Open generated files"')
 ) {
-  throw new Error("Expected compact model controls to be declared before the Git action");
+  throw new Error("Expected compact model controls to be declared before generated files");
 }
 if (!conversationScreen.includes("modelSettings: CodexMobileModelSettings")) {
   throw new Error("Expected ConversationScreen to receive persisted Codex model settings");
@@ -392,6 +394,16 @@ for (const expected of ["initialProjects", "onProjectsLoaded", "setProjects(init
     throw new Error(
       `Expected ProjectsScreen to keep warm project data while refreshing: ${expected}`
     );
+  }
+}
+for (const expected of [
+  "refreshEnabled?: boolean;",
+  "refreshEnabled = true",
+  "if (!refreshEnabled) {",
+  "refreshEnabled]"
+]) {
+  if (!projectsScreen.includes(expected)) {
+    throw new Error(`Expected ProjectsScreen to suppress refresh in previews: ${expected}`);
   }
 }
 for (const expected of [
@@ -448,6 +460,16 @@ for (const expected of [
     );
   }
 }
+for (const expected of [
+  "refreshEnabled?: boolean;",
+  "refreshEnabled = true",
+  "if (!refreshEnabled) {",
+  "refreshEnabled]"
+]) {
+  if (!projectDetailScreen.includes(expected)) {
+    throw new Error(`Expected ProjectDetailScreen to suppress refresh in previews: ${expected}`);
+  }
+}
 if (!projectDetailScreen.includes("const timer = setInterval(loadConversations, 1800);")) {
   throw new Error("Expected ProjectDetailScreen to refresh conversation statuses");
 }
@@ -495,20 +517,61 @@ if (
 if (!conversationScreen.includes("styles.chatHeader")) {
   throw new Error("Expected ConversationScreen to use a compact chat header");
 }
+for (const expected of [
+  "refreshEnabled?: boolean;",
+  "refreshEnabled = true",
+  "if (!refreshEnabled) {",
+  "refreshEnabled]"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected ConversationScreen to suppress refresh in previews: ${expected}`);
+  }
+}
 if (!conversationScreen.includes("onBack(): void")) {
   throw new Error("Expected ConversationScreen to accept a project back callback");
 }
-if (!conversationScreen.includes('accessibilityLabel="Back to project"')) {
-  throw new Error("Expected ConversationScreen to expose an accessible back-to-project button");
+for (const expected of [
+  "threadTitle",
+  "styles.threadBubble",
+  "styles.statusLed",
+  "isConversationBusyStatus(status)",
+  "numberOfLines={isHeaderExpanded ? 3 : 1}",
+  "!isHeaderExpanded ? (",
+  'accessibilityLabel="Toggle full thread name"',
+  "styles.headerActions"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected ConversationScreen to expose the new thread header: ${expected}`);
+  }
 }
-if (!conversationScreen.includes("onPress={onBack}")) {
-  throw new Error("Expected ConversationScreen back button to call onBack");
+for (const expected of [
+  "SafeAreaView",
+  "StatusBar",
+  'backgroundColor="#000000"',
+  "styles.conversationScreen",
+  "styles.conversationContent",
+  'backgroundColor: "#000000"',
+  "styles.composerShell",
+  "styles.composerRow",
+  "paddingBottom: 30",
+  "paddingTop: 30"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected ConversationScreen to use pure-black bubble layout: ${expected}`);
+  }
 }
-if (!conversationScreen.includes("styles.backButton")) {
-  throw new Error("Expected ConversationScreen to style the project back button");
-}
-if (!conversationScreen.includes('isHeaderExpanded ? "Collapse" : "Expand"')) {
-  throw new Error("Expected ConversationScreen to expose an expand/collapse title button");
+for (const removed of [
+  "FixedScreen",
+  'accessibilityLabel="Back to project"',
+  "styles.backButton",
+  "headerToggle",
+  'isHeaderExpanded ? "Collapse" : "Expand"'
+]) {
+  if (conversationScreen.includes(removed)) {
+    throw new Error(
+      `Expected ConversationScreen to remove the old chat header control: ${removed}`
+    );
+  }
 }
 if (!conversationScreen.includes("styles.composerRow")) {
   throw new Error("Expected ConversationScreen to keep the send button beside the message box");
@@ -533,39 +596,49 @@ for (const expected of [
   "markLocalMessageFailed",
   "markLocalMessageQueued",
   "markLocalMessageSent",
-  "steerConversation",
   'delivery: "queue"',
   'delivery: "steer"',
-  'accessibilityLabel="Steer running Codex turn"',
+  "steerQueuedMessage",
+  'accessibilityLabel="Steer queued Codex message"',
   "refreshGeneratedFiles",
   "downloadGeneratedFile",
   "generatedFiles",
-  "isGeneratedFilesExpanded",
+  "generatedFilesModalVisible",
   "GeneratedFileSummary",
   "FileSystem.writeAsStringAsync",
   "Sharing.isAvailableAsync",
   "Sharing.shareAsync",
   "nestedScrollEnabled",
-  "styles.generatedFilesScroll",
+  "styles.generatedFilesModalScroll",
   "GENERATED_FILES_MAX_HEIGHT",
   "isTransientResponseError",
-  "sendGitShortcut",
+  "openAttachmentMenu",
   "pickImageAttachment",
   "pickFileAttachment",
-  "uploadAttachment"
+  "uploadAttachment",
+  "ActionSheetIOS",
+  "ActivityIndicator",
+  "Feather",
+  "sendButtonIconName"
 ]) {
   if (!conversationScreen.includes(expected)) {
     throw new Error(`Expected ConversationScreen to include ${expected}`);
   }
 }
 for (const expected of [
-  'accessibilityLabel="Toggle generated files"',
-  "accessibilityState={{ expanded: isGeneratedFilesExpanded }}",
-  "setIsGeneratedFilesExpanded((current) => !current)",
-  "maxHeight: GENERATED_FILES_MAX_HEIGHT"
+  'accessibilityLabel="Open generated files"',
+  'accessibilityLabel="Close generated files"',
+  "Modal",
+  "visible={generatedFilesModalVisible}",
+  "setGeneratedFilesModalVisible(true)",
+  "maxHeight: GENERATED_FILES_MAX_HEIGHT",
+  'accessibilityLabel="Attach files or images"',
+  "styles.composerSendButton",
+  "styles.composerSendButtonIdle",
+  "styles.composerSendButtonBusy"
 ]) {
   if (!conversationScreen.includes(expected)) {
-    throw new Error(`Expected generated files to render as a collapsible scroll area: ${expected}`);
+    throw new Error(`Expected ConversationScreen to match the new chat controls: ${expected}`);
   }
 }
 for (const expected of [
@@ -577,6 +650,8 @@ for (const expected of [
   "openModelMenu",
   "openEffortMenu",
   "showActionSheetWithOptions",
+  "displayModelLabel",
+  'return "GPT-5.5";',
   "styles.compactRow",
   "styles.compactButton"
 ]) {
@@ -668,31 +743,60 @@ if (!appScreen.includes("useMessagePreloader")) {
 if (!appScreen.includes("messageCacheScope: store.messageCacheScope")) {
   throw new Error("Expected App to scope message preloading to the paired Mac");
 }
-if (!appScreen.includes('onBack={() => setRoute(project ? "project" : "projects")')) {
-  throw new Error("Expected App to route conversation back actions to the project page");
-}
-if (!appScreen.includes('onBack={() => setRoute("projects")}')) {
-  throw new Error("Expected App to route project back actions to the projects page");
+if (!appScreen.includes("onBack={goBackOneLevel}")) {
+  throw new Error("Expected App back actions to use the shared one-level route helper");
 }
 for (const expected of [
   'const [route, setRoute] = useState<RouteName>("projects");',
+  "Animated",
+  "useRef",
+  "useWindowDimensions",
   "PanResponder",
   "GLOBAL_BACK_SWIPE_DISTANCE",
+  "GLOBAL_BACK_SWIPE_DISMISS_DURATION_MS",
+  "backSwipeX",
+  "forwardSlideX",
+  "forwardRoute",
+  "swipeBackPreviewRoute",
+  "activeRouteLayerKey",
+  "createRouteLayerKey",
   "goBackOneLevel",
+  "navigateToRoute",
+  "renderRoute(routeName: RouteName, options",
+  "isPreview: true",
+  "refreshEnabled={!options?.isPreview}",
   "createGlobalBackSwipeResponder",
   "gesture.dx >= GLOBAL_BACK_SWIPE_DISTANCE",
-  "onBack();",
+  "Animated.timing",
+  "Animated.spring",
+  "setActiveRouteLayerKey(nextForwardRoute.layerKey)",
+  "setActiveRouteLayerKey(targetRoute.layerKey)",
+  "key={activeRouteLayerKey}",
+  "key={swipeBackPreviewRoute.layerKey}",
+  "key={forwardRoute.layerKey}",
+  "renderRoute(swipeBackPreviewRoute.routeName, { isPreview: true })",
+  "renderRoute(forwardRoute.routeName, { isPreview: true })",
+  "styles.routeUnderlay",
+  "styles.routeLayer",
+  "styles.routeForwardLayer",
+  "swipeBackPreviewRoute ? { transform: [{ translateX: backSwipeX }] } : null",
+  "transform: [{ translateX: forwardSlideX }]",
   "{...globalBackSwipeResponder.panHandlers}",
   "onStart={() => setHasStarted(true)}",
   'setRoute("projects");',
-  'onSettings={() => setRoute("settings")}',
+  'onSettings={() => navigateToRoute("settings")}',
   "bootstrap={store.bootstrap}",
   "error={store.bootstrapError}",
-  'onBack={() => setRoute("projects")}'
+  "onBack={goBackOneLevel}"
 ]) {
   if (!appScreen.includes(expected)) {
     throw new Error(`Expected App to route Start/pairing/settings through Projects: ${expected}`);
   }
+}
+if (appScreen.includes("requestAnimationFrame(() => {\n        backSwipeX.setValue(0);")) {
+  throw new Error(
+    "Expected App to avoid resetting the back-swipe transform during the committed route swap"
+  );
 }
 for (const removed of [
   'import { Ionicons } from "@expo/vector-icons";',

@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Sharing from "expo-sharing";
-import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
+import type { ListRenderItemInfo, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import {
+  ActionSheetIOS,
+  ActivityIndicator,
   AppState,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
+  StatusBar,
   Text,
   TextInput,
   View
@@ -20,9 +26,7 @@ import {
 
 import type { ApiClient } from "../api/client";
 import { CodexModelControls } from "../components/CodexModelControls";
-import { Button, StatusPill } from "../components/Controls";
 import { rememberRunningConversation } from "../notifications/thread-completion-notifications";
-import { FixedScreen } from "../components/Screen";
 import {
   loadCachedConversationMessages,
   moveCachedConversationMessages,
@@ -44,6 +48,7 @@ interface ConversationScreenProps {
   modelSettings: CodexMobileModelSettings;
   onBack(): void;
   onModelSettingsChange(next: CodexMobileModelSettings): void;
+  refreshEnabled?: boolean;
 }
 
 interface PendingAttachment {
@@ -60,6 +65,8 @@ interface SendConversationInput {
   prompt: string;
 }
 
+type FeatherIconName = keyof typeof Feather.glyphMap;
+
 const MESSAGE_POLL_INTERVAL_MS = 1800;
 const STATUS_POLL_INTERVAL_MS = 2500;
 const FULL_MESSAGE_REFRESH_INTERVAL_MS = 12000;
@@ -67,13 +74,33 @@ const COMPOSER_INPUT_MIN_HEIGHT = 48;
 const COMPOSER_INPUT_MAX_HEIGHT = 132;
 const GENERATED_FILES_MAX_HEIGHT = 188;
 
+const CHAT_STARS = [
+  { left: "5%", opacity: 0.42, size: 1, top: "8%" },
+  { left: "22%", opacity: 0.25, size: 1, top: "16%" },
+  { left: "38%", opacity: 0.46, size: 1.5, top: "7%" },
+  { left: "61%", opacity: 0.26, size: 1, top: "15%" },
+  { left: "91%", opacity: 0.36, size: 1, top: "10%" },
+  { left: "13%", opacity: 0.5, size: 1.5, top: "31%" },
+  { left: "56%", opacity: 0.38, size: 1, top: "28%" },
+  { left: "88%", opacity: 0.18, size: 1.5, top: "36%" },
+  { left: "6%", opacity: 0.28, size: 1, top: "54%" },
+  { left: "33%", opacity: 0.18, size: 1, top: "61%" },
+  { left: "72%", opacity: 0.44, size: 1.5, top: "57%" },
+  { left: "95%", opacity: 0.32, size: 1, top: "68%" },
+  { left: "15%", opacity: 0.48, size: 1.5, top: "82%" },
+  { left: "42%", opacity: 0.28, size: 1, top: "89%" },
+  { left: "67%", opacity: 0.46, size: 1.5, top: "83%" },
+  { left: "90%", opacity: 0.34, size: 1, top: "92%" }
+] as const;
+
 export function ConversationScreen({
   api,
   conversation,
   messageCacheScope,
   modelSettings,
   onBack,
-  onModelSettingsChange
+  onModelSettingsChange,
+  refreshEnabled = true
 }: ConversationScreenProps) {
   const [activeConversation, setActiveConversation] = useState(conversation);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
@@ -83,7 +110,7 @@ export function ConversationScreen({
   const [error, setError] = useState<string | null>(null);
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedFileSummary[]>([]);
   const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
-  const [isGeneratedFilesExpanded, setIsGeneratedFilesExpanded] = useState(false);
+  const [generatedFilesModalVisible, setGeneratedFilesModalVisible] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -117,6 +144,13 @@ export function ConversationScreen({
   const sendingCountRef = useRef(0);
   const canSendNow = !isDraftConversation(activeConversation) || !isSending;
   const canSteerNow = !isDraftConversation(activeConversation) && isConversationBusyStatus(status);
+  const threadTitle = activeConversation.prompt || "New Thread";
+  const hasComposerPayload = canSendPrompt(prompt, attachments);
+  const showComposerSpinner =
+    (isConversationBusyStatus(status) || isSending) && !hasComposerPayload;
+  const sendButtonIconName: FeatherIconName = isConversationBusyStatus(status)
+    ? "arrow-up"
+    : "send";
 
   function scrollToLatest(animated = true) {
     requestAnimationFrame(() => {
@@ -148,7 +182,7 @@ export function ConversationScreen({
     setAttachments([]);
     setGeneratedFiles([]);
     setDownloadingFileId(null);
-    setIsGeneratedFilesExpanded(false);
+    setGeneratedFilesModalVisible(false);
     setStatus(conversation.status);
     setIsHeaderExpanded(false);
     setCopiedMessageId(null);
@@ -170,6 +204,10 @@ export function ConversationScreen({
   }, [conversation]);
 
   useEffect(() => {
+    if (!refreshEnabled) {
+      return;
+    }
+
     if (isDraftConversation(activeConversation)) {
       return;
     }
@@ -198,7 +236,7 @@ export function ConversationScreen({
     return () => {
       cancelled = true;
     };
-  }, [activeConversation.id, messageCacheScope]);
+  }, [activeConversation.id, messageCacheScope, refreshEnabled]);
 
   async function refreshGeneratedFiles(conversationId = activeConversationIdRef.current) {
     if (isDraftConversationId(conversationId) || generatedFileRefreshInFlightRef.current) {
@@ -224,6 +262,10 @@ export function ConversationScreen({
   }
 
   useEffect(() => {
+    if (!refreshEnabled) {
+      return;
+    }
+
     if (isDraftConversation(activeConversation)) {
       setGeneratedFiles([]);
       return;
@@ -362,7 +404,8 @@ export function ConversationScreen({
     activeConversation.projectId,
     activeConversation.status,
     messageCacheLoadKey,
-    messageCacheScope
+    messageCacheScope,
+    refreshEnabled
   ]);
 
   useEffect(() => {
@@ -561,29 +604,113 @@ export function ConversationScreen({
     });
   }
 
-  function steerConversation() {
-    const queuedPrompt = prompt;
-    const queuedAttachments = attachments;
-
-    if (!canSendPrompt(queuedPrompt, queuedAttachments) || !canSteerNow) {
+  async function steerQueuedMessage(message: ConversationMessage) {
+    if (!canSteerQueuedLocalMessage(message, canSteerNow)) {
       return;
     }
 
-    setPrompt("");
-    setAttachments([]);
-    void sendConversation({
-      attachments: queuedAttachments,
-      delivery: "steer",
-      prompt: queuedPrompt
-    });
+    const submittedPrompt = queuedMessageSubmittedPrompt(message);
+    if (!submittedPrompt) {
+      return;
+    }
+
+    const clientMessageId = `ios-steer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const conversationForSend = activeConversation;
+
+    setError(null);
+    setMessages((current) =>
+      persistMergedConversationMessages(
+        messageCacheScope,
+        conversationForSend.id,
+        markLocalMessageSending(
+          conversationMessagesForId(current, conversationForSend.id),
+          message.id
+        )
+      )
+    );
+
+    try {
+      const continued = await api.continueConversation(conversationForSend.id, {
+        attachments: [],
+        clientMessageId,
+        delivery: "steer",
+        effort: modelSettings.effort,
+        model: modelSettings.model,
+        prompt: submittedPrompt
+      });
+
+      setStatus(
+        continued.status === "queued" && isConversationBusyStatus(status)
+          ? status
+          : continued.status
+      );
+      rememberRunningConversation(conversationForSend.id);
+      setMessages((current) =>
+        persistMergedConversationMessages(
+          messageCacheScope,
+          conversationForSend.id,
+          markLocalMessageSent(
+            conversationMessagesForId(current, conversationForSend.id),
+            message.id
+          )
+        )
+      );
+
+      try {
+        const next = await api.listMessages(conversationForSend.id, lastSequence, {
+          forceRefresh: true,
+          includeRuntime: false
+        });
+        setMessages((current) =>
+          persistMergedConversationMessages(
+            messageCacheScope,
+            conversationForSend.id,
+            mergeConversationMessages(
+              conversationMessagesForId(current, conversationForSend.id),
+              next
+            )
+          )
+        );
+        void refreshGeneratedFiles(conversationForSend.id);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Unable to refresh Codex messages");
+      }
+    } catch (caught) {
+      setMessages((current) =>
+        persistMergedConversationMessages(
+          messageCacheScope,
+          conversationForSend.id,
+          markLocalMessageQueued(
+            conversationMessagesForId(current, conversationForSend.id),
+            message.id
+          )
+        )
+      );
+      setError(caught instanceof Error ? caught.message : "Unable to steer queued message");
+    }
   }
 
-  function sendGitShortcut() {
-    if (!canSendNow) {
+  function openAttachmentMenu() {
+    if (Platform.OS !== "ios") {
+      void pickFileAttachment();
       return;
     }
 
-    void sendConversation({ delivery: "queue", prompt: "git" });
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        cancelButtonIndex: 2,
+        options: ["Image", "File", "Cancel"],
+        title: "Attach"
+      },
+      (buttonIndex) => {
+        if (buttonIndex === 0) {
+          void pickImageAttachment();
+        }
+        if (buttonIndex === 1) {
+          void pickFileAttachment();
+        }
+      }
+    );
   }
 
   async function copyMessageText(message: ConversationMessage) {
@@ -695,292 +822,312 @@ export function ConversationScreen({
     }
   }
 
+  function renderMessageItem({ item: message }: ListRenderItemInfo<ConversationMessage>) {
+    const isUserMessage = message.role === "user";
+    const localStatus =
+      typeof message.metadata?.localStatus === "string" ? message.metadata.localStatus : null;
+    const roleLabel = isUserMessage
+      ? "USER"
+      : message.role === "assistant"
+        ? "CODEX"
+        : message.role.toUpperCase();
+    const canSteerQueued = canSteerQueuedLocalMessage(message, canSteerNow);
+
+    return (
+      <View
+        style={[
+          styles.messageBlock,
+          isUserMessage ? styles.userMessageBlock : styles.codexMessageBlock
+        ]}
+      >
+        <View
+          style={[
+            styles.messageMetaRow,
+            isUserMessage ? styles.userMessageMetaRow : styles.codexMessageMetaRow
+          ]}
+        >
+          <Text style={styles.messageRoleLabel}>{roleLabel}</Text>
+          <Pressable
+            accessibilityLabel={`Copy ${message.role} message`}
+            accessibilityRole="button"
+            onPress={() => void copyMessageText(message)}
+            style={styles.copyButton}
+          >
+            <Text style={styles.copyButtonText}>
+              {copiedMessageId === message.id ? "Copied" : "Copy"}
+            </Text>
+          </Pressable>
+          {localStatus === "sending" ? <Text style={styles.sendingLabel}>Sending</Text> : null}
+          {localStatus === "queued" ? <Text style={styles.sendingLabel}>Queued</Text> : null}
+          {canSteerQueued ? (
+            <Pressable
+              accessibilityLabel="Steer queued Codex message"
+              accessibilityRole="button"
+              onPress={() => void steerQueuedMessage(message)}
+              style={styles.inlineSteerButton}
+            >
+              <Text style={styles.inlineSteerButtonText}>Steer</Text>
+            </Pressable>
+          ) : null}
+          {localStatus === "failed" ? (
+            <Text accessibilityLabel="Message failed to send" style={styles.failedSend}>
+              !
+            </Text>
+          ) : null}
+        </View>
+        <View
+          style={[
+            styles.messageCard,
+            isUserMessage ? styles.userMessageCard : styles.codexMessageCard
+          ]}
+        >
+          <Text
+            selectable
+            style={[
+              styles.messageText,
+              isUserMessage ? styles.userMessageText : styles.codexMessageText
+            ]}
+          >
+            {safeMessageContent(message.content)}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       style={styles.keyboardAvoidingScreen}
     >
-      <FixedScreen>
-        <View style={styles.chatHeader}>
-          <Pressable
-            accessibilityLabel="Back to project"
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={onBack}
-            style={styles.backButton}
-          >
-            <Text style={styles.backButtonText}>Back</Text>
-          </Pressable>
-          <View style={styles.chatHeaderCopy}>
-            <Text style={sharedStyles.label}>Conversation</Text>
-            <Text numberOfLines={isHeaderExpanded ? 3 : 1} style={styles.chatHeaderTitle}>
-              {activeConversation.prompt || "New Thread"}
-            </Text>
-            {isHeaderExpanded ? (
-              <Text style={sharedStyles.subtitle}>
-                Messages are synced through Abitat Workspace.
-              </Text>
+      <SafeAreaView style={styles.conversationScreen}>
+        <StatusBar barStyle="light-content" backgroundColor="#000000" />
+        <View style={styles.conversationContent}>
+          <View pointerEvents="none" style={styles.starField}>
+            {CHAT_STARS.map((star, index) => (
+              <View
+                key={`chat-star-${index}`}
+                style={[
+                  styles.star,
+                  {
+                    height: star.size,
+                    left: star.left,
+                    opacity: star.opacity,
+                    top: star.top,
+                    width: star.size
+                  }
+                ]}
+              />
+            ))}
+          </View>
+
+          <View style={styles.chatHeader}>
+            <View style={styles.threadCluster}>
+              <Pressable
+                accessibilityLabel="Toggle full thread name"
+                accessibilityRole="button"
+                accessibilityState={{ expanded: isHeaderExpanded }}
+                onPress={() => setIsHeaderExpanded((current) => !current)}
+                style={[styles.threadBubble, isHeaderExpanded ? styles.threadBubbleExpanded : null]}
+              >
+                <Text numberOfLines={isHeaderExpanded ? 3 : 1} style={styles.threadBubbleText}>
+                  {threadTitle}
+                </Text>
+              </Pressable>
+              <View
+                accessibilityLabel={
+                  isConversationBusyStatus(status) ? "Codex is running" : "Codex is finished"
+                }
+                style={[
+                  styles.statusLed,
+                  isConversationBusyStatus(status) ? styles.statusLedRunning : styles.statusLedDone
+                ]}
+              />
+            </View>
+
+            {!isHeaderExpanded ? (
+              <View style={styles.headerActions}>
+                <CodexModelControls
+                  api={api}
+                  onChange={onModelSettingsChange}
+                  value={modelSettings}
+                  variant="compact"
+                />
+                <Pressable
+                  accessibilityLabel="Open generated files"
+                  accessibilityRole="button"
+                  onPress={() => setGeneratedFilesModalVisible(true)}
+                  style={styles.generatedFilesButton}
+                >
+                  <Feather color="#d9d9df" name="file-text" size={18} />
+                  {generatedFiles.length > 0 ? <View style={styles.generatedFilesDot} /> : null}
+                </Pressable>
+              </View>
             ) : null}
           </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ expanded: isHeaderExpanded }}
-            hitSlop={8}
-            onPress={() => setIsHeaderExpanded((current) => !current)}
-            style={styles.headerToggle}
-          >
-            <Text style={styles.headerToggleText}>{isHeaderExpanded ? "Collapse" : "Expand"}</Text>
-          </Pressable>
-        </View>
-        <StatusPill status={status} />
 
-        <View style={{ flex: 1 }}>
-          <FlatList
-            contentContainerStyle={{ gap: 10, paddingBottom: 12 }}
-            data={newestFirstMessages}
-            inverted
-            keyExtractor={(message) => message.id}
-            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-            onContentSizeChange={handleMessagesContentSizeChange}
-            onScroll={handleMessagesScroll}
-            ref={listRef}
-            renderItem={({ item: message }) => (
-              <View
+          <View style={{ flex: 1 }}>
+            <FlatList
+              contentContainerStyle={styles.messageList}
+              data={newestFirstMessages}
+              inverted
+              keyExtractor={(message) => message.id}
+              maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+              onContentSizeChange={handleMessagesContentSizeChange}
+              onScroll={handleMessagesScroll}
+              ref={listRef}
+              renderItem={renderMessageItem}
+              scrollEventThrottle={16}
+              style={{ flex: 1 }}
+              windowSize={9}
+            />
+            {showScrollToLatestButton ? (
+              <Pressable
+                onPress={() => scrollToLatest(true)}
                 style={[
-                  sharedStyles.card,
+                  sharedStyles.secondaryButton,
                   {
-                    alignSelf: message.role === "user" ? "flex-end" : "stretch",
-                    backgroundColor: message.role === "user" ? colors.primarySoft : colors.surface,
-                    maxWidth: message.role === "user" ? "88%" : "100%"
+                    alignSelf: "center",
+                    bottom: 12,
+                    minHeight: 38,
+                    paddingHorizontal: 14,
+                    position: "absolute"
                   }
                 ]}
               >
-                <View style={styles.messageMetaRow}>
-                  <Text style={sharedStyles.label}>{message.role}</Text>
-                  <Pressable
-                    accessibilityLabel={`Copy ${message.role} message`}
-                    accessibilityRole="button"
-                    onPress={() => void copyMessageText(message)}
-                    style={styles.copyButton}
-                  >
-                    <Text style={styles.copyButtonText}>
-                      {copiedMessageId === message.id ? "Copied" : "Copy"}
-                    </Text>
-                  </Pressable>
-                  {message.metadata?.localStatus === "sending" ? (
-                    <Text style={styles.sendingLabel}>Sending</Text>
-                  ) : null}
-                  {message.metadata?.localStatus === "queued" ? (
-                    <Text style={styles.sendingLabel}>Queued</Text>
-                  ) : null}
-                  {message.metadata?.localStatus === "failed" ? (
-                    <Text accessibilityLabel="Message failed to send" style={styles.failedSend}>
-                      !
-                    </Text>
-                  ) : null}
-                </View>
-                <Text
-                  selectable
-                  style={{ color: colors.text, fontSize: 15, lineHeight: 21, marginTop: 6 }}
-                >
-                  {safeMessageContent(message.content)}
-                </Text>
-              </View>
-            )}
-            scrollEventThrottle={16}
-            style={{ flex: 1 }}
-            windowSize={9}
-          />
-          {showScrollToLatestButton ? (
-            <Pressable
-              onPress={() => scrollToLatest(true)}
-              style={[
-                sharedStyles.secondaryButton,
-                {
-                  alignSelf: "center",
-                  bottom: 12,
-                  minHeight: 38,
-                  paddingHorizontal: 14,
-                  position: "absolute"
-                }
-              ]}
-            >
-              <Text style={sharedStyles.buttonText}>Latest</Text>
-            </Pressable>
-          ) : null}
-        </View>
-
-        {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-
-        {generatedFiles.length > 0 ? (
-          <View style={styles.generatedFilesPanel}>
-            <Pressable
-              accessibilityLabel="Toggle generated files"
-              accessibilityRole="button"
-              accessibilityState={{ expanded: isGeneratedFilesExpanded }}
-              hitSlop={8}
-              onPress={() => setIsGeneratedFilesExpanded((current) => !current)}
-              style={styles.generatedFilesHeader}
-            >
-              <Text style={sharedStyles.label}>Generated files</Text>
-              <Text style={styles.generatedFilesHeaderMeta}>
-                {generatedFiles.length} {generatedFiles.length === 1 ? "file" : "files"} ·{" "}
-                {isGeneratedFilesExpanded ? "Hide" : "Show"}
-              </Text>
-            </Pressable>
-            {isGeneratedFilesExpanded ? (
-              <ScrollView
-                nestedScrollEnabled
-                contentContainerStyle={styles.generatedFilesList}
-                style={styles.generatedFilesScroll}
-              >
-                {generatedFiles.map((file) => (
-                  <Pressable
-                    accessibilityLabel={`Download ${file.name}`}
-                    accessibilityRole="button"
-                    disabled={downloadingFileId === file.id}
-                    key={file.id}
-                    onPress={() => void downloadGeneratedFile(file)}
-                    style={[
-                      styles.generatedFileChip,
-                      downloadingFileId === file.id ? styles.disabledAction : null
-                    ]}
-                  >
-                    <Text numberOfLines={1} style={styles.generatedFileName}>
-                      {file.name}
-                    </Text>
-                    <Text style={styles.generatedFileMeta}>
-                      {downloadingFileId === file.id ? "Opening" : formatFileSize(file.size)}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
+                <Text style={sharedStyles.buttonText}>Latest</Text>
+              </Pressable>
             ) : null}
           </View>
-        ) : null}
 
-        <View style={styles.composerShell}>
-          {attachments.length > 0 ? (
-            <View style={styles.attachmentList}>
-              {attachments.map((attachment) => (
-                <Pressable
-                  accessibilityLabel={`Remove ${attachment.name}`}
-                  accessibilityRole="button"
-                  key={attachment.id}
-                  onPress={() => removeAttachment(attachment.id)}
-                  style={styles.attachmentChip}
-                >
-                  <Text numberOfLines={1} style={styles.attachmentChipText}>
-                    {attachment.name}
-                  </Text>
-                  <Text style={styles.attachmentRemoveText}>x</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-          <View style={styles.composerActions}>
-            <Pressable
-              accessibilityLabel="Attach image"
-              accessibilityRole="button"
-              onPress={pickImageAttachment}
-              style={styles.toolButton}
-            >
-              <Text style={styles.toolButtonText}>Image</Text>
-            </Pressable>
-            <Pressable
-              accessibilityLabel="Attach file"
-              accessibilityRole="button"
-              onPress={pickFileAttachment}
-              style={styles.toolButton}
-            >
-              <Text style={styles.toolButtonText}>File</Text>
-            </Pressable>
-            <CodexModelControls
-              api={api}
-              onChange={onModelSettingsChange}
-              value={modelSettings}
-              variant="compact"
-            />
-            <Pressable
-              accessibilityLabel="Commit and push with git"
-              accessibilityRole="button"
-              disabled={!canSendNow}
-              onPress={sendGitShortcut}
-              style={[styles.gitButton, !canSendNow ? styles.disabledAction : null]}
-            >
-              <Text style={styles.gitButtonText}>Git</Text>
-            </Pressable>
-          </View>
-          <View style={styles.composerRow}>
-            <TextInput
-              contextMenuHidden={false}
-              multiline
-              onChangeText={setPrompt}
-              placeholder="Continue this Codex thread"
-              placeholderTextColor={colors.muted}
-              scrollEnabled
-              style={[sharedStyles.input, styles.composerInput]}
-              value={prompt}
-            />
-            <View style={styles.composerButton}>
-              <Button
-                disabled={!canSendPrompt(prompt, attachments) || !canSendNow}
-                onPress={continueConversation}
-              >
-                {sendButtonLabel(status, isSending)}
-              </Button>
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+          <View style={styles.composerShell}>
+            {attachments.length > 0 ? (
+              <View style={styles.attachmentList}>
+                {attachments.map((attachment) => (
+                  <Pressable
+                    accessibilityLabel={`Remove ${attachment.name}`}
+                    accessibilityRole="button"
+                    key={attachment.id}
+                    onPress={() => removeAttachment(attachment.id)}
+                    style={styles.attachmentChip}
+                  >
+                    <Text numberOfLines={1} style={styles.attachmentChipText}>
+                      {attachment.name}
+                    </Text>
+                    <Text style={styles.attachmentRemoveText}>x</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+            <View style={styles.composerRow}>
               <Pressable
-                accessibilityLabel="Steer running Codex turn"
+                accessibilityLabel="Attach files or images"
                 accessibilityRole="button"
-                disabled={!canSendPrompt(prompt, attachments) || !canSteerNow}
-                onPress={steerConversation}
+                onPress={openAttachmentMenu}
+                style={styles.composerPlusButton}
+              >
+                <Feather color="#f5f5f5" name="plus" size={24} />
+              </Pressable>
+              <TextInput
+                contextMenuHidden={false}
+                multiline
+                onChangeText={setPrompt}
+                placeholder="Enter celestial command..."
+                placeholderTextColor={colors.muted}
+                scrollEnabled
+                style={styles.composerInput}
+                value={prompt}
+              />
+              <Pressable
+                accessibilityLabel={
+                  isConversationBusyStatus(status) ? "Queue message" : "Send message"
+                }
+                accessibilityRole="button"
+                disabled={!hasComposerPayload || !canSendNow}
+                onPress={continueConversation}
                 style={[
-                  styles.steerButton,
-                  !canSendPrompt(prompt, attachments) || !canSteerNow ? styles.disabledAction : null
+                  styles.composerSendButton,
+                  isConversationBusyStatus(status)
+                    ? styles.composerSendButtonBusy
+                    : styles.composerSendButtonIdle,
+                  !hasComposerPayload || !canSendNow ? styles.disabledAction : null
                 ]}
               >
-                <Text style={styles.steerButtonText}>Steer</Text>
+                {showComposerSpinner ? (
+                  <ActivityIndicator color="#080808" size="small" />
+                ) : (
+                  <Feather color="#080808" name={sendButtonIconName} size={18} />
+                )}
               </Pressable>
             </View>
           </View>
+
+          <Modal
+            animationType="fade"
+            onRequestClose={() => setGeneratedFilesModalVisible(false)}
+            transparent
+            visible={generatedFilesModalVisible}
+          >
+            <View style={styles.generatedFilesModalBackdrop}>
+              <View style={styles.generatedFilesModal}>
+                <View style={styles.generatedFilesModalHeader}>
+                  <Text style={styles.generatedFilesModalTitle}>Generated files</Text>
+                  <Pressable
+                    accessibilityLabel="Close generated files"
+                    accessibilityRole="button"
+                    onPress={() => setGeneratedFilesModalVisible(false)}
+                    style={styles.generatedFilesCloseButton}
+                  >
+                    <Feather color="#f5f5f5" name="x" size={18} />
+                  </Pressable>
+                </View>
+                <ScrollView
+                  nestedScrollEnabled
+                  contentContainerStyle={styles.generatedFilesList}
+                  style={styles.generatedFilesModalScroll}
+                >
+                  {generatedFiles.length === 0 ? (
+                    <Text style={styles.generatedFilesEmptyText}>
+                      No generated files are available yet.
+                    </Text>
+                  ) : (
+                    generatedFiles.map((file) => (
+                      <Pressable
+                        accessibilityLabel={`Download ${file.name}`}
+                        accessibilityRole="button"
+                        disabled={downloadingFileId === file.id}
+                        key={file.id}
+                        onPress={() => void downloadGeneratedFile(file)}
+                        style={[
+                          styles.generatedFileChip,
+                          downloadingFileId === file.id ? styles.disabledAction : null
+                        ]}
+                      >
+                        <Feather color="#d9d9df" name="file" size={16} />
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text numberOfLines={1} style={styles.generatedFileName}>
+                            {file.name}
+                          </Text>
+                          <Text style={styles.generatedFileMeta}>
+                            {downloadingFileId === file.id ? "Opening" : formatFileSize(file.size)}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    ))
+                  )}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
         </View>
-      </FixedScreen>
+      </SafeAreaView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  backButton: {
-    alignItems: "center",
-    backgroundColor: colors.surfaceHigh,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 34,
-    paddingHorizontal: 12
-  },
-  backButtonText: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: "800"
-  },
-  chatHeader: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: 12
-  },
-  chatHeaderCopy: {
-    flex: 1,
-    minWidth: 0
-  },
-  chatHeaderTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "800",
-    lineHeight: 23,
-    marginTop: 3
-  },
   attachmentChip: {
     alignItems: "center",
     backgroundColor: colors.surfaceHigh,
@@ -1009,188 +1156,340 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "900"
   },
-  composerActions: {
+  chatHeader: {
     alignItems: "center",
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8
+    gap: 12,
+    justifyContent: "space-between",
+    minHeight: 44
   },
-  composerButton: {
-    gap: 8,
-    justifyContent: "flex-end",
-    width: 92
+  codexMessageBlock: {
+    alignItems: "stretch",
+    width: "100%"
+  },
+  codexMessageCard: {
+    backgroundColor: "rgba(0,0,0,0.36)",
+    borderColor: "rgba(255,255,255,0.13)",
+    borderWidth: 1
+  },
+  codexMessageMetaRow: {
+    justifyContent: "flex-start"
+  },
+  codexMessageText: {
+    color: "#e6e6e9"
   },
   composerInput: {
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    color: "#f2f2f2",
     flex: 1,
+    fontSize: 15,
+    lineHeight: 20,
     maxHeight: COMPOSER_INPUT_MAX_HEIGHT,
     minHeight: COMPOSER_INPUT_MIN_HEIGHT,
-    paddingBottom: 12,
-    paddingTop: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 13,
     textAlignVertical: "top"
   },
+  composerPlusButton: {
+    alignItems: "center",
+    borderRadius: 999,
+    height: 44,
+    justifyContent: "center",
+    width: 44
+  },
   composerRow: {
-    alignItems: "stretch",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.72)",
+    borderColor: "rgba(255,255,255,0.13)",
+    borderRadius: 999,
+    borderWidth: 1,
     flexDirection: "row",
-    gap: 10
+    gap: 8
+  },
+  composerSendButton: {
+    alignItems: "center",
+    borderRadius: 999,
+    height: 44,
+    justifyContent: "center",
+    marginRight: 4,
+    width: 44
+  },
+  composerSendButtonBusy: {
+    backgroundColor: "#ffffff"
+  },
+  composerSendButtonIdle: {
+    backgroundColor: "#ffffff"
   },
   composerShell: {
-    gap: 10
+    backgroundColor: "#000000",
+    gap: 10,
+    paddingBottom: 8,
+    paddingTop: 8
+  },
+  conversationContent: {
+    backgroundColor: "#000000",
+    flex: 1,
+    gap: 10,
+    paddingHorizontal: 18,
+    paddingTop: 8
+  },
+  conversationScreen: {
+    backgroundColor: "#000000",
+    flex: 1
   },
   copyButton: {
-    backgroundColor: colors.surfaceHigh,
-    borderColor: colors.border,
-    borderRadius: 8,
+    borderColor: "rgba(255,255,255,0.1)",
+    borderRadius: 999,
     borderWidth: 1,
-    minHeight: 28,
-    paddingHorizontal: 10,
-    paddingVertical: 5
+    minHeight: 22,
+    paddingHorizontal: 8,
+    paddingVertical: 3
   },
   copyButtonText: {
-    color: colors.text,
-    fontSize: 11,
+    color: "rgba(255,255,255,0.62)",
+    fontSize: 10,
     fontWeight: "800"
   },
   disabledAction: {
-    opacity: 0.55
+    opacity: 0.48
+  },
+  errorText: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: "700"
   },
   failedSend: {
     color: colors.danger,
     fontSize: 16,
     fontWeight: "900"
   },
-  gitButton: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    justifyContent: "center",
-    minHeight: 36,
-    paddingHorizontal: 14
-  },
-  gitButtonText: {
-    color: colors.surface,
-    fontSize: 12,
-    fontWeight: "900"
-  },
   generatedFileChip: {
-    alignItems: "flex-start",
-    backgroundColor: colors.surfaceHigh,
-    borderColor: colors.border,
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderColor: "rgba(255,255,255,0.1)",
     borderRadius: 8,
     borderWidth: 1,
-    gap: 3,
-    maxWidth: "100%",
-    minHeight: 42,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 52,
     paddingHorizontal: 10,
-    paddingVertical: 7,
-    width: "48%"
+    paddingVertical: 8
   },
   generatedFileMeta: {
-    color: colors.muted,
+    color: "rgba(255,255,255,0.46)",
     fontSize: 11,
     fontWeight: "700"
   },
   generatedFileName: {
-    color: colors.text,
+    color: "#f5f5f5",
     fontSize: 12,
     fontWeight: "800",
     maxWidth: "100%"
   },
-  generatedFilesList: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    paddingBottom: 2
-  },
-  generatedFilesPanel: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
+  generatedFilesButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(255,255,255,0.13)",
+    borderRadius: 999,
     borderWidth: 1,
-    gap: 8,
-    padding: 10
+    height: 34,
+    justifyContent: "center",
+    position: "relative",
+    width: 34
   },
-  generatedFilesHeader: {
+  generatedFilesCloseButton: {
+    alignItems: "center",
+    borderRadius: 999,
+    height: 34,
+    justifyContent: "center",
+    width: 34
+  },
+  generatedFilesDot: {
+    backgroundColor: colors.danger,
+    borderRadius: 999,
+    bottom: 6,
+    height: 6,
+    position: "absolute",
+    right: 7,
+    width: 6
+  },
+  generatedFilesEmptyText: {
+    color: "rgba(255,255,255,0.58)",
+    fontSize: 13,
+    lineHeight: 18
+  },
+  generatedFilesList: {
+    gap: 8,
+    paddingBottom: 2,
+    paddingTop: 6
+  },
+  generatedFilesModal: {
+    backgroundColor: "rgba(0,0,0,0.92)",
+    borderColor: "rgba(255,255,255,0.16)",
+    borderRadius: 16,
+    borderWidth: 1,
+    maxHeight: "72%",
+    padding: 16,
+    width: "88%"
+  },
+  generatedFilesModalBackdrop: {
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.68)",
+    flex: 1,
+    justifyContent: "center"
+  },
+  generatedFilesModalHeader: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 10,
     justifyContent: "space-between",
-    minHeight: 32
+    minHeight: 36
   },
-  generatedFilesHeaderMeta: {
-    color: colors.muted,
-    flexShrink: 0,
-    fontSize: 12,
-    fontWeight: "800"
-  },
-  generatedFilesScroll: {
+  generatedFilesModalScroll: {
     maxHeight: GENERATED_FILES_MAX_HEIGHT
   },
-  headerToggle: {
-    alignItems: "center",
-    backgroundColor: colors.surfaceHigh,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: 1,
-    minHeight: 34,
-    justifyContent: "center",
-    paddingHorizontal: 12
+  generatedFilesModalTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "800"
   },
-  headerToggleText: {
-    color: colors.text,
-    fontSize: 12,
+  headerActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    flexShrink: 0
+  },
+  inlineSteerButton: {
+    alignItems: "center",
+    borderColor: "rgba(255,255,255,0.2)",
+    borderRadius: 999,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 24,
+    paddingHorizontal: 9
+  },
+  inlineSteerButtonText: {
+    color: "#ffffff",
+    fontSize: 10,
     fontWeight: "800"
   },
   keyboardAvoidingScreen: {
+    backgroundColor: "#000000",
     flex: 1
+  },
+  messageBlock: {
+    gap: 7,
+    marginBottom: 16
+  },
+  messageCard: {
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 16
+  },
+  messageList: {
+    gap: 2,
+    paddingBottom: 30,
+    paddingTop: 30
   },
   messageMetaRow: {
     alignItems: "center",
     flexDirection: "row",
     gap: 8
   },
+  messageRoleLabel: {
+    color: "rgba(255,255,255,0.76)",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0,
+    textTransform: "uppercase"
+  },
+  messageText: {
+    fontSize: 17,
+    lineHeight: 25
+  },
   sendingLabel: {
-    color: colors.muted,
+    color: "rgba(255,255,255,0.55)",
     fontSize: 11,
     fontWeight: "800"
   },
-  steerButton: {
+  star: {
+    backgroundColor: "#ffffff",
+    borderRadius: 999,
+    position: "absolute"
+  },
+  starField: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#000000"
+  },
+  statusLed: {
+    borderRadius: 999,
+    height: 9,
+    width: 9
+  },
+  statusLedDone: {
+    backgroundColor: "#22c55e",
+    shadowColor: "#22c55e",
+    shadowOpacity: 0.72,
+    shadowRadius: 7
+  },
+  statusLedRunning: {
+    backgroundColor: "#a80000",
+    shadowColor: "#ff0000",
+    shadowOpacity: 0.72,
+    shadowRadius: 7
+  },
+  threadBubble: {
     alignItems: "center",
-    backgroundColor: colors.surfaceHigh,
-    borderColor: colors.border,
-    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(255,255,255,0.13)",
+    borderRadius: 999,
     borderWidth: 1,
     justifyContent: "center",
+    maxWidth: 180,
     minHeight: 36,
-    paddingHorizontal: 12
+    paddingHorizontal: 16
   },
-  steerButtonText: {
-    color: colors.text,
+  threadBubbleExpanded: {
+    alignItems: "flex-start",
+    flex: 1,
+    maxWidth: "100%",
+    paddingVertical: 9
+  },
+  threadBubbleText: {
+    color: "#f1f1f3",
     fontSize: 12,
-    fontWeight: "900"
+    fontWeight: "800",
+    letterSpacing: 0,
+    textTransform: "uppercase"
   },
-  toolButton: {
+  threadCluster: {
     alignItems: "center",
-    backgroundColor: colors.surfaceHigh,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 36,
-    paddingHorizontal: 12
+    flex: 1,
+    flexDirection: "row",
+    gap: 12,
+    minWidth: 0
   },
-  toolButtonText: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: "800"
+  userMessageBlock: {
+    alignItems: "flex-end",
+    alignSelf: "flex-end",
+    maxWidth: "86%"
+  },
+  userMessageCard: {
+    backgroundColor: "#eeeeee",
+    shadowColor: "#e2e2ff",
+    shadowOpacity: 0.16,
+    shadowRadius: 16
+  },
+  userMessageMetaRow: {
+    justifyContent: "flex-end"
+  },
+  userMessageText: {
+    color: "#111111"
   }
 });
 
 function canSendPrompt(prompt: string, attachments: PendingAttachment[]) {
   return prompt.trim().length > 0 || attachments.length > 0;
-}
-
-function canAcceptConversationInput(status: string) {
-  return !["awaiting_approval", "committing", "preparing", "queued", "running"].includes(status);
 }
 
 function isDraftConversation(conversation: ConversationSummary) {
@@ -1218,22 +1517,6 @@ function shouldForceMessageRefreshAfterStatusPoll(input: {
 
 function isConversationBusyStatus(status: string) {
   return ["awaiting_approval", "committing", "preparing", "queued", "running"].includes(status);
-}
-
-function sendButtonLabel(status: string, isSending: boolean) {
-  if (status === "awaiting_approval") {
-    return "Queue";
-  }
-
-  if (!canAcceptConversationInput(status)) {
-    return "Queue";
-  }
-
-  if (isSending) {
-    return "Sending";
-  }
-
-  return "Send";
 }
 
 function promptForSend(prompt: string, attachments: PendingAttachment[]) {
@@ -1308,6 +1591,20 @@ function markLocalMessageQueued(messages: ConversationMessage[], clientMessageId
   );
 }
 
+function markLocalMessageSending(messages: ConversationMessage[], clientMessageId: string) {
+  return messages.map((message) =>
+    message.id === clientMessageId
+      ? {
+          ...message,
+          metadata: {
+            ...(message.metadata ?? {}),
+            localStatus: "sending"
+          }
+        }
+      : message
+  );
+}
+
 function markLocalMessageSent(messages: ConversationMessage[], clientMessageId: string) {
   return messages.map((message) =>
     message.id === clientMessageId
@@ -1320,6 +1617,21 @@ function markLocalMessageSent(messages: ConversationMessage[], clientMessageId: 
         }
       : message
   );
+}
+
+function canSteerQueuedLocalMessage(message: ConversationMessage, canSteerNow: boolean) {
+  return canSteerNow && message.metadata?.localStatus === "queued";
+}
+
+function queuedMessageSubmittedPrompt(message: ConversationMessage) {
+  const submittedPrompt = message.metadata?.submittedPrompt;
+
+  if (typeof submittedPrompt === "string" && submittedPrompt.trim().length > 0) {
+    return submittedPrompt.trim();
+  }
+
+  const content = stripCodexAppDirectives(message.content).trim();
+  return content.length > 0 ? content : null;
 }
 
 function reassignLocalConversationMessages(

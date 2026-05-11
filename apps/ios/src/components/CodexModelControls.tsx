@@ -135,7 +135,7 @@ export function CodexModelControls({
           style={styles.compactButton}
         >
           <Text numberOfLines={1} style={styles.compactButtonText}>
-            {activeModel?.displayName ?? activeSettings.model}
+            {displayModelLabel(activeModel?.displayName ?? activeSettings.model)}
           </Text>
         </Pressable>
         <Pressable
@@ -212,6 +212,14 @@ export function CodexModelControls({
   );
 }
 
+function displayModelLabel(model: string) {
+  if (model.toLowerCase() === "gpt-5.5") {
+    return "GPT-5.5";
+  }
+
+  return model.replace(/^gpt-/i, "GPT-");
+}
+
 const styles = StyleSheet.create({
   chip: {
     alignItems: "center",
@@ -243,19 +251,21 @@ const styles = StyleSheet.create({
   },
   compactButton: {
     alignItems: "center",
-    backgroundColor: colors.surfaceHigh,
-    borderColor: colors.border,
-    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(255,255,255,0.13)",
+    borderRadius: 999,
     borderWidth: 1,
     justifyContent: "center",
-    minHeight: 36,
-    paddingHorizontal: 8,
-    width: 78
+    maxWidth: 112,
+    minHeight: 34,
+    minWidth: 84,
+    paddingHorizontal: 12
   },
   compactButtonText: {
-    color: colors.text,
+    color: "#e2e2e2",
     fontSize: 12,
-    fontWeight: "800"
+    fontWeight: "800",
+    letterSpacing: 0
   },
   compactRow: {
     flexDirection: "row",
