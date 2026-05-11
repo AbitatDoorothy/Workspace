@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
+import * as Sharing from "expo-sharing";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import {
   AppState,
@@ -25,7 +26,8 @@ import type {
   CodexMobileModelSettings,
   ConversationAttachment,
   ConversationMessage,
-  ConversationSummary
+  ConversationSummary,
+  GeneratedFileSummary
 } from "../types";
 
 interface ConversationScreenProps {
@@ -69,6 +71,8 @@ export function ConversationScreen({
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [status, setStatus] = useState(conversation.status);
   const [error, setError] = useState<string | null>(null);
+  const [generatedFiles, setGeneratedFiles] = useState<GeneratedFileSummary[]>([]);
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [showScrollToLatestButton, setShowScrollToLatestButton] = useState(false);
@@ -86,7 +90,9 @@ export function ConversationScreen({
   const latestSequenceRef = useRef(0);
   const latestConversationUpdatedAtRef = useRef<string | null>(conversation.updatedAt ?? null);
   const latestStatusRef = useRef(conversation.status);
+  const activeConversationIdRef = useRef(conversation.id);
   const lastFullMessageRefreshAtRef = useRef(0);
+  const generatedFileRefreshInFlightRef = useRef(false);
   const messageRefreshInFlightRef = useRef(false);
   const pendingFullMessageRefreshRef = useRef(false);
   const sendingCountRef = useRef(0);
@@ -122,19 +128,47 @@ export function ConversationScreen({
     setMessages([]);
     setPrompt("");
     setAttachments([]);
+    setGeneratedFiles([]);
+    setDownloadingFileId(null);
     setStatus(conversation.status);
     setIsHeaderExpanded(false);
     pendingAutoScrollRef.current = true;
     latestSequenceRef.current = 0;
+    activeConversationIdRef.current = conversation.id;
     latestConversationUpdatedAtRef.current = conversation.updatedAt ?? null;
     latestStatusRef.current = conversation.status;
     lastFullMessageRefreshAtRef.current = 0;
+    generatedFileRefreshInFlightRef.current = false;
     messageRefreshInFlightRef.current = false;
     pendingFullMessageRefreshRef.current = false;
   }, [conversation]);
 
+  async function refreshGeneratedFiles(conversationId = activeConversationIdRef.current) {
+    if (isDraftConversationId(conversationId) || generatedFileRefreshInFlightRef.current) {
+      if (isDraftConversationId(conversationId)) {
+        setGeneratedFiles([]);
+      }
+      return;
+    }
+
+    generatedFileRefreshInFlightRef.current = true;
+    try {
+      const files = await api.listGeneratedFiles(conversationId);
+      if (activeConversationIdRef.current === conversationId) {
+        setGeneratedFiles(files);
+      }
+    } catch (caught) {
+      if (activeConversationIdRef.current === conversationId) {
+        setError(caught instanceof Error ? caught.message : "Unable to load generated files");
+      }
+    } finally {
+      generatedFileRefreshInFlightRef.current = false;
+    }
+  }
+
   useEffect(() => {
     if (isDraftConversation(activeConversation)) {
+      setGeneratedFiles([]);
       return;
     }
 
@@ -160,6 +194,9 @@ export function ConversationScreen({
           }
           setError(null);
           setMessages((current) => mergeConversationMessages(current, nextMessages));
+          if (isFullRefresh || nextMessages.length > 0) {
+            void refreshGeneratedFiles(activeConversation.id);
+          }
         }
       } catch (caught) {
         if (!cancelled) {
@@ -206,6 +243,7 @@ export function ConversationScreen({
             })
           ) {
             void refreshMessages();
+            void refreshGeneratedFiles(activeConversation.id);
           }
         }
       } catch (caught) {
@@ -217,12 +255,14 @@ export function ConversationScreen({
 
     void refreshMessages();
     void refreshStatus();
+    void refreshGeneratedFiles(activeConversation.id);
     const messageTimer = setInterval(refreshMessagesForPoll, MESSAGE_POLL_INTERVAL_MS);
     const statusTimer = setInterval(refreshStatus, STATUS_POLL_INTERVAL_MS);
     const appStateSubscription = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
         void refreshMessages();
         void refreshStatus();
+        void refreshGeneratedFiles(activeConversation.id);
       }
     });
 
@@ -294,6 +334,7 @@ export function ConversationScreen({
         };
 
         latestStatusRef.current = started.status;
+        activeConversationIdRef.current = started.conversationId;
         latestConversationUpdatedAtRef.current = nextConversation.updatedAt ?? null;
         setActiveConversation(nextConversation);
         setStatus(started.status);
@@ -313,6 +354,7 @@ export function ConversationScreen({
             includeRuntime: false
           });
           setMessages((current) => mergeConversationMessages(current, next));
+          void refreshGeneratedFiles(started.conversationId);
         } catch (caught) {
           setError(caught instanceof Error ? caught.message : "Unable to refresh Codex messages");
         }
@@ -343,6 +385,7 @@ export function ConversationScreen({
           includeRuntime: false
         });
         setMessages((current) => mergeConversationMessages(current, next));
+        void refreshGeneratedFiles(conversationForSend.id);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Unable to refresh Codex messages");
       }
@@ -458,6 +501,41 @@ export function ConversationScreen({
     setAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }
 
+  async function downloadGeneratedFile(file: GeneratedFileSummary) {
+    if (isDraftConversation(activeConversation)) {
+      return;
+    }
+
+    try {
+      setError(null);
+      setDownloadingFileId(file.id);
+      const download = await api.downloadGeneratedFile(activeConversation.id, file.id);
+      const documentDirectory = FileSystem.documentDirectory;
+      if (!documentDirectory) {
+        throw new Error("File downloads are unavailable on this device");
+      }
+
+      const uri = `${documentDirectory}${safeLocalFileName(download.name)}`;
+      await FileSystem.writeAsStringAsync(uri, download.dataBase64, {
+        encoding: FileSystem.EncodingType.Base64
+      });
+
+      if (!(await Sharing.isAvailableAsync())) {
+        setError(`Downloaded ${download.name}, but sharing is unavailable on this device`);
+        return;
+      }
+
+      await Sharing.shareAsync(uri, {
+        dialogTitle: download.name,
+        mimeType: download.mimeType
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to download generated file");
+    } finally {
+      setDownloadingFileId(null);
+    }
+  }
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -561,6 +639,34 @@ export function ConversationScreen({
         </View>
 
         {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
+
+        {generatedFiles.length > 0 ? (
+          <View style={styles.generatedFilesPanel}>
+            <Text style={sharedStyles.label}>Generated files</Text>
+            <View style={styles.generatedFilesList}>
+              {generatedFiles.map((file) => (
+                <Pressable
+                  accessibilityLabel={`Download ${file.name}`}
+                  accessibilityRole="button"
+                  disabled={downloadingFileId === file.id}
+                  key={file.id}
+                  onPress={() => void downloadGeneratedFile(file)}
+                  style={[
+                    styles.generatedFileChip,
+                    downloadingFileId === file.id ? styles.disabledAction : null
+                  ]}
+                >
+                  <Text numberOfLines={1} style={styles.generatedFileName}>
+                    {file.name}
+                  </Text>
+                  <Text style={styles.generatedFileMeta}>
+                    {downloadingFileId === file.id ? "Opening" : formatFileSize(file.size)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.composerShell}>
           {attachments.length > 0 ? (
@@ -759,6 +865,38 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "900"
   },
+  generatedFileChip: {
+    alignItems: "flex-start",
+    backgroundColor: colors.surfaceHigh,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 3,
+    maxWidth: "100%",
+    minHeight: 42,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    width: "48%"
+  },
+  generatedFileMeta: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "700"
+  },
+  generatedFileName: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "800",
+    maxWidth: "100%"
+  },
+  generatedFilesList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8
+  },
+  generatedFilesPanel: {
+    gap: 8
+  },
   headerToggle: {
     alignItems: "center",
     backgroundColor: colors.surfaceHigh,
@@ -828,7 +966,11 @@ function canAcceptConversationInput(status: string) {
 }
 
 function isDraftConversation(conversation: ConversationSummary) {
-  return conversation.status === "draft" || conversation.id.startsWith("draft:");
+  return conversation.status === "draft" || isDraftConversationId(conversation.id);
+}
+
+function isDraftConversationId(conversationId: string) {
+  return conversationId.startsWith("draft:");
 }
 
 function shouldForceMessageRefreshAfterStatusPoll(input: {
@@ -985,6 +1127,31 @@ function stripDataUrlPrefix(dataBase64: string) {
   const markerIndex = dataBase64.indexOf(marker);
 
   return markerIndex >= 0 ? dataBase64.slice(markerIndex + marker.length) : dataBase64;
+}
+
+function safeLocalFileName(name: string) {
+  const safeName = name
+    .trim()
+    .replace(/[^\w.-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return safeName || `abitat-file-${Date.now()}`;
+}
+
+function formatFileSize(size: number) {
+  if (!Number.isFinite(size) || size <= 0) {
+    return "0 B";
+  }
+
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function mergeConversationMessages(

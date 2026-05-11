@@ -36,9 +36,16 @@ if (!packageJson.dependencies?.["expo-crypto"]) {
 if (!packageJson.dependencies?.["@expo/vector-icons"]) {
   throw new Error("Expected abitat-ios to depend on @expo/vector-icons for bottom navigation");
 }
-for (const dependency of ["expo-document-picker", "expo-file-system", "expo-image-picker"]) {
+for (const dependency of [
+  "expo-document-picker",
+  "expo-file-system",
+  "expo-image-picker",
+  "expo-sharing"
+]) {
   if (!packageJson.dependencies?.[dependency]) {
-    throw new Error(`Expected abitat-ios to depend on ${dependency} for mobile attachments`);
+    throw new Error(
+      `Expected abitat-ios to depend on ${dependency} for mobile attachments and downloads`
+    );
   }
 }
 
@@ -89,6 +96,9 @@ for (const mode of ["fetch", "remote-notification"]) {
 const podfileLock = await readFile(join(process.cwd(), "ios/Podfile.lock"), "utf8");
 if (!podfileLock.includes("ExpoCrypto (55.0.14)")) {
   throw new Error("Expected native iOS Pods to include ExpoCrypto for relay request nonces");
+}
+if (!podfileLock.includes("ExpoSharing (55.0.18)")) {
+  throw new Error("Expected native iOS Pods to include ExpoSharing for generated file downloads");
 }
 
 const conversationScreen = await readFile(
@@ -417,6 +427,13 @@ for (const expected of [
   'delivery: "queue"',
   'delivery: "steer"',
   'accessibilityLabel="Steer running Codex turn"',
+  "refreshGeneratedFiles",
+  "downloadGeneratedFile",
+  "generatedFiles",
+  "GeneratedFileSummary",
+  "FileSystem.writeAsStringAsync",
+  "Sharing.isAvailableAsync",
+  "Sharing.shareAsync",
   "sendGitShortcut",
   "pickImageAttachment",
   "pickFileAttachment",
@@ -559,6 +576,19 @@ for (const expected of ["listCodexModels", "model?: string", "effort?: CodexReas
 for (const expected of ['delivery?: "queue" | "steer"', "delivery"]) {
   if (!apiClient.includes(expected)) {
     throw new Error(`Expected API client to support queued and steer delivery: ${expected}`);
+  }
+}
+
+for (const expected of [
+  "GeneratedFileDownload",
+  "GeneratedFileSummary",
+  "listGeneratedFiles",
+  "downloadGeneratedFile",
+  "/api/mobile/conversations/${conversationId}/files",
+  "/api/mobile/conversations/${conversationId}/files/${fileId}/download"
+]) {
+  if (!apiClient.includes(expected)) {
+    throw new Error(`Expected API client to support generated file downloads: ${expected}`);
   }
 }
 

@@ -93,6 +93,18 @@ export interface ConversationAttachment {
   size: number;
 }
 
+export interface GeneratedFileSummary {
+  id: string;
+  mimeType: string;
+  name: string;
+  path: string;
+  size: number;
+}
+
+export interface GeneratedFileDownload extends GeneratedFileSummary {
+  dataBase64: string;
+}
+
 export type CodexReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface CodexMobileModelSettings {

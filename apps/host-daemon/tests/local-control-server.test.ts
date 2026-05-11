@@ -191,6 +191,41 @@ describe("local control server", () => {
           status: "running"
         })
       );
+      await expect(
+        fetchJson(`${endpoint}/api/mobile/conversations/codex_thread_new/files`)
+      ).rejects.toThrow("401");
+      await expect(
+        fetchJson(`${endpoint}/api/mobile/conversations/codex_thread_new/files`, {
+          headers: auth
+        })
+      ).resolves.toEqual({
+        files: [
+          {
+            id: "file_demo",
+            mimeType: "text/markdown",
+            name: "summary.md",
+            path: "/Users/reece/Desktop/Demo/summary.md",
+            size: 12
+          }
+        ]
+      });
+      await expect(
+        fetchJson(
+          `${endpoint}/api/mobile/conversations/codex_thread_new/files/file_demo/download`,
+          {
+            headers: auth
+          }
+        )
+      ).resolves.toEqual({
+        file: {
+          dataBase64: Buffer.from("hello file").toString("base64"),
+          id: "file_demo",
+          mimeType: "text/markdown",
+          name: "summary.md",
+          path: "/Users/reece/Desktop/Demo/summary.md",
+          size: 12
+        }
+      });
       expect(JSON.stringify(diagnostics.events)).not.toContain(paired.clientToken);
       expect(JSON.stringify(diagnostics.events)).not.toContain("Hello from phone");
       expect(JSON.stringify(diagnostics.events)).not.toContain("Continue from phone");
@@ -298,6 +333,31 @@ function createFakeCodexBridge(options: { continueError?: Error } = {}): LocalCo
           sourceDeviceId: "phone_test"
         }
       ];
+    },
+    async listGeneratedFiles() {
+      return [
+        {
+          id: "file_demo",
+          mimeType: "text/markdown",
+          name: "summary.md",
+          path: "/Users/reece/Desktop/Demo/summary.md",
+          size: 12
+        }
+      ];
+    },
+    async downloadGeneratedFile(_conversationId, fileId) {
+      if (fileId !== "file_demo") {
+        throw Object.assign(new Error("Generated file not found"), { statusCode: 404 });
+      }
+
+      return {
+        dataBase64: Buffer.from("hello file").toString("base64"),
+        id: "file_demo",
+        mimeType: "text/markdown",
+        name: "summary.md",
+        path: "/Users/reece/Desktop/Demo/summary.md",
+        size: 12
+      };
     },
     async listModelOptions() {
       return [];

@@ -16,6 +16,8 @@ import type {
   ConversationAttachment,
   ConversationMessage,
   ConversationSummary,
+  GeneratedFileDownload,
+  GeneratedFileSummary,
   LocalPairingPayload,
   MobileBootstrap,
   PairingState,
@@ -61,11 +63,13 @@ export interface ApiClient {
   listConversations(projectId: string): Promise<ConversationSummary[]>;
   listCompletionStates(): Promise<CodexCompletionSummary[]>;
   listCodexModels(): Promise<CodexModelOption[]>;
+  listGeneratedFiles(conversationId: string): Promise<GeneratedFileSummary[]>;
   listMessages(
     conversationId: string,
     afterSequence?: number,
     options?: { includeRuntime?: boolean }
   ): Promise<ConversationMessage[]>;
+  downloadGeneratedFile(conversationId: string, fileId: string): Promise<GeneratedFileDownload>;
   listProjects(): Promise<ProjectSummary[]>;
   listRemoteSignals(sessionId: string): Promise<RemoteControlSignal[]>;
   registerPushToken(input: { platform: "ios"; provider: "expo"; token: string }): Promise<void>;
@@ -144,9 +148,17 @@ export function createApiClient(pairing: PairingState): ApiClient {
       ),
     listCodexModels: () =>
       get(pairing, "/api/mobile/codex/models").then((body) => body.models as CodexModelOption[]),
+    listGeneratedFiles: (conversationId) =>
+      get(pairing, `/api/mobile/conversations/${conversationId}/files`).then(
+        (body) => body.files as GeneratedFileSummary[]
+      ),
     listMessages: (conversationId, afterSequence, options) =>
       get(pairing, mobileMessagesPath(conversationId, afterSequence, options)).then(
         (body) => body.messages as ConversationMessage[]
+      ),
+    downloadGeneratedFile: (conversationId, fileId) =>
+      get(pairing, `/api/mobile/conversations/${conversationId}/files/${fileId}/download`).then(
+        (body) => body.file as GeneratedFileDownload
       ),
     listProjects: () =>
       get(pairing, "/api/mobile/projects").then((body) => body.projects as ProjectSummary[]),
