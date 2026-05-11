@@ -89,7 +89,8 @@ export function createLocalMobilePushService(
       const subscriptions = (await subscriptionStore.listPushSubscriptions()).filter(
         (subscription) => subscription.provider === "expo"
       );
-      const messages = subscriptions.map((subscription) => {
+      const uniqueSubscriptions = uniquePushSubscriptionsByToken(subscriptions);
+      const messages = uniqueSubscriptions.map((subscription) => {
         const sound = soundPicker();
 
         return {
@@ -132,7 +133,7 @@ export function createLocalMobilePushService(
           error: errorDiagnostics(error),
           projectId: input.projectId,
           sentCount: 0,
-          subscriptionCount: messages.length,
+          subscriptionCount: subscriptions.length,
           turnId: input.turnId
         });
         throw error;
@@ -141,9 +142,10 @@ export function createLocalMobilePushService(
         conversationId: input.conversationId,
         failed: input.failed,
         projectId: input.projectId,
+        duplicateSubscriptionCount: subscriptions.length - messages.length,
         sentCount: messages.length,
         status: input.status,
-        subscriptionCount: messages.length,
+        subscriptionCount: subscriptions.length,
         turnId: input.turnId
       });
       options.logger?.info(
@@ -368,11 +370,23 @@ function snapshotCompletion(state: LocalCodexCompletionState): CompletionSnapsho
 }
 
 function completionKey(state: LocalCodexCompletionState) {
-  return [
-    state.conversationId,
-    state.latestTurnId ?? "unknown",
-    state.latestTurnCompletedAt ?? state.updatedAt
-  ].join(":");
+  return [state.conversationId, state.latestTurnId ?? "unknown"].join(":");
+}
+
+function uniquePushSubscriptionsByToken(subscriptions: LocalPushSubscription[]) {
+  const seenTokens = new Set<string>();
+  const uniqueSubscriptions: LocalPushSubscription[] = [];
+
+  for (const subscription of subscriptions) {
+    if (seenTokens.has(subscription.token)) {
+      continue;
+    }
+
+    seenTokens.add(subscription.token);
+    uniqueSubscriptions.push(subscription);
+  }
+
+  return uniqueSubscriptions;
 }
 
 async function readResponseJson(response: Response) {

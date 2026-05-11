@@ -118,6 +118,134 @@ describe("local push notifications", () => {
     expect(JSON.stringify(diagnostics.events)).not.toContain("Fix notifications");
   });
 
+  it("sends only one notification per Expo token when duplicate subscriptions exist", async () => {
+    const sent: unknown[][] = [];
+    const diagnostics = createMemoryDiagnostics();
+    const pushService = createLocalMobilePushService(
+      {
+        listPushSubscriptions: async () => [
+          {
+            deviceId: "phone_first",
+            id: "push_first",
+            lastSeenAt: "2026-05-10T12:00:00.000Z",
+            platform: "ios",
+            provider: "expo",
+            registeredAt: "2026-05-10T12:00:00.000Z",
+            token: "ExponentPushToken[duplicate]"
+          },
+          {
+            deviceId: "phone_second",
+            id: "push_second",
+            lastSeenAt: "2026-05-10T12:01:00.000Z",
+            platform: "ios",
+            provider: "expo",
+            registeredAt: "2026-05-10T12:01:00.000Z",
+            token: "ExponentPushToken[duplicate]"
+          },
+          {
+            deviceId: "phone_third",
+            id: "push_third",
+            lastSeenAt: "2026-05-10T12:02:00.000Z",
+            platform: "ios",
+            provider: "expo",
+            registeredAt: "2026-05-10T12:02:00.000Z",
+            token: "ExponentPushToken[other]"
+          }
+        ]
+      },
+      {
+        diagnostics,
+        soundPicker: () => "codex-done-1.wav",
+        transport: {
+          async send(messages) {
+            sent.push(messages);
+          }
+        }
+      }
+    );
+
+    await expect(
+      pushService.sendCodexThreadDone({
+        conversationId: "codex_thread_demo",
+        failed: false,
+        projectId: "codex_project_demo",
+        projectName: "Demo",
+        prompt: "Fix notifications",
+        source: "codex_app",
+        status: "approved",
+        turnId: "turn_1",
+        workspaceId: "local"
+      })
+    ).resolves.toBe(2);
+
+    expect(sent).toEqual([
+      [
+        expect.objectContaining({ to: "ExponentPushToken[duplicate]" }),
+        expect.objectContaining({ to: "ExponentPushToken[other]" })
+      ]
+    ]);
+    expect(diagnostics.events).toContainEqual(
+      expect.objectContaining({
+        duplicateSubscriptionCount: 1,
+        event: "push.send.success",
+        sentCount: 2,
+        subscriptionCount: 3
+      })
+    );
+    expect(JSON.stringify(diagnostics.events)).not.toContain("ExponentPushToken[duplicate]");
+    expect(JSON.stringify(diagnostics.events)).not.toContain("ExponentPushToken[other]");
+  });
+
+  it("does not resend a completed turn when its completion timestamp changes", async () => {
+    const pushed: string[] = [];
+    let states: LocalCodexCompletionState[] = [
+      completionState({
+        isComplete: false,
+        latestTurnId: "turn_1",
+        status: "running",
+        updatedAt: "2026-05-10T12:00:00.000Z"
+      })
+    ];
+    const notifier = createLocalCodexCompletionNotifier({
+      codex: {
+        async listCompletionStates() {
+          return states;
+        }
+      },
+      mobilePushService: {
+        async sendCodexThreadDone(input) {
+          pushed.push(`${input.conversationId}:${input.turnId}`);
+          return 1;
+        }
+      },
+      now: () => new Date("2026-05-10T12:00:30.000Z")
+    });
+
+    await notifier.pollOnce();
+    states = [
+      completionState({
+        isComplete: true,
+        latestTurnCompletedAt: "2026-05-10T12:01:00.000Z",
+        latestTurnId: "turn_1",
+        status: "approved",
+        updatedAt: "2026-05-10T12:01:00.000Z"
+      })
+    ];
+    await notifier.pollOnce();
+    states = [
+      completionState({
+        isComplete: true,
+        latestTurnCompletedAt: "2026-05-10T12:02:00.000Z",
+        latestTurnId: "turn_1",
+        status: "approved",
+        updatedAt: "2026-05-10T12:02:00.000Z"
+      })
+    ];
+    await notifier.pollOnce();
+
+    expect(pushed).toEqual(["codex_thread_demo:turn_1"]);
+  });
+
   it("does not send notifications for turns completed before the notifier starts", async () => {
     const sent: unknown[][] = [];
     const notifier = createLocalCodexCompletionNotifier({
