@@ -567,6 +567,16 @@ for (const expected of ["MODEL_SETTINGS_STORAGE_KEY", "modelSettings", "saveMode
     throw new Error(`Expected mobile store to persist Codex model settings: ${expected}`);
   }
 }
+for (const expected of [
+  "MODEL_SETTINGS_STORAGE_VERSION",
+  "serializeModelSettings",
+  "parsed.version !== MODEL_SETTINGS_STORAGE_VERSION",
+  "setModelSettings(DEFAULT_CODEX_MODEL_SETTINGS)"
+]) {
+  if (!mobileStore.includes(expected)) {
+    throw new Error(`Expected mobile store to reset legacy Codex model settings: ${expected}`);
+  }
+}
 
 for (const expected of [
   "listCodexModels",
@@ -583,7 +593,13 @@ const codexModelSettings = await readFile(
   join(process.cwd(), "src/codex-model-settings.ts"),
   "utf8"
 );
-for (const expected of ["Minimal", "X-High", "DEFAULT_CODEX_MODEL_SETTINGS"]) {
+for (const expected of [
+  "Minimal",
+  "X-High",
+  "DEFAULT_CODEX_MODEL_SETTINGS",
+  'model: "gpt-5.5"',
+  'effort: "high"'
+]) {
   if (!codexModelSettings.includes(expected)) {
     throw new Error(`Expected Codex model settings to include ${expected}`);
   }

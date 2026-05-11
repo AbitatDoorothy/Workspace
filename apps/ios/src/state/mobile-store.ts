@@ -7,6 +7,7 @@ import type { CodexMobileModelSettings, MobileBootstrap, PairingState } from "..
 
 const STORAGE_KEY = "abitat.mobile.pairing";
 const MODEL_SETTINGS_STORAGE_KEY = "abitat.mobile.modelSettings";
+const MODEL_SETTINGS_STORAGE_VERSION = 2;
 const DEFAULT_API_URL = "http://127.0.0.1:3901";
 const BOOTSTRAP_POLL_INTERVAL_MS = 5000;
 
@@ -27,7 +28,7 @@ export function useMobileStore() {
       SecureStore.getItemAsync(STORAGE_KEY),
       SecureStore.getItemAsync(MODEL_SETTINGS_STORAGE_KEY)
     ])
-      .then(([rawPairing, rawModelSettings]) => {
+      .then(async ([rawPairing, rawModelSettings]) => {
         if (cancelled) {
           return;
         }
@@ -41,6 +42,12 @@ export function useMobileStore() {
         const restoredModelSettings = parseModelSettings(rawModelSettings);
         if (restoredModelSettings) {
           setModelSettings(restoredModelSettings);
+        } else if (rawModelSettings) {
+          setModelSettings(DEFAULT_CODEX_MODEL_SETTINGS);
+          await SecureStore.setItemAsync(
+            MODEL_SETTINGS_STORAGE_KEY,
+            serializeModelSettings(DEFAULT_CODEX_MODEL_SETTINGS)
+          );
         }
       })
       .finally(() => {
@@ -111,7 +118,10 @@ export function useMobileStore() {
 
   const saveModelSettings = useCallback(async (nextModelSettings: CodexMobileModelSettings) => {
     setModelSettings(nextModelSettings);
-    await SecureStore.setItemAsync(MODEL_SETTINGS_STORAGE_KEY, JSON.stringify(nextModelSettings));
+    await SecureStore.setItemAsync(
+      MODEL_SETTINGS_STORAGE_KEY,
+      serializeModelSettings(nextModelSettings)
+    );
   }, []);
 
   return {
@@ -136,13 +146,17 @@ function parseModelSettings(raw: string | null): CodexMobileModelSettings | null
   }
 
   try {
-    const parsed = JSON.parse(raw) as { effort?: unknown; model?: unknown };
+    const parsed = JSON.parse(raw) as { effort?: unknown; model?: unknown; version?: unknown };
 
     if (typeof parsed.model !== "string" || !parsed.model.trim()) {
       return null;
     }
 
     if (!isCodexReasoningEffort(parsed.effort)) {
+      return null;
+    }
+
+    if (parsed.version !== MODEL_SETTINGS_STORAGE_VERSION) {
       return null;
     }
 
@@ -153,4 +167,12 @@ function parseModelSettings(raw: string | null): CodexMobileModelSettings | null
   } catch {
     return null;
   }
+}
+
+function serializeModelSettings(settings: CodexMobileModelSettings): string {
+  return JSON.stringify({
+    version: MODEL_SETTINGS_STORAGE_VERSION,
+    model: settings.model,
+    effort: settings.effort
+  });
 }

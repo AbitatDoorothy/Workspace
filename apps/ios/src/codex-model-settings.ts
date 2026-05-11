@@ -1,8 +1,8 @@
 import type { CodexMobileModelSettings, CodexModelOption, CodexReasoningEffort } from "./types";
 
 export const DEFAULT_CODEX_MODEL_SETTINGS: CodexMobileModelSettings = {
-  model: "gpt-5.3-codex",
-  effort: "medium"
+  model: "gpt-5.5",
+  effort: "high"
 };
 
 export const CODEX_REASONING_EFFORT_LABELS: Record<CodexReasoningEffort, string> = {
