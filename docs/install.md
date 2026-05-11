@@ -66,6 +66,26 @@ subscriptions in local Abitat state and sends Codex completion notifications dir
 Expo/APNs. This keeps completion sound/vibration alerts working when the iPhone app is backgrounded
 or closed, without storing push subscriptions in a hosted Abitat database.
 
+## Mobile-Control Diagnostics
+
+The Mac writes Abitat mobile-control diagnostics to:
+
+```text
+~/Library/Logs/Abitat/mobile-control.log
+```
+
+Follow it while reproducing a phone issue:
+
+```sh
+tail -f ~/Library/Logs/Abitat/mobile-control.log
+```
+
+This is the Abitat mobile-control diagnostics log, not the Codex desktop app log. It is local to the
+Mac and uses redacted JSON lines for pairing, authenticated and rejected mobile requests, relay
+state, Codex `thread/read` and `turn/start` calls, visible message counts, and push notification
+activity. Users can send it to support after reviewing and redacting anything they consider
+sensitive.
+
 ## Maintainer Release Check
 
 Before publishing, run:

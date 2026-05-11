@@ -249,8 +249,14 @@ Suggested local storage:
   config.json
   state.sqlite
   attachments/
-  logs/
+
+~/Library/Logs/Abitat/
+  mobile-control.log
 ```
+
+`mobile-control.log` is the Mac-side Abitat mobile-control diagnostics log, not the Codex desktop app
+log. It should remain local by default and use redacted JSON lines that can be tailed or shared for
+support after user review.
 
 iPhone state:
 

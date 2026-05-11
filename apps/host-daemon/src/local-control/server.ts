@@ -15,6 +15,13 @@ import {
   type LocalControlTransport,
   type LocalPairedDevice
 } from "./state.js";
+import {
+  attachmentDiagnostics,
+  errorDiagnostics,
+  logDiagnostics,
+  promptDiagnostics,
+  type MobileControlDiagnosticsLogger
+} from "./diagnostics-log.js";
 
 export interface LocalCodexProjectSummary {
   id: string;
@@ -111,6 +118,7 @@ interface StartLocalControlServerInput {
   attachmentDirectory?: string;
   bindHost: string;
   codex: LocalCodexBridge;
+  diagnostics?: MobileControlDiagnosticsLogger;
   endpoint: string;
   port: number;
   store: LocalControlStore;
@@ -143,21 +151,24 @@ const LOCAL_WORKSPACE_ID = "local";
 
 export async function startLocalControlServer(input: StartLocalControlServerInput) {
   const identity = await input.store.getMacIdentity();
+  const diagnostics = input.diagnostics;
   const sessions = new Map<string, RemoteSession>();
   const signals: RemoteSignal[] = [];
   let endpoint = input.endpoint;
 
   const server = createServer(async (request, response) => {
+    const method = request.method ?? "GET";
+    let path = "/";
     try {
-      if (request.method === "OPTIONS") {
+      if (method === "OPTIONS") {
         writeJson(response, 204, null);
         return;
       }
 
       const url = new URL(request.url ?? "/", endpoint);
-      const path = normalizePath(url.pathname);
+      path = normalizePath(url.pathname);
 
-      if (request.method === "GET" && path === "/health") {
+      if (method === "GET" && path === "/health") {
         const codex = await input.codex.bootstrap().catch((error: unknown) => ({
           available: false,
           error: errorMessage(error)
@@ -175,24 +186,66 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       }
 
       if (
-        request.method === "POST" &&
+        method === "POST" &&
         (path === "/pairing/consume" || path === "/api/mobile/pairing/complete")
       ) {
         const body = await readJson(request);
-        const pairing = await input.store.consumePairing({
-          code: stringValue(body.code),
-          deviceName: stringValue(body.deviceName) || "iPhone",
-          manualCode: stringValue(body.manualCode),
-          pairingSecret: stringValue(body.pairingSecret),
-          platform: stringValue(body.platform) || "ios"
+        let pairing: Awaited<ReturnType<LocalControlStore["consumePairing"]>>;
+        try {
+          pairing = await input.store.consumePairing({
+            code: stringValue(body.code),
+            deviceName: stringValue(body.deviceName) || "iPhone",
+            manualCode: stringValue(body.manualCode),
+            pairingSecret: stringValue(body.pairingSecret),
+            platform: stringValue(body.platform) || "ios"
+          });
+        } catch (error) {
+          const message = errorMessage(error);
+          logDiagnostics(
+            diagnostics,
+            "warn",
+            message.includes("expired") ? "pairing.expired" : "pairing.rejected",
+            {
+              error: message,
+              hasManualCode: Boolean(stringValue(body.manualCode) || stringValue(body.code)),
+              hasPairingSecret: Boolean(stringValue(body.pairingSecret)),
+              method,
+              path,
+              platform: stringValue(body.platform) || "ios"
+            }
+          );
+          throw error;
+        }
+        logDiagnostics(diagnostics, "info", "pairing.consumed", {
+          deviceId: pairing.machineId,
+          hostMachineId: pairing.hostMachineId,
+          method,
+          path,
+          platform: stringValue(body.platform) || "ios",
+          workspaceId: pairing.workspaceId
         });
         writeJson(response, 201, pairing);
         return;
       }
 
-      const actor = await requireMobileDevice(request, input.store);
+      const actor = await requireMobileDevice(request, input.store).catch((error: unknown) => {
+        logDiagnostics(diagnostics, "warn", "mobile_request.rejected", {
+          error: errorDiagnostics(error),
+          hasAuthorization: hasAuthorizationHeader(request),
+          method,
+          path,
+          status: statusCode(error)
+        });
+        throw error;
+      });
+      logDiagnostics(diagnostics, "info", "mobile_request.authenticated", {
+        deviceId: actor.id,
+        method,
+        path,
+        platform: actor.platform
+      });
 
-      if (request.method === "GET" && (path === "/me" || path === "/api/mobile/bootstrap")) {
+      if (method === "GET" && (path === "/me" || path === "/api/mobile/bootstrap")) {
         writeJson(response, 200, {
           workspace: { id: LOCAL_WORKSPACE_ID, name: `${identity.macName} Local` },
           phone: {
@@ -209,22 +262,32 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
         return;
       }
 
-      if (request.method === "GET" && path === "/api/mobile/projects") {
-        writeJson(response, 200, { projects: await input.codex.listProjects() });
+      if (method === "GET" && path === "/api/mobile/projects") {
+        const projects = await input.codex.listProjects();
+        logDiagnostics(diagnostics, "info", "projects.list.result", {
+          count: projects.length,
+          deviceId: actor.id
+        });
+        writeJson(response, 200, { projects });
         return;
       }
 
-      if (request.method === "GET" && path === "/api/mobile/codex/models") {
+      if (method === "GET" && path === "/api/mobile/codex/models") {
         writeJson(response, 200, { models: await input.codex.listModelOptions() });
         return;
       }
 
-      if (request.method === "GET" && path === "/api/mobile/codex/completions") {
-        writeJson(response, 200, { completions: await input.codex.listCompletionStates() });
+      if (method === "GET" && path === "/api/mobile/codex/completions") {
+        const completions = await input.codex.listCompletionStates();
+        logDiagnostics(diagnostics, "info", "completion.states.list.result", {
+          count: completions.length,
+          deviceId: actor.id
+        });
+        writeJson(response, 200, { completions });
         return;
       }
 
-      if (request.method === "POST" && path === "/api/mobile/notifications/register") {
+      if (method === "POST" && path === "/api/mobile/notifications/register") {
         const body = await readJson(request);
         const subscription = await input.store.registerPushSubscription(actor.id, {
           platform: stringValue(body.platform) || "ios",
@@ -238,11 +301,21 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
             provider: subscription.provider
           }
         });
+        logDiagnostics(diagnostics, "info", "push.register.result", {
+          deviceId: actor.id,
+          platform: subscription.platform,
+          provider: subscription.provider
+        });
         return;
       }
 
-      if (request.method === "POST" && path === "/api/mobile/notifications/diagnostics") {
-        await readJson(request);
+      if (method === "POST" && path === "/api/mobile/notifications/diagnostics") {
+        const body = await readJson(request);
+        logDiagnostics(diagnostics, "warn", "push.registration.diagnostic", {
+          deviceId: actor.id,
+          message: stringValue(body.message),
+          stage: stringValue(body.stage)
+        });
         writeJson(response, 200, { ok: true });
         return;
       }
@@ -251,43 +324,101 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
         path,
         "/api/mobile/projects/:projectId/conversations"
       );
-      if (projectConversationsMatch && request.method === "GET") {
-        writeJson(response, 200, {
-          conversations: await input.codex.listProjectConversations(
-            projectConversationsMatch.projectId
-          )
+      if (projectConversationsMatch && method === "GET") {
+        const conversations = await input.codex.listProjectConversations(
+          projectConversationsMatch.projectId
+        );
+        logDiagnostics(diagnostics, "info", "conversations.list.result", {
+          count: conversations.length,
+          deviceId: actor.id,
+          projectId: projectConversationsMatch.projectId
         });
+        writeJson(response, 200, { conversations });
         return;
       }
 
-      if (projectConversationsMatch && request.method === "POST") {
+      if (projectConversationsMatch && method === "POST") {
         const body = await readJson(request);
-        const started = await input.codex.startConversation(projectConversationsMatch.projectId, {
-          attachments: attachmentReferences(body.attachments),
-          modelSettings: modelSettings(body),
-          prompt: requiredPrompt(body)
+        const attachments = attachmentReferences(body.attachments);
+        const prompt = requiredPrompt(body);
+        logDiagnostics(diagnostics, "info", "conversation.start.request", {
+          ...promptDiagnostics(prompt),
+          ...attachmentDiagnostics(attachments),
+          deviceId: actor.id,
+          model: stringValue(body.model) || undefined,
+          projectId: projectConversationsMatch.projectId
+        });
+        let started: Awaited<ReturnType<LocalCodexBridge["startConversation"]>>;
+        try {
+          started = await input.codex.startConversation(projectConversationsMatch.projectId, {
+            attachments,
+            modelSettings: modelSettings(body),
+            prompt
+          });
+        } catch (error) {
+          const status = statusCode(error);
+          logDiagnostics(diagnostics, "error", "conversation.start.failure", {
+            error: errorDiagnostics(error),
+            projectId: projectConversationsMatch.projectId,
+            status
+          });
+          throw error;
+        }
+        logDiagnostics(diagnostics, "info", "conversation.start.result", {
+          conversationId: started.conversationId,
+          projectId: projectConversationsMatch.projectId,
+          status: started.status
         });
         writeJson(response, 201, started);
         return;
       }
 
       const messageMatch = matchPath(path, "/api/mobile/conversations/:conversationId/messages");
-      if (messageMatch && request.method === "GET") {
+      if (messageMatch && method === "GET") {
         const afterSequence = numberQuery(url.searchParams.get("afterSequence"));
         const includeRuntime = url.searchParams.get("includeRuntime") === "true";
+        const messages = await input.codex.listMessages(messageMatch.conversationId, {
+          afterSequence,
+          includeRuntime
+        });
+        logDiagnostics(diagnostics, "info", "messages.list.result", {
+          ...messageCounts(messages),
+          afterSequence,
+          conversationId: messageMatch.conversationId,
+          includeRuntime,
+          returned: messages.length
+        });
         writeJson(response, 200, {
-          messages: await input.codex.listMessages(messageMatch.conversationId, {
-            afterSequence,
-            includeRuntime
-          })
+          messages
         });
         return;
       }
 
-      if (messageMatch && request.method === "POST") {
+      if (messageMatch && method === "POST") {
         const body = await readJson(request);
-        const continued = await input.codex.continueConversation(messageMatch.conversationId, {
-          prompt: stringValue(body.content) || requiredPrompt(body)
+        const prompt = stringValue(body.content) || requiredPrompt(body);
+        logDiagnostics(diagnostics, "info", "conversation.continue.request", {
+          ...promptDiagnostics(prompt),
+          conversationId: messageMatch.conversationId,
+          deviceId: actor.id
+        });
+        let continued: Awaited<ReturnType<LocalCodexBridge["continueConversation"]>>;
+        try {
+          continued = await input.codex.continueConversation(messageMatch.conversationId, {
+            prompt
+          });
+        } catch (error) {
+          const status = statusCode(error);
+          logDiagnostics(diagnostics, "error", "conversation.continue.failure", {
+            conversationId: messageMatch.conversationId,
+            error: errorDiagnostics(error),
+            status
+          });
+          throw error;
+        }
+        logDiagnostics(diagnostics, "info", "conversation.continue.result", {
+          conversationId: continued.conversationId,
+          status: continued.status
         });
         const messages = await input.codex.listMessages(continued.conversationId);
         writeJson(response, 201, { message: messages.at(-1) ?? null });
@@ -295,27 +426,57 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       }
 
       const continueMatch = matchPath(path, "/api/mobile/conversations/:conversationId/continue");
-      if (continueMatch && request.method === "POST") {
+      if (continueMatch && method === "POST") {
         const body = await readJson(request);
-        const continued = await input.codex.continueConversation(continueMatch.conversationId, {
-          attachments: attachmentReferences(body.attachments),
-          modelSettings: modelSettings(body),
-          prompt: requiredPrompt(body)
+        const attachments = attachmentReferences(body.attachments);
+        const prompt = requiredPrompt(body);
+        logDiagnostics(diagnostics, "info", "conversation.continue.request", {
+          ...promptDiagnostics(prompt),
+          ...attachmentDiagnostics(attachments),
+          conversationId: continueMatch.conversationId,
+          deviceId: actor.id,
+          model: stringValue(body.model) || undefined
+        });
+        let continued: Awaited<ReturnType<LocalCodexBridge["continueConversation"]>>;
+        try {
+          continued = await input.codex.continueConversation(continueMatch.conversationId, {
+            attachments,
+            modelSettings: modelSettings(body),
+            prompt
+          });
+        } catch (error) {
+          const status = statusCode(error);
+          logDiagnostics(diagnostics, "error", "conversation.continue.failure", {
+            conversationId: continueMatch.conversationId,
+            error: errorDiagnostics(error),
+            status
+          });
+          throw error;
+        }
+        logDiagnostics(diagnostics, "info", "conversation.continue.result", {
+          conversationId: continued.conversationId,
+          status: continued.status
         });
         writeJson(response, 200, continued);
         return;
       }
 
-      if (request.method === "POST" && path === "/api/mobile/attachments") {
+      if (method === "POST" && path === "/api/mobile/attachments") {
         const attachment = await saveAttachment(
           input.attachmentDirectory ?? defaultLocalAttachmentDirectory(),
           await readJson(request)
         );
+        logDiagnostics(diagnostics, "info", "attachment.saved", {
+          deviceId: actor.id,
+          kind: attachment.kind,
+          mimeType: attachment.mimeType,
+          size: attachment.size
+        });
         writeJson(response, 201, { attachment });
         return;
       }
 
-      if (request.method === "GET" && path === "/remote-control/status") {
+      if (method === "GET" && path === "/remote-control/status") {
         writeJson(response, 200, {
           sessions: Array.from(sessions.values()).filter(
             (session) => session.clientMachineId === actor.id
@@ -325,7 +486,7 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       }
 
       if (
-        request.method === "GET" &&
+        method === "GET" &&
         (path === "/api/remote-control/sessions" || path === "/remote-control/sessions")
       ) {
         writeJson(response, 200, {
@@ -337,7 +498,7 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       }
 
       if (
-        request.method === "POST" &&
+        method === "POST" &&
         (path === "/api/remote-control/sessions" || path === "/remote-control/start")
       ) {
         const body = await readJson(request);
@@ -365,7 +526,7 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       }
 
       const remoteSessionMatch = matchPath(path, "/api/remote-control/sessions/:sessionId");
-      if (remoteSessionMatch && request.method === "DELETE") {
+      if (remoteSessionMatch && method === "DELETE") {
         const session = requireRemoteSession(sessions, remoteSessionMatch.sessionId, actor.id);
         const ended = { ...session, status: "ended" as const, updatedAt: new Date().toISOString() };
         sessions.set(session.id, ended);
@@ -374,7 +535,7 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       }
 
       const signalMatch = matchPath(path, "/api/remote-control/sessions/:sessionId/signals");
-      if (signalMatch && request.method === "GET") {
+      if (signalMatch && method === "GET") {
         requireRemoteSession(sessions, signalMatch.sessionId, actor.id);
         writeJson(response, 200, {
           signals: signals.filter(
@@ -387,8 +548,8 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       }
 
       if (
-        (signalMatch && request.method === "POST") ||
-        (path === "/remote-control/input" && request.method === "POST")
+        (signalMatch && method === "POST") ||
+        (path === "/remote-control/input" && method === "POST")
       ) {
         const body = await readJson(request);
         const sessionId = signalMatch?.sessionId ?? stringValue(body.sessionId);
@@ -410,6 +571,14 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       writeJson(response, 404, { error: "Not found" });
     } catch (error) {
       const status = statusCode(error);
+      if (status >= 500) {
+        logDiagnostics(diagnostics, "error", "mobile_request.failure", {
+          error: errorDiagnostics(error),
+          method,
+          path,
+          status
+        });
+      }
       writeJson(response, status, { error: errorMessage(error) });
     }
   });
@@ -422,6 +591,12 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       if (address && typeof address === "object" && input.endpoint.endsWith(":0")) {
         endpoint = input.endpoint.replace(/:0$/u, `:${address.port}`);
       }
+      logDiagnostics(diagnostics, "info", "local_control.server_start", {
+        bindHost: input.bindHost,
+        endpoint,
+        port: address && typeof address === "object" ? address.port : input.port,
+        transport: input.transport
+      });
       resolve();
     });
   });
@@ -450,6 +625,10 @@ async function requireMobileDevice(request: IncomingMessage, store: LocalControl
       statusCode: 401
     });
   }
+}
+
+function hasAuthorizationHeader(request: IncomingMessage) {
+  return typeof request.headers.authorization === "string" && request.headers.authorization !== "";
 }
 
 function requireRemoteSession(
@@ -600,6 +779,29 @@ function numberQuery(value: string | null) {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function messageCounts(messages: LocalCodexMessage[]) {
+  const counts = {
+    assistant: 0,
+    runtime: 0,
+    user: 0,
+    visible: 0
+  };
+
+  for (const message of messages) {
+    if (message.role === "assistant") {
+      counts.assistant += 1;
+      counts.visible += 1;
+    } else if (message.role === "user") {
+      counts.user += 1;
+      counts.visible += 1;
+    } else if (message.role === "runtime") {
+      counts.runtime += 1;
+    }
+  }
+
+  return counts;
 }
 
 function statusCode(error: unknown) {

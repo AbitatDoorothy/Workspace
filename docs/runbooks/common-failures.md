@@ -8,6 +8,19 @@ Confirm the host daemon is running and paired. The daemon polls `/api/daemon/job
 
 Run the host tool scan by restarting the paired daemon. The agent UI warns when a selected real runtime is missing from the host scan.
 
+## iPhone Gets Completion Notification But No Reply Appears
+
+On the Mac running `abitat iphone`, inspect the Abitat mobile-control diagnostics log:
+
+```sh
+tail -f ~/Library/Logs/Abitat/mobile-control.log
+```
+
+This log is separate from the Codex desktop app log. It records redacted JSON lines for the local
+control server, pairing, relay reconnects, mobile request auth, Codex `thread/read` and `turn/start`
+calls, message-list counts, unknown Codex item types, completion polling, and push notification
+send/skip/failure decisions. Ask the user to review the file before sharing it with support.
+
 ## Push Fails
 
 Check git credentials in the daemon shell. The daemon commits locally first, then runs `git push -u origin <branch>`. Authentication failures mark the conversation failed.

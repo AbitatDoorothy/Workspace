@@ -11,6 +11,11 @@ import { collectChangeset } from "../git/changeset.js";
 import { branchNameForConversation, resolveRepoPath } from "../git/paths.js";
 import { createLocalCodexBridge } from "../local-control/codex-bridge.js";
 import {
+  createMobileControlDiagnosticsLogger,
+  logDiagnostics,
+  mobileControlDiagnosticsLogPath
+} from "../local-control/diagnostics-log.js";
+import {
   createLocalCodexCompletionNotifier,
   createLocalMobilePushService
 } from "../local-control/push-notifications.js";
@@ -102,6 +107,8 @@ async function startIphoneControl(args: string[]) {
     readOption(args, "--codex-server-url") ??
     process.env.CODEX_APP_SERVER_URL ??
     "ws://127.0.0.1:47777";
+  const diagnosticsLogPath = mobileControlDiagnosticsLogPath();
+  const diagnostics = createMobileControlDiagnosticsLogger({ logPath: diagnosticsLogPath });
   const transport = await resolveLocalControlTransport({
     endpoint,
     port,
@@ -110,10 +117,11 @@ async function startIphoneControl(args: string[]) {
   });
   const store = createLocalControlStore();
   const relayId = transport.transport === "relay" ? await store.getRelayId() : undefined;
-  const codex = createLocalCodexBridge({ serverUrl: codexServerUrl });
+  const codex = createLocalCodexBridge({ diagnostics, serverUrl: codexServerUrl });
   const server = await startLocalControlServer({
     bindHost: transport.bindHost,
     codex,
+    diagnostics,
     endpoint: transport.endpoint,
     port,
     store,
@@ -138,8 +146,9 @@ async function startIphoneControl(args: string[]) {
   };
   stopCompletionNotifier = createLocalCodexCompletionNotifier({
     codex,
+    diagnostics,
     logger: console,
-    mobilePushService: createLocalMobilePushService(store, { logger: console })
+    mobilePushService: createLocalMobilePushService(store, { diagnostics, logger: console })
   }).start();
 
   if (!endpoint && transport.transport === "relay") {
@@ -148,6 +157,7 @@ async function startIphoneControl(args: string[]) {
     }
     console.log(`Connecting this Mac to Abitat relay at ${transport.relayEndpoint}...`);
     relayClient = startRelayClient({
+      diagnostics,
       localEndpoint: localServerEndpoint(port),
       relayEndpoint: transport.relayEndpoint,
       relayId,
@@ -234,6 +244,13 @@ async function startIphoneControl(args: string[]) {
     relayId,
     transport: pairingTransport
   });
+  logDiagnostics(diagnostics, "info", "pairing.created", {
+    endpoint: publicEndpoint,
+    expiresAt: pairing.expiresAt,
+    macId: pairing.macId,
+    relayId,
+    transport: pairingTransport
+  });
   const qrPayload = JSON.stringify(pairing);
 
   console.log("Abitat local iPhone control");
@@ -243,6 +260,7 @@ async function startIphoneControl(args: string[]) {
     console.log(`localEndpoint=${server.endpoint}`);
   }
   console.log(`transport=${pairingTransport}`);
+  console.log(`diagnosticsLog=${diagnosticsLogPath}`);
   if (relayId) {
     console.log(`relayId=${relayId}`);
   }

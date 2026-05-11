@@ -17,6 +17,7 @@ import {
   handleRelayRequest,
   handleRelaySocketMessage
 } from "../src/local-control/relay-client";
+import type { MobileControlDiagnosticsLogger } from "../src/local-control/diagnostics-log";
 import { createLocalControlStore, hashLocalControlToken } from "../src/local-control/state";
 
 describe("local relay client", () => {
@@ -24,6 +25,7 @@ describe("local relay client", () => {
     let now = 1_000;
     const scheduled: Array<() => void> = [];
     const clearedTimers: number[] = [];
+    const diagnostics = createMemoryDiagnostics();
     const socket = {
       closed: false,
       readyState: 1,
@@ -38,6 +40,8 @@ describe("local relay client", () => {
     };
     const controller = createRelayHeartbeatController({
       clearIntervalFn: (timer) => clearedTimers.push(timer as number),
+      diagnostics,
+      diagnosticsMetadata: { relayId: "relay_test" },
       heartbeatIntervalMs: 10_000,
       now: () => now,
       setIntervalFn: (callback) => {
@@ -57,6 +61,12 @@ describe("local relay client", () => {
     scheduled[0]?.();
 
     expect(socket.closed).toBe(true);
+    expect(diagnostics.events).toContainEqual(
+      expect.objectContaining({
+        event: "relay.heartbeat.stale",
+        relayId: "relay_test"
+      })
+    );
     controller.stop();
     expect(clearedTimers).toContain(1);
   });
@@ -276,3 +286,15 @@ describe("local relay client", () => {
     ).rejects.toThrow("Relay request has already been processed");
   });
 });
+
+function createMemoryDiagnostics() {
+  const events: Array<Record<string, unknown>> = [];
+  const logger: MobileControlDiagnosticsLogger & { events: Array<Record<string, unknown>> } = {
+    events,
+    log(level, event, fields = {}) {
+      events.push({ event, level, ...fields });
+    }
+  };
+
+  return logger;
+}

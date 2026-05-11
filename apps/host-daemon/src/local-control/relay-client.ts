@@ -10,6 +10,11 @@ import {
   type RelayPlainRequest
 } from "@abitat_reece/shared";
 
+import {
+  errorDiagnostics,
+  logDiagnostics,
+  type MobileControlDiagnosticsLogger
+} from "./diagnostics-log.js";
 import type { LocalControlStore } from "./state.js";
 
 interface RelayKeyMaterial {
@@ -32,6 +37,7 @@ interface HandleRelayRequestInput {
 }
 
 interface StartRelayClientInput {
+  diagnostics?: MobileControlDiagnosticsLogger;
   fetch?: typeof fetch;
   heartbeatIntervalMs?: number;
   heartbeatStaleMs?: number;
@@ -57,6 +63,8 @@ interface RelayHostErrorMessage {
 
 interface RelayHeartbeatControllerInput {
   clearIntervalFn?: (timer: ReturnType<typeof setInterval>) => void;
+  diagnostics?: MobileControlDiagnosticsLogger;
+  diagnosticsMetadata?: Record<string, unknown>;
   heartbeatIntervalMs?: number;
   now?: () => number;
   onStale?: () => void;
@@ -115,6 +123,10 @@ export function startRelayClient(input: StartRelayClientInput) {
     }
 
     const url = relayWebSocketUrl(input.relayEndpoint, input.relayId);
+    logDiagnostics(input.diagnostics, "info", "relay.connect.attempt", {
+      relayEndpoint: input.relayEndpoint,
+      relayId: input.relayId
+    });
     const activeSocket = new WebSocket(url);
     socket = activeSocket;
     activeSocket.on("open", () => {
@@ -122,12 +134,18 @@ export function startRelayClient(input: StartRelayClientInput) {
         return;
       }
 
+      logDiagnostics(input.diagnostics, "info", "relay.connect.open", {
+        relayEndpoint: input.relayEndpoint,
+        relayId: input.relayId
+      });
       heartbeat?.stop();
       heartbeat = createRelayHeartbeatController({
+        diagnostics: input.diagnostics,
+        diagnosticsMetadata: { relayId: input.relayId },
         heartbeatIntervalMs: input.heartbeatIntervalMs,
         onStale: () => {
           if (socket === activeSocket) {
-            scheduleReconnect();
+            scheduleReconnect("stale_heartbeat");
           }
         },
         socket: activeSocket,
@@ -159,20 +177,32 @@ export function startRelayClient(input: StartRelayClientInput) {
         return;
       }
 
+      logDiagnostics(input.diagnostics, "warn", "relay.connect.closed", {
+        relayId: input.relayId
+      });
       heartbeat?.stop();
       heartbeat = null;
       socket = null;
-      scheduleReconnect();
+      scheduleReconnect("socket_closed");
     });
-    activeSocket.on("error", () => {
+    activeSocket.on("error", (error) => {
+      logDiagnostics(input.diagnostics, "warn", "relay.connect.error", {
+        error: errorDiagnostics(error),
+        relayId: input.relayId
+      });
       activeSocket.close();
     });
   };
 
-  const scheduleReconnect = () => {
+  const scheduleReconnect = (reason: string) => {
     if (stopped || reconnectTimer) {
       return;
     }
+    logDiagnostics(input.diagnostics, "info", "relay.reconnect.scheduled", {
+      delayMs: input.reconnectIntervalMs ?? 2_000,
+      reason,
+      relayId: input.relayId
+    });
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       connect();
@@ -211,6 +241,11 @@ export function createRelayHeartbeatController(input: RelayHeartbeatControllerIn
     }
 
     if (now() - lastHeartbeatAckAt > staleAfterMs) {
+      logDiagnostics(input.diagnostics, "warn", "relay.heartbeat.stale", {
+        ...input.diagnosticsMetadata,
+        msSinceLastAck: now() - lastHeartbeatAckAt,
+        staleAfterMs
+      });
       stop();
       if (typeof input.socket.terminate === "function") {
         input.socket.terminate();

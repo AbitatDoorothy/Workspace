@@ -18,6 +18,13 @@ import type {
   LocalCodexMessage,
   LocalCodexProjectSummary
 } from "./server.js";
+import {
+  attachmentDiagnostics,
+  errorDiagnostics,
+  logDiagnostics,
+  promptDiagnostics,
+  type MobileControlDiagnosticsLogger
+} from "./diagnostics-log.js";
 
 const CODEX_PROJECT_PREFIX = "codex_project_";
 const CODEX_THREAD_PREFIX = "codex_thread_";
@@ -27,6 +34,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const START_TIMEOUT_MS = 15_000;
 const TURN_KEEPALIVE_TIMEOUT_MS = 30 * 60_000;
 const MAX_CODEX_MESSAGE_CONTENT_LENGTH = 12_000;
+const HIDDEN_CODEX_ITEM_TYPES = new Set(["reasoning"]);
 const PHONE_FULL_ACCESS_TURN_OPTIONS = {
   approvalPolicy: "never",
   sandboxPolicy: { type: "dangerFullAccess" }
@@ -37,6 +45,7 @@ let nextRequestId = 1;
 const activeTurnKeepAlives = new Set<Promise<void>>();
 
 interface CreateLocalCodexBridgeOptions {
+  diagnostics?: MobileControlDiagnosticsLogger;
   serverUrl?: string;
   codexBinaryPath?: string;
   workspaceId?: string;
@@ -137,6 +146,7 @@ export function createLocalCodexBridge(
   options: CreateLocalCodexBridgeOptions = {}
 ): LocalCodexBridge {
   const client = createCodexAppClient(options);
+  const diagnostics = options.diagnostics;
   const workspaceId = options.workspaceId ?? "local";
   const userId = options.userId ?? "local";
 
@@ -203,8 +213,15 @@ export function createLocalCodexBridge(
     async bootstrap() {
       try {
         await client.listThreads({ limit: 1, useStateDbOnly: true });
+        logDiagnostics(diagnostics, "info", "codex.app_server.bootstrap", {
+          available: true
+        });
         return { available: true };
       } catch (error) {
+        logDiagnostics(diagnostics, "error", "codex.app_server.bootstrap_failure", {
+          available: false,
+          error: errorDiagnostics(error)
+        });
         return { available: false, error: errorMessage(error) };
       }
     },
@@ -235,6 +252,9 @@ export function createLocalCodexBridge(
 
     async listCompletionStates() {
       const threads = await readThreadsWithTurns(await listAllThreads());
+      logDiagnostics(diagnostics, "info", "completion.states.result", {
+        stateCount: threads.length
+      });
       return threads
         .sort((left, right) => right.updatedAt - left.updatedAt)
         .map((thread) => codexThreadToCompletionState(thread, workspaceId));
@@ -244,20 +264,34 @@ export function createLocalCodexBridge(
       const threadId = toCodexThreadId(conversationId);
       const messages = flattenThreadMessages(
         await client.readThread(threadId, true),
-        externalCodexConversationId(threadId)
+        externalCodexConversationId(threadId),
+        diagnostics
       );
       const filtered = messageOptions.includeRuntime
         ? messages
         : messages.filter((message) => message.role !== "runtime");
+      const returned =
+        typeof messageOptions.afterSequence === "number"
+          ? messageOptions.afterSequence >
+            filtered.reduce((max, message) => Math.max(max, message.sequence), 0)
+            ? filtered
+            : filtered.filter((message) => message.sequence > messageOptions.afterSequence!)
+          : filtered;
+
+      logDiagnostics(diagnostics, "info", "messages.list.bridge_result", {
+        ...messageCounts(messages),
+        afterSequence: messageOptions.afterSequence,
+        conversationId: externalCodexConversationId(threadId),
+        includeRuntime: messageOptions.includeRuntime === true,
+        returned: returned.length,
+        total: messages.length
+      });
 
       if (typeof messageOptions.afterSequence !== "number") {
-        return filtered;
+        return returned;
       }
 
-      const maxSequence = filtered.reduce((max, message) => Math.max(max, message.sequence), 0);
-      return messageOptions.afterSequence > maxSequence
-        ? filtered
-        : filtered.filter((message) => message.sequence > messageOptions.afterSequence!);
+      return returned;
     },
 
     listModelOptions() {
@@ -306,6 +340,7 @@ function createCodexAppClient(options: CreateLocalCodexBridgeOptions) {
   const serverUrl = options.serverUrl ?? process.env.CODEX_APP_SERVER_URL ?? DEFAULT_SERVER_URL;
   const codexBinaryPath =
     options.codexBinaryPath ?? process.env.CODEX_APP_BINARY ?? DEFAULT_CODEX_BINARY;
+  const diagnostics = options.diagnostics;
 
   return {
     listModels: async () => {
@@ -314,11 +349,17 @@ function createCodexAppClient(options: CreateLocalCodexBridgeOptions) {
 
       do {
         const response: { data: Array<Record<string, unknown>>; nextCursor: string | null } =
-          await callCodexApp(serverUrl, codexBinaryPath, "model/list", {
-            cursor,
-            includeHidden: false,
-            limit: 200
-          });
+          await callCodexApp(
+            serverUrl,
+            codexBinaryPath,
+            "model/list",
+            {
+              cursor,
+              includeHidden: false,
+              limit: 200
+            },
+            diagnostics
+          );
         models.push(...response.data.flatMap(normalizeCodexModel));
         cursor = response.nextCursor;
       } while (cursor);
@@ -327,43 +368,81 @@ function createCodexAppClient(options: CreateLocalCodexBridgeOptions) {
     },
 
     listThreads: (params: CodexAppThreadListParams = {}) =>
-      callCodexApp<CodexAppThreadListResponse>(serverUrl, codexBinaryPath, "thread/list", {
-        archived: false,
-        limit: 200,
-        sortDirection: "desc",
-        useStateDbOnly: true,
-        ...params
-      }),
-
-    async readThread(threadId: string, includeTurns = true) {
-      const response = await callCodexApp<{ thread: CodexAppThread }>(
+      callCodexApp<CodexAppThreadListResponse>(
         serverUrl,
         codexBinaryPath,
-        "thread/read",
-        { includeTurns, threadId }
-      );
-      return response.thread;
+        "thread/list",
+        {
+          archived: false,
+          limit: 200,
+          sortDirection: "desc",
+          useStateDbOnly: true,
+          ...params
+        },
+        diagnostics
+      ),
+
+    async readThread(threadId: string, includeTurns = true) {
+      logDiagnostics(diagnostics, "info", "codex.thread_read.call", {
+        includeTurns,
+        threadId
+      });
+      try {
+        const response = await callCodexApp<{ thread: CodexAppThread }>(
+          serverUrl,
+          codexBinaryPath,
+          "thread/read",
+          { includeTurns, threadId },
+          diagnostics
+        );
+        logDiagnostics(diagnostics, "info", "codex.thread_read.result", {
+          includeTurns,
+          threadId,
+          turnCount: response.thread.turns.length
+        });
+        return response.thread;
+      } catch (error) {
+        logDiagnostics(diagnostics, "error", "codex.thread_read.failure", {
+          error: errorDiagnostics(error),
+          includeTurns,
+          threadId
+        });
+        throw error;
+      }
     },
 
     resumeThread: (params: { excludeTurns?: boolean; threadId: string }) =>
-      callCodexApp<{ thread: CodexAppThread }>(serverUrl, codexBinaryPath, "thread/resume", params),
+      callCodexApp<{ thread: CodexAppThread }>(
+        serverUrl,
+        codexBinaryPath,
+        "thread/resume",
+        params,
+        diagnostics
+      ),
 
     startThread: (params: {
       cwd?: string | null;
       experimentalRawEvents?: boolean;
       persistExtendedHistory?: boolean;
     }) =>
-      callCodexApp<{ thread: CodexAppThread }>(serverUrl, codexBinaryPath, "thread/start", {
-        experimentalRawEvents: false,
-        persistExtendedHistory: true,
-        ...params
-      }),
+      callCodexApp<{ thread: CodexAppThread }>(
+        serverUrl,
+        codexBinaryPath,
+        "thread/start",
+        {
+          experimentalRawEvents: false,
+          persistExtendedHistory: true,
+          ...params
+        },
+        diagnostics
+      ),
 
     startTurn: (
       threadId: string,
       input: CodexAppUserInput[],
       turnOptions: CodexAppStartTurnOptions
-    ) => startTurnWithKeepAlive(serverUrl, codexBinaryPath, threadId, input, turnOptions)
+    ) =>
+      startTurnWithKeepAlive(serverUrl, codexBinaryPath, threadId, input, turnOptions, diagnostics)
   };
 }
 
@@ -371,7 +450,8 @@ async function callCodexApp<TResult>(
   serverUrl: string,
   codexBinaryPath: string,
   method: string,
-  params: unknown
+  params: unknown,
+  diagnostics?: MobileControlDiagnosticsLogger
 ): Promise<TResult> {
   try {
     return await callCodexAppOnce<TResult>(serverUrl, method, params);
@@ -380,7 +460,12 @@ async function callCodexApp<TResult>(
       throw error;
     }
 
-    await ensureLocalAppServer(serverUrl, codexBinaryPath);
+    logDiagnostics(diagnostics, "warn", "codex.app_server.connect_failure", {
+      error: errorDiagnostics(error),
+      method,
+      serverUrl
+    });
+    await ensureLocalAppServer(serverUrl, codexBinaryPath, diagnostics);
     return callCodexAppOnce<TResult>(serverUrl, method, params);
   }
 }
@@ -401,17 +486,54 @@ async function startTurnWithKeepAlive(
   codexBinaryPath: string,
   threadId: string,
   input: CodexAppUserInput[],
-  options: CodexAppStartTurnOptions
+  options: CodexAppStartTurnOptions,
+  diagnostics?: MobileControlDiagnosticsLogger
 ) {
+  logDiagnostics(diagnostics, "info", "codex.turn_start.call", {
+    ...turnInputDiagnostics(input),
+    cwd: options.cwd,
+    effort: options.effort,
+    model: options.model,
+    threadId
+  });
   try {
-    return await startTurnWithKeepAliveOnce(serverUrl, threadId, input, options);
+    const response = await startTurnWithKeepAliveOnce(serverUrl, threadId, input, options);
+    logDiagnostics(diagnostics, "info", "codex.turn_start.result", {
+      status: turnStatusType(response.turn),
+      threadId,
+      turnId: response.turn.id
+    });
+    return response;
   } catch (error) {
     if (!isConnectionFailure(error) || !canStartLocalServer(serverUrl)) {
+      logDiagnostics(diagnostics, "error", "codex.turn_start.failure", {
+        error: errorDiagnostics(error),
+        threadId
+      });
       throw error;
     }
 
-    await ensureLocalAppServer(serverUrl, codexBinaryPath);
-    return startTurnWithKeepAliveOnce(serverUrl, threadId, input, options);
+    logDiagnostics(diagnostics, "warn", "codex.app_server.connect_failure", {
+      error: errorDiagnostics(error),
+      method: "turn/start",
+      serverUrl
+    });
+    await ensureLocalAppServer(serverUrl, codexBinaryPath, diagnostics);
+    try {
+      const response = await startTurnWithKeepAliveOnce(serverUrl, threadId, input, options);
+      logDiagnostics(diagnostics, "info", "codex.turn_start.result", {
+        status: turnStatusType(response.turn),
+        threadId,
+        turnId: response.turn.id
+      });
+      return response;
+    } catch (retryError) {
+      logDiagnostics(diagnostics, "error", "codex.turn_start.failure", {
+        error: errorDiagnostics(retryError),
+        threadId
+      });
+      throw retryError;
+    }
   }
 }
 
@@ -630,8 +752,16 @@ function keepTurnConnectionAlive(connection: JsonRpcConnection, threadId: string
   void keepAlive;
 }
 
-async function ensureLocalAppServer(serverUrl: string, codexBinaryPath: string) {
+async function ensureLocalAppServer(
+  serverUrl: string,
+  codexBinaryPath: string,
+  diagnostics?: MobileControlDiagnosticsLogger
+) {
   if (!spawnedAppServer || spawnedAppServer.exitCode !== null || spawnedAppServer.killed) {
+    logDiagnostics(diagnostics, "info", "codex.app_server.bootstrap_start", {
+      codexBinaryPath,
+      serverUrl
+    });
     spawnedAppServer = spawn(
       codexBinaryPath,
       ["app-server", "--listen", serverUrl, "--analytics-default-enabled"],
@@ -646,11 +776,19 @@ async function ensureLocalAppServer(serverUrl: string, codexBinaryPath: string) 
   const startedAt = Date.now();
   while (Date.now() - startedAt < START_TIMEOUT_MS) {
     if (await canOpenWebSocket(serverUrl)) {
+      logDiagnostics(diagnostics, "info", "codex.app_server.bootstrap_connected", {
+        elapsedMs: Date.now() - startedAt,
+        serverUrl
+      });
       return;
     }
     await delay(250);
   }
 
+  logDiagnostics(diagnostics, "error", "codex.app_server.bootstrap_failure", {
+    elapsedMs: Date.now() - startedAt,
+    serverUrl
+  });
   throw new Error("Unable to start Codex app-server. Open Codex.app or set CODEX_APP_SERVER_URL.");
 }
 
@@ -757,18 +895,33 @@ function codexThreadToCompletionState(thread: CodexAppThread, workspaceId: strin
   };
 }
 
-function flattenThreadMessages(
+export function flattenThreadMessages(
   thread: CodexAppThread,
-  conversationId = externalCodexConversationId(thread.id)
+  conversationId = externalCodexConversationId(thread.id),
+  diagnostics?: MobileControlDiagnosticsLogger
 ): LocalCodexMessage[] {
   const messages: LocalCodexMessage[] = [];
   const itemOccurrences = new Map<string, number>();
+  const itemTypeCounts = new Map<string, number>();
+  const unknownItemTypes = new Set<string>();
+  const assistantMessagesByTurn = new Map<string, number>();
   let sequence = 1;
 
   for (const turn of thread.turns) {
     for (const [itemIndex, item] of turn.items.entries()) {
+      itemTypeCounts.set(item.type, (itemTypeCounts.get(item.type) ?? 0) + 1);
       const flattened = threadItemToMessageContent(item);
       if (!flattened) {
+        if (!HIDDEN_CODEX_ITEM_TYPES.has(item.type) && !isKnownCodexItemType(item.type)) {
+          unknownItemTypes.add(item.type);
+          logDiagnostics(diagnostics, "warn", "codex.thread_item.unknown", {
+            codexItemId: item.id,
+            codexItemType: item.type,
+            conversationId,
+            threadId: thread.id,
+            turnId: turn.id
+          });
+        }
         continue;
       }
 
@@ -795,9 +948,31 @@ function flattenThreadMessages(
         sequence,
         sourceDeviceId: null
       });
+      if (flattened.role === "assistant") {
+        assistantMessagesByTurn.set(turn.id, (assistantMessagesByTurn.get(turn.id) ?? 0) + 1);
+      }
       sequence += 1;
     }
+
+    if (isTurnCompleted(turn) && (assistantMessagesByTurn.get(turn.id) ?? 0) === 0) {
+      logDiagnostics(diagnostics, "warn", "codex.turn.completed_without_visible_assistant", {
+        conversationId,
+        itemTypeCounts: Object.fromEntries(itemTypeCounts.entries()),
+        threadId: thread.id,
+        turnId: turn.id,
+        unknownItemTypes: [...unknownItemTypes]
+      });
+    }
   }
+
+  logDiagnostics(diagnostics, "info", "codex.thread.messages_flattened", {
+    ...messageCounts(messages),
+    conversationId,
+    itemTypeCounts: Object.fromEntries(itemTypeCounts.entries()),
+    threadId: thread.id,
+    total: messages.length,
+    unknownItemTypes: [...unknownItemTypes]
+  });
 
   return messages;
 }
@@ -890,6 +1065,50 @@ function threadItemToMessageContent(
   }
 
   return null;
+}
+
+function isKnownCodexItemType(type: string) {
+  return (
+    type === "userMessage" ||
+    type === "agentMessage" ||
+    type === "plan" ||
+    type === "commandExecution" ||
+    type === "fileChange" ||
+    HIDDEN_CODEX_ITEM_TYPES.has(type)
+  );
+}
+
+function messageCounts(messages: LocalCodexMessage[]) {
+  const counts = {
+    assistant: 0,
+    runtime: 0,
+    user: 0,
+    visible: 0
+  };
+
+  for (const message of messages) {
+    if (message.role === "assistant") {
+      counts.assistant += 1;
+      counts.visible += 1;
+    } else if (message.role === "user") {
+      counts.user += 1;
+      counts.visible += 1;
+    } else if (message.role === "runtime") {
+      counts.runtime += 1;
+    }
+  }
+
+  return counts;
+}
+
+function turnInputDiagnostics(input: CodexAppUserInput[]) {
+  const text = input.flatMap((item) => (item.type === "text" ? [item.text] : [])).join("\n");
+  const attachments = input.filter((item) => item.type !== "text");
+
+  return {
+    ...promptDiagnostics(text),
+    ...attachmentDiagnostics(attachments)
+  };
 }
 
 function userInput(

@@ -1,5 +1,10 @@
 import type { LocalCodexCompletionState } from "./server.js";
 import type { LocalPushSubscription } from "./state.js";
+import {
+  errorDiagnostics,
+  logDiagnostics,
+  type MobileControlDiagnosticsLogger
+} from "./diagnostics-log.js";
 
 const EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
 const DEFAULT_COMPLETION_POLL_INTERVAL_MS = 5_000;
@@ -44,6 +49,7 @@ interface LocalCompletionPushService {
 
 interface LocalCompletionNotifierOptions {
   codex: LocalCompletionCodex;
+  diagnostics?: MobileControlDiagnosticsLogger;
   intervalMs?: number;
   logger?: Pick<Console, "info" | "warn">;
   mobilePushService: LocalCompletionPushService;
@@ -67,6 +73,7 @@ export const CODEX_COMPLETION_NOTIFICATION_SOUNDS = [
 export function createLocalMobilePushService(
   subscriptionStore: LocalPushSubscriptionStore,
   options: {
+    diagnostics?: MobileControlDiagnosticsLogger;
     logger?: Pick<Console, "info" | "warn">;
     soundPicker?: () => string;
     transport?: LocalMobilePushTransport;
@@ -108,10 +115,37 @@ export function createLocalMobilePushService(
       });
 
       if (messages.length === 0) {
+        logDiagnostics(options.diagnostics, "info", "push.send.skipped", {
+          conversationId: input.conversationId,
+          projectId: input.projectId,
+          reason: "no_subscriptions",
+          turnId: input.turnId
+        });
         return 0;
       }
 
-      await transport.send(messages);
+      try {
+        await transport.send(messages);
+      } catch (error) {
+        logDiagnostics(options.diagnostics, "error", "push.send.failure", {
+          conversationId: input.conversationId,
+          error: errorDiagnostics(error),
+          projectId: input.projectId,
+          sentCount: 0,
+          subscriptionCount: messages.length,
+          turnId: input.turnId
+        });
+        throw error;
+      }
+      logDiagnostics(options.diagnostics, "info", "push.send.success", {
+        conversationId: input.conversationId,
+        failed: input.failed,
+        projectId: input.projectId,
+        sentCount: messages.length,
+        status: input.status,
+        subscriptionCount: messages.length,
+        turnId: input.turnId
+      });
       options.logger?.info(
         `[mobile-push] Sent ${messages.length} Codex completion push notification${
           messages.length === 1 ? "" : "s"
@@ -136,7 +170,13 @@ export function createLocalCodexCompletionNotifier(options: LocalCompletionNotif
 
     isPolling = true;
     try {
+      logDiagnostics(options.diagnostics, "debug", "completion.poll.start");
       const states = await options.codex.listCompletionStates();
+      logDiagnostics(options.diagnostics, "info", "completion.poll.result", {
+        completeCount: states.filter((state) => state.isComplete).length,
+        conversationId: states.length === 1 ? states[0]?.conversationId : undefined,
+        stateCount: states.length
+      });
 
       if (!hasBootstrapped) {
         for (const state of states) {
@@ -159,6 +199,11 @@ export function createLocalCodexCompletionNotifier(options: LocalCompletionNotif
           snapshots.delete(conversationId);
         }
       }
+    } catch (error) {
+      logDiagnostics(options.diagnostics, "error", "completion.poll.failure", {
+        error: errorDiagnostics(error)
+      });
+      throw error;
     } finally {
       isPolling = false;
     }
@@ -188,11 +233,22 @@ export function createLocalCodexCompletionNotifier(options: LocalCompletionNotif
     key: string
   ) {
     if (notifiedCompletionKeys.has(key)) {
+      logDiagnostics(options.diagnostics, "info", "push.send.skipped", {
+        conversationId: state.conversationId,
+        reason: "already_notified",
+        turnId: state.latestTurnId
+      });
       return;
     }
 
     const skipReason = completionNotificationSkipReason(state, previous, startedAtMs);
     if (skipReason) {
+      logDiagnostics(options.diagnostics, "info", "push.send.skipped", {
+        conversationId: state.conversationId,
+        reason: skipReason,
+        status: state.status,
+        turnId: state.latestTurnId
+      });
       if (shouldResolveSkippedCompletion(skipReason)) {
         notifiedCompletionKeys.add(key);
       }

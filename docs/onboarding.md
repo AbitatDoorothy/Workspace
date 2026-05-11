@@ -89,3 +89,12 @@ After pairing, the iPhone reconnects with the stored Mac endpoint and device tok
 - If the pairing payload expired, run `abitat iphone` again and scan the new code.
 - If no projects appear, keep the Mac command running and refresh the iPhone Projects screen.
 - If Codex does not start, open Codex on the Mac or set `CODEX_APP_SERVER_URL` to a reachable local Codex app-server.
+- For iPhone control issues, watch the Abitat mobile-control diagnostics log on the Mac:
+
+```sh
+tail -f ~/Library/Logs/Abitat/mobile-control.log
+```
+
+This is Abitat's Mac-side mobile-control log, not the Codex desktop app log. It records redacted
+JSON lines for pairing, relay, mobile requests, Codex thread/turn calls, message counts, and
+completion notifications. Review it before sharing, then send it to support if needed.

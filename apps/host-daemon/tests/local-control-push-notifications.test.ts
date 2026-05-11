@@ -5,6 +5,7 @@ import {
   createLocalMobilePushService,
   type LocalPushSubscription
 } from "../src/local-control/push-notifications";
+import type { MobileControlDiagnosticsLogger } from "../src/local-control/diagnostics-log";
 import type { LocalCodexCompletionState } from "../src/local-control/server";
 
 describe("local push notifications", () => {
@@ -20,6 +21,7 @@ describe("local push notifications", () => {
         token: "ExponentPushToken[demo]"
       }
     ];
+    const diagnostics = createMemoryDiagnostics();
     const states: LocalCodexCompletionState[][] = [
       [
         completionState({
@@ -53,6 +55,7 @@ describe("local push notifications", () => {
         listPushSubscriptions: async () => subscriptions
       },
       {
+        diagnostics,
         soundPicker: () => "codex-done-2.wav",
         transport: {
           async send(messages) {
@@ -67,6 +70,7 @@ describe("local push notifications", () => {
           return states.shift() ?? [];
         }
       },
+      diagnostics,
       mobilePushService: pushService,
       now: () => new Date("2026-05-10T12:00:30.000Z")
     });
@@ -96,6 +100,22 @@ describe("local push notifications", () => {
         })
       ]
     ]);
+    expect(diagnostics.events).toContainEqual(
+      expect.objectContaining({
+        conversationId: "codex_thread_demo",
+        event: "completion.poll.result",
+        stateCount: 1
+      })
+    );
+    expect(diagnostics.events).toContainEqual(
+      expect.objectContaining({
+        conversationId: "codex_thread_demo",
+        event: "push.send.success",
+        sentCount: 1
+      })
+    );
+    expect(JSON.stringify(diagnostics.events)).not.toContain("ExponentPushToken[demo]");
+    expect(JSON.stringify(diagnostics.events)).not.toContain("Fix notifications");
   });
 
   it("does not send notifications for turns completed before the notifier starts", async () => {
@@ -143,6 +163,56 @@ describe("local push notifications", () => {
 
     expect(sent).toEqual([]);
   });
+
+  it("logs push notification failures without push tokens or prompt text", async () => {
+    const diagnostics = createMemoryDiagnostics();
+    const pushService = createLocalMobilePushService(
+      {
+        listPushSubscriptions: async () => [
+          {
+            deviceId: "phone_test",
+            lastSeenAt: "2026-05-10T12:00:00.000Z",
+            platform: "ios",
+            provider: "expo",
+            registeredAt: "2026-05-10T12:00:00.000Z",
+            token: "ExponentPushToken[demo]"
+          }
+        ]
+      },
+      {
+        diagnostics,
+        transport: {
+          async send() {
+            throw new Error("Expo rejected the request");
+          }
+        }
+      }
+    );
+
+    await expect(
+      pushService.sendCodexThreadDone({
+        conversationId: "codex_thread_demo",
+        failed: false,
+        projectId: "codex_project_demo",
+        projectName: "Demo",
+        prompt: "Sensitive prompt text",
+        source: "codex_app",
+        status: "approved",
+        turnId: "turn_1",
+        workspaceId: "local"
+      })
+    ).rejects.toThrow("Expo rejected the request");
+
+    expect(diagnostics.events).toContainEqual(
+      expect.objectContaining({
+        conversationId: "codex_thread_demo",
+        error: "Expo rejected the request",
+        event: "push.send.failure"
+      })
+    );
+    expect(JSON.stringify(diagnostics.events)).not.toContain("ExponentPushToken[demo]");
+    expect(JSON.stringify(diagnostics.events)).not.toContain("Sensitive prompt text");
+  });
 });
 
 function completionState(
@@ -162,4 +232,16 @@ function completionState(
     updatedAt: input.updatedAt ?? "2026-05-10T12:00:00.000Z",
     workspaceId: "local"
   };
+}
+
+function createMemoryDiagnostics() {
+  const events: Array<Record<string, unknown>> = [];
+  const logger: MobileControlDiagnosticsLogger & { events: Array<Record<string, unknown>> } = {
+    events,
+    log(level, event, fields = {}) {
+      events.push({ event, level, ...fields });
+    }
+  };
+
+  return logger;
 }
