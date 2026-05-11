@@ -236,13 +236,22 @@ if (!conversationScreen.includes("shouldForceMessageRefreshAfterStatusPoll")) {
 }
 if (
   !conversationScreen.includes(
-    "const canSendNow = canAcceptConversationInput(status) && !isSending;"
+    "const canSendNow = !isDraftConversation(activeConversation) || !isSending;"
   )
 ) {
-  throw new Error("Expected ConversationScreen to block phone sends while a Codex turn is running");
+  throw new Error(
+    "Expected ConversationScreen to keep existing Codex threads queueable while a send is in flight"
+  );
 }
 if (!conversationScreen.includes("{sendButtonLabel(status, isSending)}")) {
-  throw new Error("Expected ConversationScreen to label blocked Codex turns as running");
+  throw new Error("Expected ConversationScreen to label busy Codex turns as queueable");
+}
+if (
+  !conversationScreen.includes(
+    'if (!canAcceptConversationInput(status)) {\n    return "Queue";\n  }\n\n  if (isSending) {'
+  )
+) {
+  throw new Error("Expected ConversationScreen to prefer Queue over Sending for busy turns");
 }
 if (conversationScreen.includes('source === "codex_app" && status === "running"')) {
   throw new Error("Expected ConversationScreen not to allow sends into running Codex app turns");
@@ -370,7 +379,12 @@ for (const expected of [
   "createOptimisticMessage",
   "localStatus",
   "markLocalMessageFailed",
+  "markLocalMessageQueued",
   "markLocalMessageSent",
+  "steerConversation",
+  'delivery: "queue"',
+  'delivery: "steer"',
+  'accessibilityLabel="Steer running Codex turn"',
   "sendGitShortcut",
   "pickImageAttachment",
   "pickFileAttachment",
@@ -504,6 +518,12 @@ if (notificationWatcher.includes("isNotificationMessageFromCompletedTurn")) {
 for (const expected of ["listCodexModels", "model?: string", "effort?: CodexReasoningEffort"]) {
   if (!apiClient.includes(expected)) {
     throw new Error(`Expected API client to support Codex model control: ${expected}`);
+  }
+}
+
+for (const expected of ['delivery?: "queue" | "steer"', "delivery"]) {
+  if (!apiClient.includes(expected)) {
+    throw new Error(`Expected API client to support queued and steer delivery: ${expected}`);
   }
 }
 

@@ -40,6 +40,7 @@ export interface ApiClient {
     input: {
       attachments?: Pick<ConversationAttachment, "kind" | "name" | "path">[];
       clientMessageId: string;
+      delivery?: "queue" | "steer";
       effort?: CodexReasoningEffort;
       model?: string;
       prompt: string;
