@@ -197,6 +197,18 @@ if (!conversationScreen.includes('message.role !== "runtime"')) {
     "Expected ConversationScreen to hide runtime messages from the conversation page"
   );
 }
+for (const expected of [
+  "stripCodexAppDirectives",
+  "isCodexAppDirectiveLine",
+  "git-stage",
+  "git-commit",
+  "git-push",
+  "stripCodexAppDirectives(message.content).trim().length > 0"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected ConversationScreen to hide Codex app directives: ${expected}`);
+  }
+}
 if (conversationScreen.includes("scrollToEnd")) {
   throw new Error(
     "Expected ConversationScreen to avoid unreliable scrollToEnd on long Codex threads"

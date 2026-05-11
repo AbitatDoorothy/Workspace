@@ -1437,7 +1437,10 @@ function hasMatchingServerMessage(
 }
 
 export function visibleConversationMessages(messages: ConversationMessage[]) {
-  return messages.filter((message) => message.role !== "runtime");
+  return messages.filter(
+    (message) =>
+      message.role !== "runtime" && stripCodexAppDirectives(message.content).trim().length > 0
+  );
 }
 
 function conversationMessagesForId(messages: ConversationMessage[], conversationId: string) {
@@ -1446,10 +1449,25 @@ function conversationMessagesForId(messages: ConversationMessage[], conversation
 
 export function safeMessageContent(content: string) {
   const maxLength = 8_000;
+  const visibleContent = stripCodexAppDirectives(content);
 
-  if (content.length <= maxLength) {
-    return content;
+  if (visibleContent.length <= maxLength) {
+    return visibleContent;
   }
 
-  return `${content.slice(0, maxLength)}\n\n[Message truncated for iPhone stability.]`;
+  return `${visibleContent.slice(0, maxLength)}\n\n[Message truncated for iPhone stability.]`;
+}
+
+export function stripCodexAppDirectives(content: string) {
+  return content
+    .split(/\r?\n/)
+    .filter((line) => !isCodexAppDirectiveLine(line))
+    .join("\n")
+    .trim();
+}
+
+function isCodexAppDirectiveLine(line: string) {
+  return /^::(?:git-stage|git-commit|git-push|git-create-branch|git-create-pr|archive)\{.*\}\s*$/.test(
+    line.trim()
+  );
 }
