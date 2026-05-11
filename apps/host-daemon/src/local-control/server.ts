@@ -112,7 +112,7 @@ export interface LocalCodexBridge {
   ): Promise<LocalGeneratedFileDownload>;
   listMessages(
     conversationId: string,
-    options?: { afterSequence?: number; includeRuntime?: boolean }
+    options?: { afterSequence?: number; forceRefresh?: boolean; includeRuntime?: boolean }
   ): Promise<LocalCodexMessage[]>;
   listGeneratedFiles(conversationId: string): Promise<LocalGeneratedFileSummary[]>;
   listModelOptions(): Promise<CodexModelOption[]>;
@@ -399,15 +399,18 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       const messageMatch = matchPath(path, "/api/mobile/conversations/:conversationId/messages");
       if (messageMatch && method === "GET") {
         const afterSequence = numberQuery(url.searchParams.get("afterSequence"));
+        const forceRefresh = url.searchParams.get("forceRefresh") === "true";
         const includeRuntime = url.searchParams.get("includeRuntime") === "true";
         const messages = await input.codex.listMessages(messageMatch.conversationId, {
           afterSequence,
+          forceRefresh,
           includeRuntime
         });
         logDiagnostics(diagnostics, "info", "messages.list.result", {
           ...messageCounts(messages),
           afterSequence,
           conversationId: messageMatch.conversationId,
+          forceRefresh,
           includeRuntime,
           returned: messages.length
         });

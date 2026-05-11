@@ -274,6 +274,11 @@ if (!conversationScreen.includes("shouldForceMessageRefreshAfterStatusPoll")) {
     "Expected ConversationScreen to force a message refresh from desktop status updates"
   );
 }
+if (!conversationScreen.includes("forceRefresh: isForcedRefresh")) {
+  throw new Error(
+    "Expected ConversationScreen to bypass stale daemon message caches during forced refreshes"
+  );
+}
 for (const expected of [
   "const nextStatus = latestConversation?.status ?? activeConversation.status;",
   "latestStatusRef.current = nextStatus;",
@@ -683,6 +688,11 @@ for (const expected of ['delivery?: "queue" | "steer"', "delivery"]) {
     throw new Error(`Expected API client to support queued and steer delivery: ${expected}`);
   }
 }
+for (const expected of ["forceRefresh?: boolean", 'params.push("forceRefresh=true")']) {
+  if (!apiClient.includes(expected)) {
+    throw new Error(`Expected API client to support forced message refresh: ${expected}`);
+  }
+}
 
 for (const expected of [
   "GeneratedFileDownload",
@@ -773,6 +783,8 @@ for (const expected of [
   "useMessagePreloader",
   "PRELOAD_POLL_INTERVAL_MS",
   "MAX_PRELOAD_CONVERSATIONS_PER_TICK",
+  "shouldForcePreloadMessageRefresh",
+  "forceRefresh: shouldForcePreloadMessageRefresh",
   "api.listCompletionStates()",
   "api.listMessages",
   "loadMessageCacheIndex",

@@ -127,8 +127,13 @@ async function preloadConversationMessages(
     cacheEntry?.latestSequence ?? 0,
     highestCachedMessageSequence(cachedMessages)
   );
+  const shouldForcePreloadMessageRefresh = shouldForcePreloadRefresh(state, cacheEntry);
 
-  if (latestSequence === 0 && !isActivePreloadStatus(state.status)) {
+  if (
+    latestSequence === 0 &&
+    !isActivePreloadStatus(state.status) &&
+    !shouldForcePreloadMessageRefresh
+  ) {
     await upsertMessageCacheIndexEntry(messageCacheScope, cacheIndexEntryFromState(state, 0));
     return;
   }
@@ -136,7 +141,7 @@ async function preloadConversationMessages(
   const nextMessages = await api.listMessages(
     state.conversationId,
     latestSequence > 0 ? latestSequence : undefined,
-    { includeRuntime: false }
+    { forceRefresh: shouldForcePreloadMessageRefresh, includeRuntime: false }
   );
   const mergedMessages = mergePreloadedMessages(cachedMessages, nextMessages);
 
@@ -200,6 +205,24 @@ function comparePreloadCandidates(left: CodexCompletionSummary, right: CodexComp
   }
 
   return safeTimestamp(right.updatedAt) - safeTimestamp(left.updatedAt);
+}
+
+function shouldForcePreloadRefresh(
+  state: CodexCompletionSummary,
+  cacheEntry: MessageCacheIndexEntry | undefined
+) {
+  if (isActivePreloadStatus(state.status)) {
+    return true;
+  }
+
+  if (!cacheEntry) {
+    return false;
+  }
+
+  return (
+    state.status !== cacheEntry.status ||
+    safeTimestamp(state.updatedAt) > safeTimestamp(cacheEntry.updatedAt)
+  );
 }
 
 function isActivePreloadStatus(status: string) {

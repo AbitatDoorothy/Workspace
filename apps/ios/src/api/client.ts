@@ -67,7 +67,7 @@ export interface ApiClient {
   listMessages(
     conversationId: string,
     afterSequence?: number,
-    options?: { includeRuntime?: boolean }
+    options?: { forceRefresh?: boolean; includeRuntime?: boolean }
   ): Promise<ConversationMessage[]>;
   downloadGeneratedFile(conversationId: string, fileId: string): Promise<GeneratedFileDownload>;
   listProjects(): Promise<ProjectSummary[]>;
@@ -514,7 +514,7 @@ function isHtmlError(text: string) {
 function mobileMessagesPath(
   conversationId: string,
   afterSequence?: number,
-  options: { includeRuntime?: boolean } = {}
+  options: { forceRefresh?: boolean; includeRuntime?: boolean } = {}
 ) {
   const params: string[] = [];
 
@@ -524,6 +524,10 @@ function mobileMessagesPath(
 
   if (options.includeRuntime) {
     params.push("includeRuntime=true");
+  }
+
+  if (options.forceRefresh) {
+    params.push("forceRefresh=true");
   }
 
   const query = params.join("&");

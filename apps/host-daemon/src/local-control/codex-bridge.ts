@@ -431,13 +431,17 @@ export function createLocalCodexBridge(
 
     async listMessages(conversationId, messageOptions = {}) {
       const threadId = toCodexThreadId(conversationId);
-      const messages = await readCachedThreadMessages(threadId, messageOptions.afterSequence);
+      const messages = await readCachedThreadMessages(threadId, {
+        afterSequence: messageOptions.afterSequence,
+        forceRefresh: messageOptions.forceRefresh === true
+      });
       const returned = filterThreadMessages(messages, messageOptions);
 
       logDiagnostics(diagnostics, "info", "messages.list.bridge_result", {
         ...messageCounts(messages),
         afterSequence: messageOptions.afterSequence,
         conversationId: externalCodexConversationId(threadId),
+        forceRefresh: messageOptions.forceRefresh === true,
         includeRuntime: messageOptions.includeRuntime === true,
         returned: returned.length,
         total: messages.length
@@ -526,9 +530,12 @@ export function createLocalCodexBridge(
     );
   }
 
-  async function readCachedThreadMessages(threadId: string, afterSequence: number | undefined) {
+  async function readCachedThreadMessages(
+    threadId: string,
+    options: { afterSequence: number | undefined; forceRefresh: boolean }
+  ) {
     const cached = messageHistoryCache.get(threadId);
-    if (typeof afterSequence === "number" && cached) {
+    if (!options.forceRefresh && typeof options.afterSequence === "number" && cached) {
       const summary = await client.readThread(threadId, false).catch(() => null);
       if (summary && canUseCachedMessageHistory(cached, summary)) {
         return cached.messages;

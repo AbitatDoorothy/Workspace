@@ -228,16 +228,19 @@ export function ConversationScreen({
 
     let cancelled = false;
 
-    async function refreshMessages(afterSequence?: number) {
+    async function refreshMessages(
+      afterSequence?: number,
+      options: { forceRefresh?: boolean } = {}
+    ) {
       if (loadedCachedConversationIdRef.current !== activeConversation.id) {
         return;
       }
 
+      const isForcedRefresh = options.forceRefresh === true || typeof afterSequence !== "number";
       const cachedAfterSequence =
         typeof afterSequence === "number" ? afterSequence : latestSequenceRef.current;
-      const isFullRefresh = typeof afterSequence !== "number" && cachedAfterSequence === 0;
       if (messageRefreshInFlightRef.current) {
-        if (isFullRefresh) {
+        if (isForcedRefresh) {
           pendingFullMessageRefreshRef.current = true;
         }
         return;
@@ -249,11 +252,12 @@ export function ConversationScreen({
           activeConversation.id,
           cachedAfterSequence > 0 ? cachedAfterSequence : undefined,
           {
+            forceRefresh: isForcedRefresh,
             includeRuntime: false
           }
         );
         if (!cancelled) {
-          if (isFullRefresh) {
+          if (isForcedRefresh) {
             lastFullMessageRefreshAtRef.current = Date.now();
           }
           setError(null);
@@ -267,7 +271,7 @@ export function ConversationScreen({
               )
             )
           );
-          if (isFullRefresh || nextMessages.length > 0) {
+          if (isForcedRefresh || nextMessages.length > 0) {
             void refreshGeneratedFiles(activeConversation.id);
           }
         }
@@ -287,10 +291,10 @@ export function ConversationScreen({
     }
 
     function refreshMessagesForPoll() {
-      const shouldFullRefresh =
+      const shouldForceRefresh =
         Date.now() - lastFullMessageRefreshAtRef.current >= FULL_MESSAGE_REFRESH_INTERVAL_MS;
 
-      void refreshMessages(shouldFullRefresh ? undefined : latestSequenceRef.current);
+      void refreshMessages(latestSequenceRef.current, { forceRefresh: shouldForceRefresh });
     }
 
     async function refreshStatus() {
@@ -317,7 +321,7 @@ export function ConversationScreen({
               previousUpdatedAt
             })
           ) {
-            void refreshMessages();
+            void refreshMessages(latestSequenceRef.current, { forceRefresh: true });
             void refreshGeneratedFiles(activeConversation.id);
           }
         }

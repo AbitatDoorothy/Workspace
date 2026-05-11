@@ -163,9 +163,12 @@ describe("local control server", () => {
       );
 
       await expect(
-        fetchJson(`${endpoint}/api/mobile/conversations/codex_thread_new/messages`, {
-          headers: auth
-        })
+        fetchJson(
+          `${endpoint}/api/mobile/conversations/codex_thread_new/messages?afterSequence=3&forceRefresh=true&includeRuntime=true`,
+          {
+            headers: auth
+          }
+        )
       ).resolves.toEqual({
         messages: [
           expect.objectContaining({
@@ -173,6 +176,14 @@ describe("local control server", () => {
             role: "user"
           })
         ]
+      });
+      expect(bridge.listMessageRequests.at(-1)).toEqual({
+        conversationId: "codex_thread_new",
+        options: {
+          afterSequence: 3,
+          forceRefresh: true,
+          includeRuntime: true
+        }
       });
       await expect(
         fetchJson(`${endpoint}/api/mobile/conversations/codex_thread_new/continue`, {
@@ -301,11 +312,20 @@ describe("local control server", () => {
 });
 
 function createFakeCodexBridge(options: { continueError?: Error } = {}): LocalCodexBridge & {
+  listMessageRequests: Array<{
+    conversationId: string;
+    options?: { afterSequence?: number; forceRefresh?: boolean; includeRuntime?: boolean };
+  }>;
   startedPrompts: string[];
 } {
+  const listMessageRequests: Array<{
+    conversationId: string;
+    options?: { afterSequence?: number; forceRefresh?: boolean; includeRuntime?: boolean };
+  }> = [];
   const startedPrompts: string[] = [];
 
   return {
+    listMessageRequests,
     startedPrompts,
     async bootstrap() {
       return { available: true };
@@ -320,7 +340,8 @@ function createFakeCodexBridge(options: { continueError?: Error } = {}): LocalCo
     async listCompletionStates() {
       return [];
     },
-    async listMessages(conversationId) {
+    async listMessages(conversationId, listOptions) {
+      listMessageRequests.push({ conversationId, options: listOptions });
       return [
         {
           content: "Hello from phone",
