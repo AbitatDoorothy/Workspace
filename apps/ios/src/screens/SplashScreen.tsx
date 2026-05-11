@@ -74,7 +74,7 @@ export function SplashScreen({ onStart }: SplashScreenProps) {
   const [isLeaving, setIsLeaving] = useState(false);
   const buttonFloat = useRef(new Animated.Value(0)).current;
   const logoScale = useRef(new Animated.Value(1)).current;
-  const screenOpacity = useRef(new Animated.Value(1)).current;
+  const blackoutOpacity = useRef(new Animated.Value(0)).current;
   const shootingProgress = useMemo(() => SHOOTING_STARS.map(() => new Animated.Value(0)), []);
 
   useEffect(() => {
@@ -191,10 +191,10 @@ export function SplashScreen({ onStart }: SplashScreenProps) {
     }
 
     setIsLeaving(true);
-    Animated.timing(screenOpacity, {
+    Animated.timing(blackoutOpacity, {
       duration: 420,
       easing: Easing.inOut(Easing.quad),
-      toValue: 0,
+      toValue: 1,
       useNativeDriver: true
     }).start(({ finished }) => {
       if (finished) {
@@ -213,7 +213,7 @@ export function SplashScreen({ onStart }: SplashScreenProps) {
   });
 
   return (
-    <Animated.View style={[styles.screen, { opacity: screenOpacity }]}>
+    <View style={styles.screen}>
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
         {STAR_POINTS.map((star, index) => (
           <View
@@ -309,7 +309,11 @@ export function SplashScreen({ onStart }: SplashScreenProps) {
           </Pressable>
         </Animated.View>
       </View>
-    </Animated.View>
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.blackoutOverlay, { opacity: blackoutOpacity }]}
+      />
+    </View>
   );
 }
 
@@ -326,6 +330,10 @@ async function triggerPulseHaptic(hapticStyle: Haptics.ImpactFeedbackStyle) {
 }
 
 const styles = StyleSheet.create({
+  blackoutOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#000000"
+  },
   centerPanel: {
     alignItems: "center",
     gap: 52

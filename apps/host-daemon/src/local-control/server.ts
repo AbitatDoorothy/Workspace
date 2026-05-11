@@ -100,11 +100,23 @@ export interface LocalCodexBridge {
     conversationId: string,
     input: {
       attachments?: LocalAttachmentReference[];
+      clientMessageId?: string;
       delivery?: LocalCodexDeliveryMode;
       modelSettings?: CodexMobileModelSettings;
       prompt: string;
     }
   ): Promise<{ conversationId: string; status: ConversationStatus | string }>;
+  deleteQueuedTurn(
+    conversationId: string,
+    input: { clientMessageId: string }
+  ): Promise<{ conversationId: string; removed: boolean; status: ConversationStatus | string }>;
+  updateQueuedTurn(
+    conversationId: string,
+    input: {
+      clientMessageId: string;
+      prompt: string;
+    }
+  ): Promise<{ conversationId: string; status: ConversationStatus | string; updated: boolean }>;
   listCompletionStates(): Promise<LocalCodexCompletionState[]>;
   downloadGeneratedFile(
     conversationId: string,
@@ -458,6 +470,7 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
         let continued: Awaited<ReturnType<LocalCodexBridge["continueConversation"]>>;
         try {
           continued = await input.codex.continueConversation(messageMatch.conversationId, {
+            clientMessageId: stringValue(body.clientMessageId) || undefined,
             delivery,
             prompt
           });
@@ -497,6 +510,7 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
         try {
           continued = await input.codex.continueConversation(continueMatch.conversationId, {
             attachments,
+            clientMessageId: stringValue(body.clientMessageId) || undefined,
             delivery,
             modelSettings: modelSettings(body),
             prompt
@@ -515,6 +529,40 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
           status: continued.status
         });
         writeJson(response, 200, continued);
+        return;
+      }
+
+      const queuedTurnMatch = matchPath(
+        path,
+        "/api/mobile/conversations/:conversationId/queue/:clientMessageId"
+      );
+      if (queuedTurnMatch && method === "DELETE") {
+        const result = await input.codex.deleteQueuedTurn(queuedTurnMatch.conversationId, {
+          clientMessageId: queuedTurnMatch.clientMessageId
+        });
+        logDiagnostics(diagnostics, "info", "conversation.queue.delete", {
+          conversationId: queuedTurnMatch.conversationId,
+          deviceId: actor.id,
+          removed: result.removed
+        });
+        writeJson(response, 200, result);
+        return;
+      }
+
+      if (queuedTurnMatch && method === "PATCH") {
+        const body = await readJson(request);
+        const prompt = requiredPrompt(body);
+        const result = await input.codex.updateQueuedTurn(queuedTurnMatch.conversationId, {
+          clientMessageId: queuedTurnMatch.clientMessageId,
+          prompt
+        });
+        logDiagnostics(diagnostics, "info", "conversation.queue.update", {
+          ...promptDiagnostics(prompt),
+          conversationId: queuedTurnMatch.conversationId,
+          deviceId: actor.id,
+          updated: result.updated
+        });
+        writeJson(response, 200, result);
         return;
       }
 

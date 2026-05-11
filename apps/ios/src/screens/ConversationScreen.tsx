@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   AppState,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -116,13 +117,21 @@ export function ConversationScreen({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [showScrollToLatestButton, setShowScrollToLatestButton] = useState(false);
   const [messageCacheLoadKey, setMessageCacheLoadKey] = useState(0);
+  const [editingQueuedMessageId, setEditingQueuedMessageId] = useState<string | null>(null);
   const listRef = useRef<FlatList<ConversationMessage> | null>(null);
   const activeMessages = useMemo(
     () => conversationMessagesForId(messages, activeConversation.id),
     [activeConversation.id, messages]
   );
+  const queuedLocalMessages = useMemo(
+    () => activeMessages.filter(isQueuedLocalMessage),
+    [activeMessages]
+  );
   const newestFirstMessages = useMemo(
-    () => visibleConversationMessages(activeMessages).reverse(),
+    () =>
+      visibleConversationMessages(activeMessages)
+        .filter((message) => !isQueuedLocalMessage(message))
+        .reverse(),
     [activeMessages]
   );
   const lastSequence = useMemo(
@@ -148,10 +157,17 @@ export function ConversationScreen({
   const collapsedThreadTitle = compactThreadTitle(threadTitle);
   const hasComposerPayload = canSendPrompt(prompt, attachments);
   const showComposerSpinner =
-    (isConversationBusyStatus(status) || isSending) && !hasComposerPayload;
-  const sendButtonIconName: FeatherIconName = isConversationBusyStatus(status)
-    ? "arrow-up"
-    : "send";
+    (isConversationBusyStatus(status) || isSending) &&
+    !hasComposerPayload &&
+    editingQueuedMessageId === null;
+  const sendButtonIconName: FeatherIconName =
+    editingQueuedMessageId !== null
+      ? "check"
+      : isConversationBusyStatus(status)
+        ? "arrow-up"
+        : "send";
+  const canSubmitComposer =
+    editingQueuedMessageId !== null ? prompt.trim().length > 0 : hasComposerPayload && canSendNow;
 
   function scrollToLatest(animated = true) {
     requestAnimationFrame(() => {
@@ -187,6 +203,7 @@ export function ConversationScreen({
     setStatus(conversation.status);
     setIsHeaderExpanded(false);
     setCopiedMessageId(null);
+    setEditingQueuedMessageId(null);
     pendingAutoScrollRef.current = true;
     if (isDraftConversation(conversation)) {
       setMessages([]);
@@ -426,11 +443,18 @@ export function ConversationScreen({
     const submittedPrompt = promptForSend(input.prompt, queuedAttachments);
     const clientMessageId = `ios-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const afterSequence = lastSequence;
+    const optimisticLocalStatus =
+      delivery === "queue" &&
+      !isStartingDraftConversation &&
+      (isConversationBusyStatus(status) || queuedLocalMessages.length > 0)
+        ? "queued"
+        : "sending";
     const optimisticMessage = createOptimisticMessage({
       attachmentNames: queuedAttachments.map((attachment) => attachment.name),
       clientMessageId,
       conversationId: conversationForSend.id,
       createdAt: new Date().toISOString(),
+      localStatus: optimisticLocalStatus,
       prompt: submittedPrompt,
       sequence: afterSequence + 1
     });
@@ -589,6 +613,11 @@ export function ConversationScreen({
   }
 
   function continueConversation() {
+    if (editingQueuedMessageId !== null) {
+      void saveQueuedMessageEdit();
+      return;
+    }
+
     const queuedPrompt = prompt;
     const queuedAttachments = attachments;
 
@@ -615,7 +644,7 @@ export function ConversationScreen({
       return;
     }
 
-    const clientMessageId = `ios-steer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const clientMessageId = queuedMessageClientId(message);
     const conversationForSend = activeConversation;
 
     setError(null);
@@ -629,6 +658,9 @@ export function ConversationScreen({
         )
       )
     );
+    pendingAutoScrollRef.current = true;
+    scrollToLatest(true);
+    setEditingQueuedMessageId(null);
 
     try {
       const continued = await api.continueConversation(conversationForSend.id, {
@@ -688,6 +720,104 @@ export function ConversationScreen({
         )
       );
       setError(caught instanceof Error ? caught.message : "Unable to steer queued message");
+    }
+  }
+
+  async function deleteQueuedMessage(message: ConversationMessage) {
+    if (!isQueuedLocalMessage(message)) {
+      return;
+    }
+
+    const clientMessageId = queuedMessageClientId(message);
+    setError(null);
+    try {
+      const result = await api.deleteQueuedTurn(activeConversation.id, clientMessageId);
+      if (!result.removed) {
+        setError("Queued message is already being processed.");
+        return;
+      }
+
+      if (editingQueuedMessageId === message.id) {
+        setEditingQueuedMessageId(null);
+        setPrompt("");
+      }
+
+      setMessages((current) =>
+        persistMergedConversationMessages(
+          messageCacheScope,
+          activeConversation.id,
+          removeLocalQueuedMessage(
+            conversationMessagesForId(current, activeConversation.id),
+            message.id
+          )
+        )
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to delete queued message");
+    }
+  }
+
+  function editQueuedMessage(message: ConversationMessage) {
+    if (!isQueuedLocalMessage(message)) {
+      return;
+    }
+
+    const submittedPrompt = queuedMessageSubmittedPrompt(message);
+    if (!submittedPrompt) {
+      return;
+    }
+
+    setAttachments([]);
+    setEditingQueuedMessageId(message.id);
+    setPrompt(submittedPrompt);
+  }
+
+  async function saveQueuedMessageEdit() {
+    if (!editingQueuedMessageId) {
+      return;
+    }
+
+    const editedPrompt = prompt.trim();
+    if (!editedPrompt) {
+      return;
+    }
+
+    const queuedMessage = queuedLocalMessages.find(
+      (message) => message.id === editingQueuedMessageId
+    );
+    if (!queuedMessage) {
+      setEditingQueuedMessageId(null);
+      setPrompt("");
+      return;
+    }
+
+    setError(null);
+    try {
+      const result = await api.updateQueuedTurn(
+        activeConversation.id,
+        queuedMessageClientId(queuedMessage),
+        { prompt: editedPrompt }
+      );
+      if (!result.updated) {
+        setError("Queued message is already being processed.");
+        return;
+      }
+
+      setMessages((current) =>
+        persistMergedConversationMessages(
+          messageCacheScope,
+          activeConversation.id,
+          updateLocalQueuedMessagePrompt(
+            conversationMessagesForId(current, activeConversation.id),
+            queuedMessage.id,
+            editedPrompt
+          )
+        )
+      );
+      setEditingQueuedMessageId(null);
+      setPrompt("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to edit queued message");
     }
   }
 
@@ -823,6 +953,75 @@ export function ConversationScreen({
     }
   }
 
+  function renderQueuedMessageStack() {
+    if (queuedLocalMessages.length === 0) {
+      return null;
+    }
+
+    return (
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={queuedLocalMessages.length > 2}
+        style={styles.queueStackScroll}
+        contentContainerStyle={styles.queueStack}
+      >
+        {queuedLocalMessages.map((message) => {
+          const submittedPrompt = queuedMessageSubmittedPrompt(message) ?? "";
+          const isEditing = editingQueuedMessageId === message.id;
+
+          return (
+            <View
+              key={message.id}
+              style={[styles.queueStackRow, isEditing ? styles.queueStackRowEditing : null]}
+            >
+              <Feather color="#dcdce2" name="corner-down-right" size={17} />
+              <Text numberOfLines={1} style={styles.queueStackText}>
+                {submittedPrompt}
+              </Text>
+              <Pressable
+                accessibilityLabel="Steer queued Codex message"
+                accessibilityRole="button"
+                disabled={!canSteerQueuedLocalMessage(message, canSteerNow)}
+                onPress={() => void steerQueuedMessage(message)}
+                style={({ pressed }) => [
+                  styles.queueSteerButton,
+                  pressed ? styles.queueActionPressed : null,
+                  !canSteerQueuedLocalMessage(message, canSteerNow) ? styles.disabledAction : null
+                ]}
+              >
+                <Feather color="#ffffff" name="corner-down-right" size={16} />
+                <Text style={styles.queueSteerText}>STEER</Text>
+              </Pressable>
+              <Pressable
+                accessibilityLabel="Delete queued message"
+                accessibilityRole="button"
+                onPress={() => void deleteQueuedMessage(message)}
+                style={({ pressed }) => [
+                  styles.queueIconButton,
+                  pressed ? styles.queueActionPressed : null
+                ]}
+              >
+                <Feather color="#aeb2be" name="trash-2" size={22} />
+              </Pressable>
+              <Pressable
+                accessibilityLabel="Edit queued message"
+                accessibilityRole="button"
+                onPress={() => editQueuedMessage(message)}
+                style={({ pressed }) => [
+                  styles.queueIconButton,
+                  pressed ? styles.queueActionPressed : null
+                ]}
+              >
+                <Feather color="#aeb2be" name="edit-3" size={22} />
+              </Pressable>
+            </View>
+          );
+        })}
+      </ScrollView>
+    );
+  }
+
   function renderMessageItem({ item: message }: ListRenderItemInfo<ConversationMessage>) {
     const isUserMessage = message.role === "user";
     const localStatus =
@@ -832,7 +1031,6 @@ export function ConversationScreen({
       : message.role === "assistant"
         ? "CODEX"
         : message.role.toUpperCase();
-    const canSteerQueued = canSteerQueuedLocalMessage(message, canSteerNow);
 
     return (
       <View
@@ -859,17 +1057,6 @@ export function ConversationScreen({
             </Text>
           </Pressable>
           {localStatus === "sending" ? <Text style={styles.sendingLabel}>Sending</Text> : null}
-          {localStatus === "queued" ? <Text style={styles.sendingLabel}>Queued</Text> : null}
-          {canSteerQueued ? (
-            <Pressable
-              accessibilityLabel="Steer queued Codex message"
-              accessibilityRole="button"
-              onPress={() => void steerQueuedMessage(message)}
-              style={styles.inlineSteerButton}
-            >
-              <Text style={styles.inlineSteerButtonText}>Steer</Text>
-            </Pressable>
-          ) : null}
           {localStatus === "failed" ? (
             <Text accessibilityLabel="Message failed to send" style={styles.failedSend}>
               !
@@ -975,8 +1162,11 @@ export function ConversationScreen({
               data={newestFirstMessages}
               inverted
               keyExtractor={(message) => message.id}
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="handled"
               maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
               onContentSizeChange={handleMessagesContentSizeChange}
+              onScrollBeginDrag={Keyboard.dismiss}
               onScroll={handleMessagesScroll}
               ref={listRef}
               renderItem={renderMessageItem}
@@ -1004,6 +1194,7 @@ export function ConversationScreen({
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
           <View style={styles.composerShell}>
+            {renderQueuedMessageStack()}
             {attachments.length > 0 ? (
               <View style={styles.attachmentList}>
                 {attachments.map((attachment) => (
@@ -1033,9 +1224,14 @@ export function ConversationScreen({
               </Pressable>
               <TextInput
                 contextMenuHidden={false}
+                keyboardAppearance="dark"
                 multiline
                 onChangeText={setPrompt}
-                placeholder="Enter celestial command..."
+                placeholder={
+                  editingQueuedMessageId === null
+                    ? "Enter celestial command..."
+                    : "Edit queued command..."
+                }
                 placeholderTextColor={colors.muted}
                 scrollEnabled
                 style={styles.composerInput}
@@ -1046,14 +1242,14 @@ export function ConversationScreen({
                   isConversationBusyStatus(status) ? "Queue message" : "Send message"
                 }
                 accessibilityRole="button"
-                disabled={!hasComposerPayload || !canSendNow}
+                disabled={!canSubmitComposer}
                 onPress={continueConversation}
                 style={[
                   styles.composerSendButton,
                   isConversationBusyStatus(status)
                     ? styles.composerSendButtonBusy
                     : styles.composerSendButtonIdle,
-                  !hasComposerPayload || !canSendNow ? styles.disabledAction : null
+                  !canSubmitComposer ? styles.disabledAction : null
                 ]}
               >
                 {showComposerSpinner ? (
@@ -1397,6 +1593,60 @@ const styles = StyleSheet.create({
   latestButtonIcon: {
     opacity: 0.92
   },
+  queueActionPressed: {
+    opacity: 0.66,
+    transform: [{ scale: 0.96 }]
+  },
+  queueIconButton: {
+    alignItems: "center",
+    borderRadius: 10,
+    height: 32,
+    justifyContent: "center",
+    width: 32
+  },
+  queueStack: {
+    gap: 8,
+    paddingVertical: 2
+  },
+  queueStackRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 30
+  },
+  queueStackRowEditing: {
+    opacity: 0.72
+  },
+  queueStackScroll: {
+    backgroundColor: "rgba(18,18,18,0.92)",
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 18,
+    borderWidth: 1,
+    maxHeight: 92,
+    paddingHorizontal: 14,
+    paddingVertical: 10
+  },
+  queueStackText: {
+    color: "#f1f1f4",
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "800",
+    minWidth: 0
+  },
+  queueSteerButton: {
+    alignItems: "center",
+    borderRadius: 10,
+    flexDirection: "row",
+    gap: 6,
+    minHeight: 32,
+    paddingHorizontal: 4
+  },
+  queueSteerText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.8
+  },
   messageBlock: {
     gap: 7,
     marginBottom: 16
@@ -1568,6 +1818,7 @@ function createOptimisticMessage(input: {
   clientMessageId: string;
   conversationId: string;
   createdAt: string;
+  localStatus: "queued" | "sending";
   prompt: string;
   sequence: number;
 }): ConversationMessage {
@@ -1580,7 +1831,7 @@ function createOptimisticMessage(input: {
       afterSequence: input.sequence - 1,
       attachmentNames: input.attachmentNames,
       clientMessageId: input.clientMessageId,
-      localStatus: "sending",
+      localStatus: input.localStatus,
       submittedPrompt: input.prompt
     },
     role: "user",
@@ -1657,6 +1908,16 @@ function canSteerQueuedLocalMessage(message: ConversationMessage, canSteerNow: b
   return canSteerNow && message.metadata?.localStatus === "queued";
 }
 
+function isQueuedLocalMessage(message: ConversationMessage) {
+  return message.metadata?.localStatus === "queued";
+}
+
+function queuedMessageClientId(message: ConversationMessage) {
+  return typeof message.metadata?.clientMessageId === "string"
+    ? message.metadata.clientMessageId
+    : message.id;
+}
+
 function queuedMessageSubmittedPrompt(message: ConversationMessage) {
   const submittedPrompt = message.metadata?.submittedPrompt;
 
@@ -1666,6 +1927,36 @@ function queuedMessageSubmittedPrompt(message: ConversationMessage) {
 
   const content = stripCodexAppDirectives(message.content).trim();
   return content.length > 0 ? content : null;
+}
+
+function removeLocalQueuedMessage(messages: ConversationMessage[], messageId: string) {
+  return messages.filter((message) => message.id !== messageId);
+}
+
+function updateLocalQueuedMessagePrompt(
+  messages: ConversationMessage[],
+  messageId: string,
+  prompt: string
+) {
+  return messages.map((message) =>
+    message.id === messageId
+      ? {
+          ...message,
+          content: optimisticMessageContent(
+            prompt,
+            Array.isArray(message.metadata?.attachmentNames)
+              ? message.metadata.attachmentNames.filter(
+                  (name): name is string => typeof name === "string"
+                )
+              : []
+          ),
+          metadata: {
+            ...(message.metadata ?? {}),
+            submittedPrompt: prompt
+          }
+        }
+      : message
+  );
 }
 
 function reassignLocalConversationMessages(

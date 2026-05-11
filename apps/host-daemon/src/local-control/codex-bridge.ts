@@ -130,6 +130,7 @@ interface CodexAppLoadedThreadListResponse {
 
 interface QueuedCodexTurnInput {
   attachments?: LocalAttachmentReference[];
+  clientMessageId?: string;
   modelSettings?: CodexMobileModelSettings;
   prompt: string;
 }
@@ -280,6 +281,50 @@ export function createLocalCodexBridge(
     scheduleQueueDrain(threadId);
   }
 
+  function deleteQueuedTurn(threadId: string, clientMessageId: string) {
+    const existing = queuedTurnsByThread.get(threadId);
+    if (!existing?.length) {
+      return false;
+    }
+
+    const next = existing.filter((turn) => turn.clientMessageId !== clientMessageId);
+    if (next.length === existing.length) {
+      return false;
+    }
+
+    invalidateMessageHistoryCache(threadId);
+    if (next.length > 0) {
+      queuedTurnsByThread.set(threadId, next);
+    } else {
+      queuedTurnsByThread.delete(threadId);
+      const timer = queueDrainTimers.get(threadId);
+      if (timer) {
+        clearTimeout(timer);
+        queueDrainTimers.delete(threadId);
+      }
+    }
+    return true;
+  }
+
+  function updateQueuedTurn(threadId: string, clientMessageId: string, prompt: string) {
+    const existing = queuedTurnsByThread.get(threadId);
+    if (!existing?.length) {
+      return false;
+    }
+
+    const index = existing.findIndex((turn) => turn.clientMessageId === clientMessageId);
+    if (index < 0) {
+      return false;
+    }
+
+    invalidateMessageHistoryCache(threadId);
+    queuedTurnsByThread.set(
+      threadId,
+      existing.map((turn, turnIndex) => (turnIndex === index ? { ...turn, prompt } : turn))
+    );
+    return true;
+  }
+
   function invalidateMessageHistoryCache(threadId: string) {
     messageHistoryCache.delete(threadId);
   }
@@ -389,6 +434,9 @@ export function createLocalCodexBridge(
             userInput(input.prompt, input.attachments),
             activeTurn.id
           );
+          if (input.clientMessageId) {
+            deleteQueuedTurn(threadId, input.clientMessageId);
+          }
           return {
             conversationId: externalCodexConversationId(threadId),
             status: "running"
@@ -415,6 +463,26 @@ export function createLocalCodexBridge(
       return {
         conversationId: externalCodexConversationId(threadId),
         status: "running"
+      };
+    },
+
+    async deleteQueuedTurn(conversationId, input) {
+      const threadId = toCodexThreadId(conversationId);
+      const removed = deleteQueuedTurn(threadId, input.clientMessageId);
+      return {
+        conversationId: externalCodexConversationId(threadId),
+        removed,
+        status: (queuedTurnsByThread.get(threadId)?.length ?? 0) > 0 ? "queued" : "running"
+      };
+    },
+
+    async updateQueuedTurn(conversationId, input) {
+      const threadId = toCodexThreadId(conversationId);
+      const updated = updateQueuedTurn(threadId, input.clientMessageId, input.prompt);
+      return {
+        conversationId: externalCodexConversationId(threadId),
+        status: (queuedTurnsByThread.get(threadId)?.length ?? 0) > 0 ? "queued" : "running",
+        updated
       };
     },
 

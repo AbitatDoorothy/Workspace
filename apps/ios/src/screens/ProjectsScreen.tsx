@@ -10,6 +10,7 @@ import type { ProjectSummary } from "../types";
 interface ProjectsScreenProps {
   api: ApiClient;
   initialProjects?: ProjectSummary[];
+  isConnected: boolean;
   onProject(project: ProjectSummary): void;
   onProjectsLoaded?(projects: ProjectSummary[]): void;
   onSettings(): void;
@@ -60,6 +61,7 @@ const BIG_DIPPER_STARS = [
 export function ProjectsScreen({
   api,
   initialProjects = [],
+  isConnected,
   onProject,
   onProjectsLoaded,
   onSettings,
@@ -150,7 +152,11 @@ export function ProjectsScreen({
               pressed ? styles.settingsButtonPressed : null
             ]}
           >
-            <Feather color="#ffffff" name="settings" size={19} />
+            <Feather
+              color={isConnected ? "#ffffff" : "rgba(255,255,255,0.36)"}
+              name="grid"
+              size={19}
+            />
           </Pressable>
         </View>
 

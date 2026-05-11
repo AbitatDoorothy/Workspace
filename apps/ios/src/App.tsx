@@ -287,6 +287,7 @@ function AppContent() {
         <ProjectsScreen
           api={store.api}
           initialProjects={cachedProjects}
+          isConnected={store.bootstrap?.host?.status === "online"}
           onProjectsLoaded={setCachedProjects}
           onProject={(nextProject) => {
             setProject(nextProject);
@@ -332,14 +333,11 @@ function AppContent() {
     if (routeName === "settings") {
       return (
         <SettingsScreen
-          bootstrap={store.bootstrap}
-          error={store.bootstrapError}
           onBack={goBackOneLevel}
           onSignOut={() => {
             void store.signOut();
             setRoute("projects");
           }}
-          pairing={store.pairing}
         />
       );
     }

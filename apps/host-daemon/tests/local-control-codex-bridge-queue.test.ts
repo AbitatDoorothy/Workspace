@@ -101,6 +101,137 @@ describe("local Codex bridge command queue and steer", () => {
     });
   });
 
+  it("deletes queued phone commands before they drain into Codex", async () => {
+    let isRunning = true;
+    const turnStarts: Array<Record<string, unknown>> = [];
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            status: isRunning ? { activeFlags: [], type: "active" } : { type: "idle" },
+            turns: [
+              createTurn({
+                completedAt: isRunning ? null : 1_778_000_050,
+                id: "turn_current",
+                status: isRunning ? "inProgress" : "completed"
+              })
+            ]
+          })
+        });
+      }
+
+      if (message.method === "turn/start") {
+        turnStarts.push(message.params as Record<string, unknown>);
+        sendResult(socket, message.id, {
+          turn: createTurn({
+            completedAt: null,
+            id: "turn_deleted_wrongly",
+            status: "inProgress"
+          })
+        });
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+
+    await bridge.continueConversation("codex_thread_thread_busy", {
+      clientMessageId: "ios-queued-delete",
+      prompt: "Delete me before I run"
+    });
+
+    await expect(
+      bridge.deleteQueuedTurn("codex_thread_thread_busy", {
+        clientMessageId: "ios-queued-delete"
+      })
+    ).resolves.toEqual({
+      conversationId: "codex_thread_thread_busy",
+      removed: true,
+      status: "running"
+    });
+
+    isRunning = false;
+    await delay(450);
+    expect(turnStarts).toEqual([]);
+  });
+
+  it("updates queued phone commands before they drain into Codex", async () => {
+    let isRunning = true;
+    const turnStarts: Array<Record<string, unknown>> = [];
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            status: isRunning ? { activeFlags: [], type: "active" } : { type: "idle" },
+            turns: [
+              createTurn({
+                completedAt: isRunning ? null : 1_778_000_050,
+                id: "turn_current",
+                status: isRunning ? "inProgress" : "completed"
+              })
+            ]
+          })
+        });
+      }
+
+      if (message.method === "thread/resume") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            status: { activeFlags: [], type: "active" },
+            turns: [
+              createTurn({
+                completedAt: 1_778_000_050,
+                id: "turn_current",
+                status: "completed"
+              })
+            ]
+          })
+        });
+      }
+
+      if (message.method === "turn/start") {
+        turnStarts.push(message.params as Record<string, unknown>);
+        sendResult(socket, message.id, {
+          turn: createTurn({
+            completedAt: null,
+            id: "turn_edited",
+            status: "inProgress"
+          })
+        });
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+
+    await bridge.continueConversation("codex_thread_thread_busy", {
+      clientMessageId: "ios-queued-edit",
+      prompt: "Original queued prompt"
+    });
+
+    await expect(
+      bridge.updateQueuedTurn("codex_thread_thread_busy", {
+        clientMessageId: "ios-queued-edit",
+        prompt: "Edited queued prompt"
+      })
+    ).resolves.toEqual({
+      conversationId: "codex_thread_thread_busy",
+      status: "queued",
+      updated: true
+    });
+
+    isRunning = false;
+    await waitFor(() => turnStarts.length === 1);
+    expect(turnStarts[0]).toMatchObject({
+      input: [{ text: "Edited queued prompt", text_elements: [], type: "text" }],
+      threadId: "thread_busy"
+    });
+  });
+
   it("steers active Codex turns by interrupting the current turn and starting a replacement", async () => {
     let injectParams: Record<string, unknown> | null = null;
     let steerParams: Record<string, unknown> | null = null;
@@ -149,6 +280,65 @@ describe("local Codex bridge command queue and steer", () => {
     expect(steerParams).toEqual({
       expectedTurnId: "turn_current",
       input: [{ text: "Change direction now", text_elements: [], type: "text" }],
+      threadId: "thread_busy"
+    });
+  });
+
+  it("removes a queued command when that same command is steered immediately", async () => {
+    let startParams: Record<string, unknown> | null = null;
+    let steerParams: Record<string, unknown> | null = null;
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            turns: [
+              createTurn({
+                completedAt: null,
+                id: "turn_current",
+                status: "inProgress"
+              })
+            ]
+          })
+        });
+      }
+
+      if (message.method === "turn/start") {
+        startParams = message.params as Record<string, unknown>;
+        sendResult(socket, message.id, {
+          turn: createTurn({
+            completedAt: null,
+            id: "turn_started_wrongly",
+            status: "inProgress"
+          })
+        });
+      }
+
+      if (message.method === "turn/steer") {
+        steerParams = message.params as Record<string, unknown>;
+        sendResult(socket, message.id, { turnId: "turn_steered" });
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+
+    await bridge.continueConversation("codex_thread_thread_busy", {
+      clientMessageId: "ios-queued-steer",
+      prompt: "Normal queue"
+    });
+    await bridge.continueConversation("codex_thread_thread_busy", {
+      clientMessageId: "ios-queued-steer",
+      delivery: "steer",
+      prompt: "Steer now"
+    });
+
+    await delay(450);
+    expect(startParams).toBeNull();
+    expect(steerParams).toEqual({
+      expectedTurnId: "turn_current",
+      input: [{ text: "Steer now", text_elements: [], type: "text" }],
       threadId: "thread_busy"
     });
   });

@@ -42,6 +42,9 @@ if (!packageJson.dependencies?.["expo-haptics"]) {
 if (!packageJson.dependencies?.["expo-clipboard"]) {
   throw new Error("Expected abitat-ios to depend on expo-clipboard for message copying");
 }
+if (!packageJson.dependencies?.["expo-camera"]) {
+  throw new Error("Expected abitat-ios to depend on expo-camera for QR pairing scans");
+}
 if (!packageJson.dependencies?.["@expo/vector-icons"]) {
   throw new Error("Expected abitat-ios to depend on @expo/vector-icons for project icons");
 }
@@ -73,6 +76,15 @@ const expoNotificationsPlugin = appJson.expo?.plugins?.find((plugin) =>
 if (!expoNotificationsPlugin) {
   throw new Error("Expected app.json to include the expo-notifications config plugin");
 }
+if (!appJson.expo?.plugins?.includes("expo-camera")) {
+  throw new Error("Expected app.json to include the expo-camera config plugin");
+}
+if (
+  appJson.expo?.ios?.infoPlist?.NSCameraUsageDescription !==
+  "Abitat scans the pairing QR code shown on your Mac."
+) {
+  throw new Error("Expected app.json to explain why Abitat needs camera access");
+}
 const notificationSounds = [
   "./assets/notifications/codex-done-1.wav",
   "./assets/notifications/codex-done-2.wav",
@@ -100,6 +112,9 @@ if (!entitlements.includes("aps-environment")) {
   throw new Error("Expected the native iOS app to enable remote push notifications");
 }
 const infoPlist = await readFile(join(process.cwd(), "ios/Abitat/Info.plist"), "utf8");
+if (!infoPlist.includes("<key>NSCameraUsageDescription</key>")) {
+  throw new Error("Expected native Info.plist to explain QR scanner camera usage");
+}
 for (const mode of ["fetch", "remote-notification"]) {
   if (!infoPlist.includes(`<string>${mode}</string>`)) {
     throw new Error(`Expected native Info.plist to enable the ${mode} background mode`);
@@ -117,6 +132,9 @@ if (!podfileLock.includes("ExpoHaptics (55.0.14)")) {
 }
 if (!podfileLock.includes("ExpoClipboard (55.0.13)")) {
   throw new Error("Expected native iOS Pods to include ExpoClipboard for message copying");
+}
+if (!podfileLock.includes("ExpoCamera (55.0.16)")) {
+  throw new Error("Expected native iOS Pods to include ExpoCamera for QR pairing scans");
 }
 if (!podfileLock.includes("react-native-safe-area-context (5.6.2)")) {
   throw new Error("Expected native iOS Pods to include react-native-safe-area-context");
@@ -138,6 +156,10 @@ const messagePreloader = await readFile(
   "utf8"
 );
 const pairingScreen = await readFile(join(process.cwd(), "src/screens/PairingScreen.tsx"), "utf8");
+const remoteControlScreen = await readFile(
+  join(process.cwd(), "src/screens/RemoteControlScreen.tsx"),
+  "utf8"
+);
 if (mobileStore.includes("https://workspace.abitat.io")) {
   throw new Error("Expected mobile-store to avoid hosted workspace.abitat.io defaults");
 }
@@ -164,6 +186,33 @@ if (!pairingScreen.includes("pairingSecret")) {
 }
 if (!pairingScreen.includes("createPairingClient(endpoint)")) {
   throw new Error("Expected manual pairing to post to the currently visible Mac endpoint");
+}
+for (const expected of [
+  'const [step, setStep] = useState<"name" | "pair">("name");',
+  "Identify yourself",
+  "Enter your name",
+  'setStep("pair")',
+  "Pair with your Mac",
+  "Enter payload manually",
+  "completePairing(pairingInput)",
+  "completePairing(result.data)",
+  "Modal",
+  "visible={isScanning}",
+  "styles.scannerOverlay",
+  "styles.onboardingScreen",
+  "styles.primaryFont",
+  "TouchableWithoutFeedback",
+  "Keyboard.dismiss",
+  'keyboardAppearance="dark"'
+]) {
+  if (!pairingScreen.includes(expected)) {
+    throw new Error(`Expected PairingScreen to implement two-step onboarding: ${expected}`);
+  }
+}
+for (const removed of ["Mac endpoint", "Pairing payload or manual code", "Device name"]) {
+  if (pairingScreen.includes(removed)) {
+    throw new Error(`Expected PairingScreen to remove old onboarding field: ${removed}`);
+  }
 }
 if (!conversationScreen.includes("mergeConversationMessages")) {
   throw new Error("Expected ConversationScreen to merge refreshed messages without duplicates");
@@ -339,13 +388,45 @@ if (
 for (const expected of [
   "const hasComposerPayload = canSendPrompt(prompt, attachments);",
   "const showComposerSpinner =",
-  "(isConversationBusyStatus(status) || isSending) && !hasComposerPayload;",
+  "editingQueuedMessageId === null;",
   "const sendButtonIconName",
+  '? "check"',
   '? "arrow-up"',
-  ': "send"'
+  ': "send"',
+  "const canSubmitComposer ="
 ]) {
   if (!conversationScreen.includes(expected)) {
     throw new Error(`Expected ConversationScreen to render stateful send controls: ${expected}`);
+  }
+}
+for (const expected of [
+  "queuedLocalMessages",
+  ".filter((message) => !isQueuedLocalMessage(message))",
+  "const optimisticLocalStatus =",
+  "localStatus: optimisticLocalStatus",
+  '? "queued"',
+  ': "sending"',
+  "renderQueuedMessageStack()",
+  "deleteQueuedMessage",
+  "editQueuedMessage",
+  "saveQueuedMessageEdit",
+  "api.deleteQueuedTurn",
+  "api.updateQueuedTurn",
+  "queuedMessageClientId",
+  "removeLocalQueuedMessage",
+  "updateLocalQueuedMessagePrompt",
+  "markLocalMessageSending",
+  "scrollToLatest(true);",
+  "styles.queueStack",
+  "styles.queueStackScroll",
+  'name="trash-2"',
+  'name="edit-3"',
+  'keyboardAppearance="dark"',
+  'keyboardDismissMode="on-drag"',
+  "onScrollBeginDrag={Keyboard.dismiss}"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected ConversationScreen queued composer stack behavior: ${expected}`);
   }
 }
 if (conversationScreen.includes('source === "codex_app" && status === "running"')) {
@@ -775,6 +856,11 @@ for (const expected of [
     throw new Error(`Expected SplashScreen to include ${expected}`);
   }
 }
+for (const expected of ["blackoutOpacity", "blackoutOverlay", "toValue: 1"]) {
+  if (!splashScreen.includes(expected)) {
+    throw new Error(`Expected SplashScreen to fade to black on start: ${expected}`);
+  }
+}
 for (const removed of [
   "cornerLogo",
   "triggerHeartbeatHaptics",
@@ -875,8 +961,6 @@ for (const expected of [
   "onStart={() => setHasStarted(true)}",
   'setRoute("projects");',
   'onSettings={() => navigateToRoute("settings")}',
-  "bootstrap={store.bootstrap}",
-  "error={store.bootstrapError}",
   "onBack={goBackOneLevel}"
 ]) {
   if (!appScreen.includes(expected)) {
@@ -903,8 +987,10 @@ for (const removed of [
 }
 for (const expected of [
   "onSettings(): void;",
+  "isConnected: boolean;",
   'accessibilityLabel="Open settings"',
-  'name="settings"',
+  'name="grid"',
+  'isConnected ? "#ffffff" : "rgba(255,255,255,0.36)"',
   "onPress={onSettings}"
 ]) {
   if (!projectsScreen.includes(expected)) {
@@ -916,10 +1002,22 @@ const settingsScreen = await readFile(
   "utf8"
 );
 for (const expected of [
-  "bootstrap: MobileBootstrap | null;",
-  "error: string | null;",
-  "onBack(): void;",
+  "onSignOut(): void;",
+  "settingsScreen",
+  "settingsPanel",
+  "ABITAT",
+  'accessibilityLabel="Disconnect iPhone from Mac"',
+  "onPress={onSignOut}",
+  "DISCONNECT"
+]) {
+  if (!settingsScreen.includes(expected)) {
+    throw new Error(`Expected SettingsScreen to render the minimal disconnect UI: ${expected}`);
+  }
+}
+for (const removed of [
+  "Header",
   "StatusPill",
+  "sharedStyles.card",
   "bootstrap?.workspace.name",
   "bootstrap?.host?.name",
   "bootstrap?.phone.name",
@@ -929,10 +1027,8 @@ for (const expected of [
   "Back to Projects",
   "Sign Out"
 ]) {
-  if (!settingsScreen.includes(expected)) {
-    throw new Error(
-      `Expected SettingsScreen to consolidate workspace/settings content: ${expected}`
-    );
+  if (settingsScreen.includes(removed)) {
+    throw new Error(`Expected SettingsScreen to remove old diagnostics content: ${removed}`);
   }
 }
 
@@ -994,6 +1090,19 @@ for (const expected of ['delivery?: "queue" | "steer"', "delivery"]) {
   if (!apiClient.includes(expected)) {
     throw new Error(`Expected API client to support queued and steer delivery: ${expected}`);
   }
+}
+for (const expected of [
+  "deleteQueuedTurn",
+  "updateQueuedTurn",
+  'method: "PATCH"',
+  "/queue/${encodeURIComponent(clientMessageId)}"
+]) {
+  if (!apiClient.includes(expected)) {
+    throw new Error(`Expected API client to manage queued composer items: ${expected}`);
+  }
+}
+if (!remoteControlScreen.includes('keyboardAppearance="dark"')) {
+  throw new Error("Expected RemoteControlScreen to use the dark iOS keyboard");
 }
 for (const expected of ["forceRefresh?: boolean", 'params.push("forceRefresh=true")']) {
   if (!apiClient.includes(expected)) {

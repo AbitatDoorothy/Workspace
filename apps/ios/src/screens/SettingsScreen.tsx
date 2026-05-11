@@ -1,82 +1,74 @@
-import { Text, View } from "react-native";
-
-import { Button, Header, StatusPill } from "../components/Controls";
-import { Screen } from "../components/Screen";
-import { colors, sharedStyles } from "../theme";
-import type { MobileBootstrap, PairingState } from "../types";
+import { Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 interface SettingsScreenProps {
-  bootstrap: MobileBootstrap | null;
-  error: string | null;
   onBack(): void;
-  pairing: PairingState | null;
   onSignOut(): void;
 }
 
-export function SettingsScreen({
-  bootstrap,
-  error,
-  onBack,
-  pairing,
-  onSignOut
-}: SettingsScreenProps) {
+export function SettingsScreen({ onSignOut }: SettingsScreenProps) {
   return (
-    <Screen>
-      <Header
-        eyebrow="Settings"
-        title={bootstrap?.workspace.name ?? "Abitat"}
-        subtitle="Manage this iPhone pairing and paired Mac connection."
-      />
-
-      <View style={sharedStyles.card}>
-        <View style={[sharedStyles.row, { justifyContent: "space-between" }]}>
-          <View style={{ flex: 1 }}>
-            <Text style={sharedStyles.label}>Mac host</Text>
-            <Text style={[sharedStyles.value, { marginTop: 4 }]}>
-              {bootstrap?.host?.name ?? "Checking host"}
-            </Text>
-          </View>
-          <StatusPill status={bootstrap?.host?.status ?? "checking"} />
-        </View>
-      </View>
-
-      <View style={sharedStyles.card}>
-        <Text style={sharedStyles.label}>Phone</Text>
-        <Text style={[sharedStyles.value, { marginTop: 4 }]}>
-          {bootstrap?.phone.name ?? "This iPhone"}
+    <SafeAreaView edges={["top", "left", "right"]} style={styles.settingsScreen}>
+      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+      <View style={styles.settingsPanel}>
+        <Text accessibilityRole="header" style={styles.brand}>
+          ABITAT
         </Text>
+        <Pressable
+          accessibilityLabel="Disconnect iPhone from Mac"
+          accessibilityRole="button"
+          onPress={onSignOut}
+          style={({ pressed }) => [
+            styles.disconnectButton,
+            pressed ? styles.disconnectButtonPressed : null
+          ]}
+        >
+          <Text style={styles.disconnectButtonText}>DISCONNECT</Text>
+        </Pressable>
       </View>
-
-      {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-
-      <View style={sharedStyles.card}>
-        <Text style={sharedStyles.label}>API</Text>
-        <Text style={[sharedStyles.value, { marginTop: 4 }]}>
-          {pairing?.apiUrl ?? "Not paired"}
-        </Text>
-      </View>
-
-      <View style={sharedStyles.card}>
-        <Text style={sharedStyles.label}>Phone machine</Text>
-        <Text style={[sharedStyles.value, { marginTop: 4 }]}>
-          {pairing?.machineId ?? "Not paired"}
-        </Text>
-      </View>
-
-      <View style={sharedStyles.card}>
-        <Text style={sharedStyles.label}>Mac host ID</Text>
-        <Text style={[sharedStyles.value, { marginTop: 4 }]}>
-          {pairing?.hostMachineId ?? "Not paired"}
-        </Text>
-      </View>
-
-      <Button onPress={onBack} variant="secondary">
-        Back to Projects
-      </Button>
-
-      <Button onPress={onSignOut} variant="danger">
-        Sign Out
-      </Button>
-    </Screen>
+    </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  brand: {
+    color: "#e6e6e6",
+    fontSize: 36,
+    fontWeight: "300",
+    letterSpacing: 0,
+    lineHeight: 44
+  },
+  disconnectButton: {
+    alignItems: "center",
+    borderColor: "rgba(255,255,255,0.22)",
+    borderRadius: 4,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 50,
+    minWidth: 272,
+    paddingHorizontal: 32
+  },
+  disconnectButtonPressed: {
+    opacity: 0.68,
+    transform: [{ scale: 0.99 }]
+  },
+  disconnectButtonText: {
+    color: "#f3f3f3",
+    fontSize: 15,
+    fontWeight: "400",
+    letterSpacing: 7,
+    lineHeight: 20
+  },
+  settingsPanel: {
+    alignItems: "center",
+    gap: 28,
+    justifyContent: "center",
+    transform: [{ translateY: -18 }]
+  },
+  settingsScreen: {
+    alignItems: "center",
+    backgroundColor: "#000000",
+    flex: 1,
+    justifyContent: "center"
+  }
+});

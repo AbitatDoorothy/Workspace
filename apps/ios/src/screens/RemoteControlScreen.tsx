@@ -190,6 +190,7 @@ export function RemoteControlScreen({ api, hostMachineId }: RemoteControlScreenP
       {mode === "keyboard" ? (
         <View style={sharedStyles.card}>
           <TextInput
+            keyboardAppearance="dark"
             onChangeText={setKeyboardText}
             placeholder="Type to Mac"
             placeholderTextColor={colors.muted}

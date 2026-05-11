@@ -203,6 +203,37 @@ describe("local control server", () => {
         })
       );
       await expect(
+        fetchJson(`${endpoint}/api/mobile/conversations/codex_thread_new/queue/ios-2`, {
+          headers: auth,
+          method: "DELETE"
+        })
+      ).resolves.toEqual({
+        conversationId: "codex_thread_new",
+        removed: true,
+        status: "queued"
+      });
+      expect(bridge.deletedQueuedTurns).toEqual([
+        { clientMessageId: "ios-2", conversationId: "codex_thread_new" }
+      ]);
+      await expect(
+        fetchJson(`${endpoint}/api/mobile/conversations/codex_thread_new/queue/ios-2`, {
+          body: JSON.stringify({ prompt: "Edited queued prompt" }),
+          headers: { ...auth, "content-type": "application/json" },
+          method: "PATCH"
+        })
+      ).resolves.toEqual({
+        conversationId: "codex_thread_new",
+        status: "queued",
+        updated: true
+      });
+      expect(bridge.updatedQueuedTurns).toEqual([
+        {
+          clientMessageId: "ios-2",
+          conversationId: "codex_thread_new",
+          prompt: "Edited queued prompt"
+        }
+      ]);
+      await expect(
         fetchJson(`${endpoint}/api/mobile/conversations/codex_thread_new/files`)
       ).rejects.toThrow("401");
       await expect(
@@ -317,16 +348,26 @@ function createFakeCodexBridge(options: { continueError?: Error } = {}): LocalCo
     options?: { afterSequence?: number; forceRefresh?: boolean; includeRuntime?: boolean };
   }>;
   startedPrompts: string[];
+  deletedQueuedTurns: Array<{ clientMessageId: string; conversationId: string }>;
+  updatedQueuedTurns: Array<{ clientMessageId: string; conversationId: string; prompt: string }>;
 } {
   const listMessageRequests: Array<{
     conversationId: string;
     options?: { afterSequence?: number; forceRefresh?: boolean; includeRuntime?: boolean };
   }> = [];
   const startedPrompts: string[] = [];
+  const deletedQueuedTurns: Array<{ clientMessageId: string; conversationId: string }> = [];
+  const updatedQueuedTurns: Array<{
+    clientMessageId: string;
+    conversationId: string;
+    prompt: string;
+  }> = [];
 
   return {
+    deletedQueuedTurns,
     listMessageRequests,
     startedPrompts,
+    updatedQueuedTurns,
     async bootstrap() {
       return { available: true };
     },
@@ -336,6 +377,18 @@ function createFakeCodexBridge(options: { continueError?: Error } = {}): LocalCo
       }
       startedPrompts.push(input.prompt);
       return { conversationId, status: "running" };
+    },
+    async deleteQueuedTurn(conversationId, input) {
+      deletedQueuedTurns.push({ clientMessageId: input.clientMessageId, conversationId });
+      return { conversationId, removed: true, status: "queued" };
+    },
+    async updateQueuedTurn(conversationId, input) {
+      updatedQueuedTurns.push({
+        clientMessageId: input.clientMessageId,
+        conversationId,
+        prompt: input.prompt
+      });
+      return { conversationId, status: "queued", updated: true };
     },
     async listCompletionStates() {
       return [];

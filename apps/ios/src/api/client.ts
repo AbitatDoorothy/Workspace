@@ -59,6 +59,10 @@ export interface ApiClient {
     }
   ): Promise<{ conversationId: string; status: string }>;
   createRemoteSession(hostMachineId: string): Promise<RemoteControlSession>;
+  deleteQueuedTurn(
+    conversationId: string,
+    clientMessageId: string
+  ): Promise<{ conversationId: string; removed: boolean; status: string }>;
   endRemoteSession(sessionId: string): Promise<RemoteControlSession>;
   listConversations(projectId: string): Promise<ConversationSummary[]>;
   listCompletionStates(): Promise<CodexCompletionSummary[]>;
@@ -83,6 +87,11 @@ export interface ApiClient {
     fileName: string;
     mimeType: string;
   }): Promise<ConversationAttachment>;
+  updateQueuedTurn(
+    conversationId: string,
+    clientMessageId: string,
+    input: { prompt: string }
+  ): Promise<{ conversationId: string; status: string; updated: boolean }>;
 }
 
 export function createApiClient(pairing: PairingState): ApiClient {
@@ -134,6 +143,11 @@ export function createApiClient(pairing: PairingState): ApiClient {
         inputEnabled: true,
         screenEnabled: true
       }).then((body) => body.session as RemoteControlSession),
+    deleteQueuedTurn: (conversationId, clientMessageId) =>
+      del(
+        pairing,
+        `/api/mobile/conversations/${conversationId}/queue/${encodeURIComponent(clientMessageId)}`
+      ).then((body) => body as { conversationId: string; removed: boolean; status: string }),
     endRemoteSession: (sessionId) =>
       del(pairing, `/api/remote-control/sessions/${sessionId}`).then(
         (body) => body.session as RemoteControlSession
@@ -177,7 +191,13 @@ export function createApiClient(pairing: PairingState): ApiClient {
     uploadAttachment: (input) =>
       post(pairing, "/api/mobile/attachments", input).then(
         (body) => body.attachment as ConversationAttachment
-      )
+      ),
+    updateQueuedTurn: (conversationId, clientMessageId, input) =>
+      patch(
+        pairing,
+        `/api/mobile/conversations/${conversationId}/queue/${encodeURIComponent(clientMessageId)}`,
+        input
+      ).then((body) => body as { conversationId: string; status: string; updated: boolean })
   };
 }
 
@@ -220,6 +240,14 @@ async function post(pairing: PairingState, path: string, body: unknown) {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST"
+  });
+}
+
+async function patch(pairing: PairingState, path: string, body: unknown) {
+  return request(pairing, path, {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "PATCH"
   });
 }
 
