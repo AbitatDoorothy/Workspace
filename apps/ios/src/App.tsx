@@ -8,6 +8,7 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { PairingScreen } from "./screens/PairingScreen";
 import { SplashScreen } from "./screens/SplashScreen";
@@ -36,6 +37,14 @@ interface NavigationRouteLayer {
 }
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppContent />
+    </SafeAreaProvider>
+  );
+}
+
+function AppContent() {
   const store = useMobileStore();
   const { width: windowWidth } = useWindowDimensions();
   const routeLayerSequenceRef = useRef(0);

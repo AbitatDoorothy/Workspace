@@ -1,14 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
-import {
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  View
-} from "react-native";
+import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { ApiClient } from "../api/client";
 import { colors } from "../theme";
@@ -112,7 +105,7 @@ export function ProjectsScreen({
   }, [api, onProjectsLoaded, refreshEnabled]);
 
   return (
-    <SafeAreaView style={styles.voidScreen}>
+    <SafeAreaView edges={["top", "left", "right"]} style={styles.voidScreen}>
       <StatusBar barStyle="light-content" />
       <View pointerEvents="none" style={styles.starField}>
         {CELESTIAL_STARS.map((star, index) => (

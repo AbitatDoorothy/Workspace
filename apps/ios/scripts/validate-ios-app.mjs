@@ -45,6 +45,9 @@ if (!packageJson.dependencies?.["expo-clipboard"]) {
 if (!packageJson.dependencies?.["@expo/vector-icons"]) {
   throw new Error("Expected abitat-ios to depend on @expo/vector-icons for project icons");
 }
+if (!packageJson.dependencies?.["react-native-safe-area-context"]) {
+  throw new Error("Expected abitat-ios to depend on react-native-safe-area-context");
+}
 for (const dependency of [
   "expo-document-picker",
   "expo-file-system",
@@ -114,6 +117,9 @@ if (!podfileLock.includes("ExpoHaptics (55.0.14)")) {
 }
 if (!podfileLock.includes("ExpoClipboard (55.0.13)")) {
   throw new Error("Expected native iOS Pods to include ExpoClipboard for message copying");
+}
+if (!podfileLock.includes("react-native-safe-area-context (5.6.2)")) {
+  throw new Error("Expected native iOS Pods to include react-native-safe-area-context");
 }
 
 const conversationScreen = await readFile(
@@ -482,14 +488,60 @@ if (!projectDetailScreen.includes('accessibilityLabel="Back to all projects"')) 
 if (!projectDetailScreen.includes("onPress={onBack}")) {
   throw new Error("Expected ProjectDetailScreen back button to call onBack");
 }
-if (!projectDetailScreen.includes("styles.backButton")) {
-  throw new Error("Expected ProjectDetailScreen to style the projects back button");
-}
 if (!projectDetailScreen.includes('accessibilityLabel="New Thread"')) {
   throw new Error("Expected ProjectDetailScreen to expose a New Thread button");
 }
 if (!projectDetailScreen.includes("function startNewThread()")) {
   throw new Error("Expected ProjectDetailScreen to enter a draft chat before starting Codex");
+}
+for (const expected of [
+  'import { Feather } from "@expo/vector-icons";',
+  "PROJECT_DETAIL_STARS",
+  "SafeAreaView",
+  "StatusBar",
+  "styles.projectScreen",
+  "styles.starField",
+  "styles.projectHeader",
+  "project.name",
+  "Threads",
+  "styles.threadRow",
+  "styles.threadStatusLight",
+  "isThreadRunningStatus(conversation.status)",
+  "styles.threadStatusRunning",
+  "styles.threadStatusIdle",
+  'conversation.prompt || "Untitled thread"',
+  "styles.newThreadDock",
+  "styles.newThreadButton"
+]) {
+  if (!projectDetailScreen.includes(expected)) {
+    throw new Error(`Expected ProjectDetailScreen to match the celestial thread UI: ${expected}`);
+  }
+}
+for (const expected of [
+  'projectName: {\n    color: "#ffffff",\n    flexShrink: 1,\n    fontSize: 22,',
+  'sectionTitle: {\n    color: "#ffffff",\n    fontSize: 18,',
+  "threadList: {\n    paddingBottom: 18,\n    paddingTop: 22",
+  'threadName: {\n    color: "#f7f7f7",\n    flex: 1,\n    fontSize: 18,',
+  'newThreadButtonText: {\n    color: "#f5f5f5",\n    fontSize: 18,'
+]) {
+  if (!projectDetailScreen.includes(expected)) {
+    throw new Error(
+      `Expected ProjectDetailScreen to use compact project-detail typography: ${expected}`
+    );
+  }
+}
+for (const removed of [
+  "import { Button, Header, StatusPill }",
+  "<Header",
+  "<StatusPill",
+  "sharedStyles.card",
+  "styles.backButton",
+  "styles.conversationStatusRow",
+  ">Conversations<"
+]) {
+  if (projectDetailScreen.includes(removed)) {
+    throw new Error(`Expected ProjectDetailScreen to remove old project detail UI: ${removed}`);
+  }
 }
 for (const removed of [
   "CodexModelControls",
@@ -532,13 +584,17 @@ if (!conversationScreen.includes("onBack(): void")) {
 }
 for (const expected of [
   "threadTitle",
+  "collapsedThreadTitle",
+  "compactThreadTitle(threadTitle)",
   "styles.threadBubble",
   "styles.statusLed",
   "isConversationBusyStatus(status)",
   "numberOfLines={isHeaderExpanded ? 3 : 1}",
+  "isHeaderExpanded ? threadTitle : collapsedThreadTitle",
   "!isHeaderExpanded ? (",
   'accessibilityLabel="Toggle full thread name"',
-  "styles.headerActions"
+  "styles.headerActions",
+  "styles.threadClusterExpanded"
 ]) {
   if (!conversationScreen.includes(expected)) {
     throw new Error(`Expected ConversationScreen to expose the new thread header: ${expected}`);
@@ -553,12 +609,29 @@ for (const expected of [
   'backgroundColor: "#000000"',
   "styles.composerShell",
   "styles.composerRow",
-  "paddingBottom: 30",
-  "paddingTop: 30"
+  "paddingBottom: 14",
+  "paddingTop: 14",
+  "paddingBottom: 22",
+  "paddingTop: 4"
 ]) {
   if (!conversationScreen.includes(expected)) {
     throw new Error(`Expected ConversationScreen to use pure-black bubble layout: ${expected}`);
   }
+}
+for (const expected of [
+  'accessibilityLabel="Scroll to latest message"',
+  "styles.latestButton",
+  "styles.latestButtonIcon",
+  'name="arrow-down"',
+  "compactThreadTitle",
+  "slice(0, 6)"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected ConversationScreen compact latest/title controls: ${expected}`);
+  }
+}
+if (conversationScreen.includes(">Latest<")) {
+  throw new Error("Expected ConversationScreen to replace Latest text with an arrow icon");
 }
 for (const removed of [
   "FixedScreen",
@@ -661,7 +734,24 @@ for (const expected of [
 }
 
 const appScreen = await readFile(join(process.cwd(), "src/App.tsx"), "utf8");
+const screenComponent = await readFile(join(process.cwd(), "src/components/Screen.tsx"), "utf8");
 const splashScreen = await readFile(join(process.cwd(), "src/screens/SplashScreen.tsx"), "utf8");
+if (!appScreen.includes("SafeAreaProvider")) {
+  throw new Error("Expected App to provide safe-area context at the app root");
+}
+for (const [fileName, fileContent] of [
+  ["Screen.tsx", screenComponent],
+  ["ProjectsScreen.tsx", projectsScreen],
+  ["ProjectDetailScreen.tsx", projectDetailScreen],
+  ["ConversationScreen.tsx", conversationScreen]
+]) {
+  if (!fileContent.includes('from "react-native-safe-area-context"')) {
+    throw new Error(`Expected ${fileName} to use configurable safe-area edges`);
+  }
+  if (!fileContent.includes('edges={["top", "left", "right"]}')) {
+    throw new Error(`Expected ${fileName} to remove the bottom safe-area edge`);
+  }
+}
 for (const expected of [
   "SplashScreen",
   "Animated.loop",

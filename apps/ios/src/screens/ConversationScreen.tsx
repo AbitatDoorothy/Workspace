@@ -15,7 +15,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   StatusBar,
@@ -23,6 +22,7 @@ import {
   TextInput,
   View
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { ApiClient } from "../api/client";
 import { CodexModelControls } from "../components/CodexModelControls";
@@ -32,7 +32,7 @@ import {
   moveCachedConversationMessages,
   saveCachedConversationMessages
 } from "../state/message-cache";
-import { colors, sharedStyles } from "../theme";
+import { colors } from "../theme";
 import type {
   CodexMobileModelSettings,
   ConversationAttachment,
@@ -145,6 +145,7 @@ export function ConversationScreen({
   const canSendNow = !isDraftConversation(activeConversation) || !isSending;
   const canSteerNow = !isDraftConversation(activeConversation) && isConversationBusyStatus(status);
   const threadTitle = activeConversation.prompt || "New Thread";
+  const collapsedThreadTitle = compactThreadTitle(threadTitle);
   const hasComposerPayload = canSendPrompt(prompt, attachments);
   const showComposerSpinner =
     (isConversationBusyStatus(status) || isSending) && !hasComposerPayload;
@@ -900,7 +901,7 @@ export function ConversationScreen({
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       style={styles.keyboardAvoidingScreen}
     >
-      <SafeAreaView style={styles.conversationScreen}>
+      <SafeAreaView edges={["top", "left", "right"]} style={styles.conversationScreen}>
         <StatusBar barStyle="light-content" backgroundColor="#000000" />
         <View style={styles.conversationContent}>
           <View pointerEvents="none" style={styles.starField}>
@@ -922,7 +923,9 @@ export function ConversationScreen({
           </View>
 
           <View style={styles.chatHeader}>
-            <View style={styles.threadCluster}>
+            <View
+              style={[styles.threadCluster, isHeaderExpanded ? styles.threadClusterExpanded : null]}
+            >
               <Pressable
                 accessibilityLabel="Toggle full thread name"
                 accessibilityRole="button"
@@ -931,7 +934,7 @@ export function ConversationScreen({
                 style={[styles.threadBubble, isHeaderExpanded ? styles.threadBubbleExpanded : null]}
               >
                 <Text numberOfLines={isHeaderExpanded ? 3 : 1} style={styles.threadBubbleText}>
-                  {threadTitle}
+                  {isHeaderExpanded ? threadTitle : collapsedThreadTitle}
                 </Text>
               </Pressable>
               <View
@@ -983,19 +986,17 @@ export function ConversationScreen({
             />
             {showScrollToLatestButton ? (
               <Pressable
+                accessibilityLabel="Scroll to latest message"
+                accessibilityRole="button"
                 onPress={() => scrollToLatest(true)}
-                style={[
-                  sharedStyles.secondaryButton,
-                  {
-                    alignSelf: "center",
-                    bottom: 12,
-                    minHeight: 38,
-                    paddingHorizontal: 14,
-                    position: "absolute"
-                  }
-                ]}
+                style={styles.latestButton}
               >
-                <Text style={sharedStyles.buttonText}>Latest</Text>
+                <Feather
+                  color="#ffffff"
+                  name="arrow-down"
+                  size={20}
+                  style={styles.latestButtonIcon}
+                />
               </Pressable>
             ) : null}
           </View>
@@ -1224,13 +1225,13 @@ const styles = StyleSheet.create({
   composerShell: {
     backgroundColor: "#000000",
     gap: 10,
-    paddingBottom: 8,
-    paddingTop: 8
+    paddingBottom: 22,
+    paddingTop: 4
   },
   conversationContent: {
     backgroundColor: "#000000",
     flex: 1,
-    gap: 10,
+    gap: 6,
     paddingHorizontal: 18,
     paddingTop: 8
   },
@@ -1377,6 +1378,25 @@ const styles = StyleSheet.create({
     backgroundColor: "#000000",
     flex: 1
   },
+  latestButton: {
+    alignItems: "center",
+    alignSelf: "center",
+    backgroundColor: "rgba(0,0,0,0.58)",
+    borderColor: "rgba(255,255,255,0.16)",
+    borderRadius: 999,
+    borderWidth: 1,
+    bottom: 8,
+    height: 42,
+    justifyContent: "center",
+    position: "absolute",
+    shadowColor: "#000000",
+    shadowOpacity: 0.24,
+    shadowRadius: 12,
+    width: 42
+  },
+  latestButtonIcon: {
+    opacity: 0.92
+  },
   messageBlock: {
     gap: 7,
     marginBottom: 16
@@ -1388,8 +1408,8 @@ const styles = StyleSheet.create({
   },
   messageList: {
     gap: 2,
-    paddingBottom: 30,
-    paddingTop: 30
+    paddingBottom: 14,
+    paddingTop: 14
   },
   messageMetaRow: {
     alignItems: "center",
@@ -1445,9 +1465,9 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     justifyContent: "center",
-    maxWidth: 180,
-    minHeight: 36,
-    paddingHorizontal: 16
+    maxWidth: 112,
+    minHeight: 34,
+    paddingHorizontal: 14
   },
   threadBubbleExpanded: {
     alignItems: "flex-start",
@@ -1464,10 +1484,15 @@ const styles = StyleSheet.create({
   },
   threadCluster: {
     alignItems: "center",
-    flex: 1,
     flexDirection: "row",
-    gap: 12,
+    flexShrink: 1,
+    gap: 8,
+    maxWidth: 134,
     minWidth: 0
+  },
+  threadClusterExpanded: {
+    flex: 1,
+    maxWidth: "100%"
   },
   userMessageBlock: {
     alignItems: "flex-end",
@@ -1490,6 +1515,15 @@ const styles = StyleSheet.create({
 
 function canSendPrompt(prompt: string, attachments: PendingAttachment[]) {
   return prompt.trim().length > 0 || attachments.length > 0;
+}
+
+function compactThreadTitle(title: string) {
+  const trimmedTitle = title.trim();
+  if (trimmedTitle.length <= 6) {
+    return trimmedTitle;
+  }
+
+  return `${trimmedTitle.slice(0, 6)}...`;
 }
 
 function isDraftConversation(conversation: ConversationSummary) {
