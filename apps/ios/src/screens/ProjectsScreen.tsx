@@ -9,12 +9,23 @@ import type { ProjectSummary } from "../types";
 
 interface ProjectsScreenProps {
   api: ApiClient;
+  initialProjects?: ProjectSummary[];
   onProject(project: ProjectSummary): void;
+  onProjectsLoaded?(projects: ProjectSummary[]): void;
 }
 
-export function ProjectsScreen({ api, onProject }: ProjectsScreenProps) {
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+export function ProjectsScreen({
+  api,
+  initialProjects = [],
+  onProject,
+  onProjectsLoaded
+}: ProjectsScreenProps) {
+  const [projects, setProjects] = useState<ProjectSummary[]>(initialProjects);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setProjects(initialProjects);
+  }, [initialProjects]);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,6 +36,7 @@ export function ProjectsScreen({ api, onProject }: ProjectsScreenProps) {
 
         if (!cancelled) {
           setProjects(nextProjects);
+          onProjectsLoaded?.(nextProjects);
           setError(null);
         }
       } catch (caught) {
@@ -41,7 +53,7 @@ export function ProjectsScreen({ api, onProject }: ProjectsScreenProps) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [api]);
+  }, [api, onProjectsLoaded]);
 
   return (
     <Screen>

@@ -9,19 +9,27 @@ import type { ConversationSummary, ProjectSummary } from "../types";
 
 interface ProjectDetailScreenProps {
   api: ApiClient;
+  initialConversations?: ConversationSummary[];
   onBack(): void;
   onConversation(conversation: ConversationSummary): void;
+  onConversationsLoaded?(projectId: string, conversations: ConversationSummary[]): void;
   project: ProjectSummary;
 }
 
 export function ProjectDetailScreen({
   api,
+  initialConversations = [],
   onBack,
   onConversation,
+  onConversationsLoaded,
   project
 }: ProjectDetailScreenProps) {
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [conversations, setConversations] = useState<ConversationSummary[]>(initialConversations);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setConversations(initialConversations);
+  }, [initialConversations, project.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,6 +40,7 @@ export function ProjectDetailScreen({
 
         if (!cancelled) {
           setConversations(nextConversations);
+          onConversationsLoaded?.(project.id, nextConversations);
           setError(null);
         }
       } catch (caught) {
@@ -47,7 +56,7 @@ export function ProjectDetailScreen({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [api, project.id]);
+  }, [api, project.id, onConversationsLoaded]);
 
   function startNewThread() {
     onConversation({

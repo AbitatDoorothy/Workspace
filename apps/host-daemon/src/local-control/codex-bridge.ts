@@ -34,6 +34,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const START_TIMEOUT_MS = 15_000;
 const TURN_KEEPALIVE_TIMEOUT_MS = 30 * 60_000;
 const QUEUED_TURN_POLL_INTERVAL_MS = 250;
+const THREAD_LIST_CACHE_TTL_MS = 2_500;
 const MAX_CODEX_MESSAGE_CONTENT_LENGTH = 12_000;
 const HIDDEN_CODEX_ITEM_TYPES = new Set(["reasoning"]);
 const PHONE_FULL_ACCESS_TURN_OPTIONS = {
@@ -165,8 +166,31 @@ export function createLocalCodexBridge(
   const userId = options.userId ?? "local";
   const queuedTurnsByThread = new Map<string, QueuedCodexTurnInput[]>();
   const queueDrainTimers = new Map<string, NodeJS.Timeout>();
+  const threadListCache = new Map<
+    string,
+    { expiresAt: number; promise: Promise<CodexAppThread[]> }
+  >();
 
   async function listAllThreads(params: CodexAppThreadListParams = {}) {
+    const cacheKey = threadListCacheKey(params);
+    const cached = threadListCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) {
+      return cached.promise;
+    }
+
+    const promise = loadAllThreads(params).catch((error) => {
+      threadListCache.delete(cacheKey);
+      throw error;
+    });
+    threadListCache.set(cacheKey, {
+      expiresAt: now + THREAD_LIST_CACHE_TTL_MS,
+      promise
+    });
+    return promise;
+  }
+
+  async function loadAllThreads(params: CodexAppThreadListParams = {}) {
     if (params.useStateDbOnly !== undefined) {
       return listAllThreadsOnce(params);
     }
@@ -208,11 +232,13 @@ export function createLocalCodexBridge(
   }
 
   async function resolveProjectCwd(projectId: string) {
-    const project = (await listProjects()).find((candidate) => candidate.id === projectId);
-    if (!project) {
-      throw Object.assign(new Error("Codex project not found"), { statusCode: 404 });
+    for (const thread of await listAllThreads()) {
+      if (externalCodexProjectId(thread.cwd) === projectId) {
+        return thread.cwd;
+      }
     }
-    return project.hostLocalPath;
+
+    throw Object.assign(new Error("Codex project not found"), { statusCode: 404 });
   }
 
   async function listProjects(): Promise<LocalCodexProjectSummary[]> {
@@ -372,7 +398,7 @@ export function createLocalCodexBridge(
     },
 
     async listCompletionStates() {
-      const threads = await readThreadsWithTurns(await listAllThreads());
+      const threads = await readThreadsWithTurns(await loadAllThreads());
       logDiagnostics(diagnostics, "info", "completion.states.result", {
         stateCount: threads.length
       });
@@ -421,7 +447,7 @@ export function createLocalCodexBridge(
 
     async listProjectConversations(projectId) {
       const cwd = await resolveProjectCwd(projectId);
-      const threads = await readThreadsWithTurns(await listAllThreads({ cwd }));
+      const threads = await hydrateConversationStatusThreads(await listAllThreads({ cwd }));
       return threads
         .filter((thread) => externalCodexProjectId(thread.cwd) === projectId)
         .sort((left, right) => right.updatedAt - left.updatedAt)
@@ -453,6 +479,19 @@ export function createLocalCodexBridge(
   async function readThreadsWithTurns(threads: CodexAppThread[]) {
     return Promise.all(
       threads.map(async (thread) => {
+        const readThread = await client.readThread(thread.id, true).catch(() => thread);
+        return mergeCodexThreadSnapshots(readThread, thread);
+      })
+    );
+  }
+
+  async function hydrateConversationStatusThreads(threads: CodexAppThread[]) {
+    return Promise.all(
+      threads.map(async (thread) => {
+        if (!needsConversationStatusHydration(thread)) {
+          return thread;
+        }
+
         const readThread = await client.readThread(thread.id, true).catch(() => thread);
         return mergeCodexThreadSnapshots(readThread, thread);
       })
@@ -997,6 +1036,17 @@ function toCodexThreadId(conversationId: string) {
     : conversationId;
 }
 
+function threadListCacheKey(params: CodexAppThreadListParams) {
+  return JSON.stringify({
+    archived: params.archived ?? null,
+    cursor: params.cursor ?? null,
+    cwd: params.cwd ?? null,
+    limit: params.limit ?? null,
+    sortDirection: params.sortDirection ?? null,
+    useStateDbOnly: params.useStateDbOnly ?? null
+  });
+}
+
 function mergeCodexThreadLists(...threadLists: CodexAppThread[][]) {
   const byId = new Map<string, CodexAppThread>();
 
@@ -1110,6 +1160,10 @@ function hasUnpersistedThreadListActivity(
 function isThreadListActivitySummaryStatus(status: CodexAppThreadStatus) {
   const statusType = threadStatusType(status);
   return statusType === "idle" || statusType === "notLoaded";
+}
+
+function needsConversationStatusHydration(thread: CodexAppThread) {
+  return thread.turns.length === 0 && isThreadListActivitySummaryStatus(thread.status);
 }
 
 function threadListActivitySeconds(thread: CodexAppThread) {

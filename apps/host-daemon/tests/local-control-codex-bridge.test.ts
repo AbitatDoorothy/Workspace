@@ -1,7 +1,26 @@
-import { describe, expect, it } from "vitest";
+import { AddressInfo } from "node:net";
 
-import { flattenThreadMessages } from "../src/local-control/codex-bridge";
+import WebSocket, { WebSocketServer } from "ws";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createLocalCodexBridge, flattenThreadMessages } from "../src/local-control/codex-bridge";
 import type { MobileControlDiagnosticsLogger } from "../src/local-control/diagnostics-log";
+
+const openServers: WebSocketServer[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    openServers.splice(0).map((server) => {
+      for (const client of server.clients) {
+        client.terminate();
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    })
+  );
+});
 
 describe("local Codex bridge diagnostics", () => {
   it("logs unknown thread item types and completed turns without visible assistant messages", () => {
@@ -82,6 +101,94 @@ describe("local Codex bridge diagnostics", () => {
     expect(JSON.stringify(diagnostics.events)).not.toContain("hidden payload");
   });
 });
+
+describe("local Codex bridge loading performance", () => {
+  it("lists project conversations without reading full thread history", async () => {
+    const calls: string[] = [];
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (typeof message.method === "string") {
+        calls.push(message.method);
+      }
+
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/loaded/list") {
+        sendResult(socket, message.id, { data: [], nextCursor: null });
+      }
+
+      if (message.method === "thread/list") {
+        sendResult(socket, message.id, {
+          data: [
+            {
+              createdAt: 1_778_000_000,
+              cwd: "/Users/reece/Desktop/Fast Project",
+              ephemeral: false,
+              id: "thread_fast",
+              name: null,
+              preview: "Make loading faster",
+              status: { activeFlags: [], type: "active" },
+              turns: [],
+              updatedAt: 1_778_000_050
+            }
+          ],
+          nextCursor: null
+        });
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          thread: {
+            createdAt: 1_778_000_000,
+            cwd: "/Users/reece/Desktop/Fast Project",
+            ephemeral: false,
+            id: "thread_fast",
+            name: null,
+            preview: "Make loading faster",
+            status: { activeFlags: [], type: "active" },
+            turns: [],
+            updatedAt: 1_778_000_050
+          }
+        });
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+
+    const [project] = await bridge.listProjects();
+    const conversations = await bridge.listProjectConversations(project.id);
+
+    expect(conversations).toEqual([
+      expect.objectContaining({
+        id: "codex_thread_thread_fast",
+        prompt: "Make loading faster",
+        worktreePath: "/Users/reece/Desktop/Fast Project"
+      })
+    ]);
+    expect(calls.filter((method) => method === "thread/read")).toHaveLength(0);
+  });
+});
+
+async function startMockCodexAppServer(
+  onMessage: (
+    socket: WebSocket,
+    message: { id?: number; method?: string; params?: unknown }
+  ) => void
+) {
+  const server = new WebSocketServer({ port: 0 });
+  openServers.push(server);
+  server.on("connection", (socket) => {
+    socket.on("message", (raw) => onMessage(socket, JSON.parse(raw.toString())));
+  });
+
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address() as AddressInfo;
+  return { serverUrl: `ws://127.0.0.1:${address.port}` };
+}
+
+function sendResult(socket: WebSocket, id: number | undefined, result: unknown) {
+  socket.send(JSON.stringify({ id, result }));
+}
 
 function createMemoryDiagnostics() {
   const events: Array<Record<string, unknown>> = [];
