@@ -43,7 +43,7 @@ if (!packageJson.dependencies?.["expo-clipboard"]) {
   throw new Error("Expected abitat-ios to depend on expo-clipboard for message copying");
 }
 if (!packageJson.dependencies?.["@expo/vector-icons"]) {
-  throw new Error("Expected abitat-ios to depend on @expo/vector-icons for bottom navigation");
+  throw new Error("Expected abitat-ios to depend on @expo/vector-icons for project icons");
 }
 for (const dependency of [
   "expo-document-picker",
@@ -395,6 +395,49 @@ for (const expected of ["initialProjects", "onProjectsLoaded", "setProjects(init
   }
 }
 for (const expected of [
+  'import { Feather } from "@expo/vector-icons";',
+  "CELESTIAL_STARS",
+  "BIG_DIPPER_STARS",
+  "ABITAT",
+  "PROJECTS",
+  "projects.map((project)",
+  "project.name",
+  'name="folder"',
+  "styles.voidScreen",
+  "styles.starField",
+  "styles.projectRow",
+  "onSettings(): void;",
+  "paddingTop: 28",
+  "fontSize: 24",
+  "fontSize: 16",
+  "fontSize: 20",
+  "marginTop: 38"
+]) {
+  if (!projectsScreen.includes(expected)) {
+    throw new Error(`Expected ProjectsScreen to match the celestial project UI: ${expected}`);
+  }
+}
+for (const removed of ["PanResponder", "SWIPE_BACK_DISTANCE", "onPanResponderRelease"]) {
+  if (projectsScreen.includes(removed)) {
+    throw new Error(`Expected ProjectsScreen to leave swipe navigation to App: ${removed}`);
+  }
+}
+for (const removed of [
+  "Codex Projects",
+  "folderGrid",
+  "folderTile",
+  "folderBody",
+  "fontSize: 34",
+  "fontSize: 30",
+  "fontSize: 25",
+  "marginTop: 74",
+  "paddingTop: 52"
+]) {
+  if (projectsScreen.includes(removed)) {
+    throw new Error(`Expected ProjectsScreen to remove old folder-grid UI: ${removed}`);
+  }
+}
+for (const expected of [
   "initialConversations",
   "onConversationsLoaded",
   "setConversations(initialConversations)"
@@ -631,34 +674,72 @@ if (!appScreen.includes('onBack={() => setRoute(project ? "project" : "projects"
 if (!appScreen.includes('onBack={() => setRoute("projects")}')) {
   throw new Error("Expected App to route project back actions to the projects page");
 }
-if (!appScreen.includes('import { Ionicons } from "@expo/vector-icons";')) {
-  throw new Error("Expected App bottom navigation to render Expo Ionicons");
-}
 for (const expected of [
-  'route: "workspace"',
-  'label: "Workspace"',
-  'icon: "laptop-outline"',
-  'route: "projects"',
-  'label: "Projects"',
-  'icon: "folder-outline"',
-  'route: "settings"',
-  'label: "Settings"',
-  'icon: "settings-outline"',
-  'accessibilityRole="tab"',
-  "accessibilityState={{ selected: isActive }}"
+  'const [route, setRoute] = useState<RouteName>("projects");',
+  "PanResponder",
+  "GLOBAL_BACK_SWIPE_DISTANCE",
+  "goBackOneLevel",
+  "createGlobalBackSwipeResponder",
+  "gesture.dx >= GLOBAL_BACK_SWIPE_DISTANCE",
+  "onBack();",
+  "{...globalBackSwipeResponder.panHandlers}",
+  "onStart={() => setHasStarted(true)}",
+  'setRoute("projects");',
+  'onSettings={() => setRoute("settings")}',
+  "bootstrap={store.bootstrap}",
+  "error={store.bootstrapError}",
+  'onBack={() => setRoute("projects")}'
 ]) {
   if (!appScreen.includes(expected)) {
-    throw new Error(`Expected App bottom navigation to include ${expected}`);
+    throw new Error(`Expected App to route Start/pairing/settings through Projects: ${expected}`);
   }
 }
-if (appScreen.includes("{item}</Text>") || appScreen.includes("textTransform")) {
-  throw new Error("Expected App bottom navigation to use icon-only buttons");
+for (const removed of [
+  'import { Ionicons } from "@expo/vector-icons";',
+  "NAV_ITEMS",
+  "shouldShowBottomNav",
+  "styles.bottomNav",
+  'accessibilityRole="tab"',
+  'label: "Workspace"',
+  'label: "Settings"'
+]) {
+  if (appScreen.includes(removed)) {
+    throw new Error(`Expected App to remove bottom navigation: ${removed}`);
+  }
 }
-if (!appScreen.includes('const shouldShowBottomNav = route !== "conversation";')) {
-  throw new Error("Expected App to hide bottom navigation on the chat interface");
+for (const expected of [
+  "onSettings(): void;",
+  'accessibilityLabel="Open settings"',
+  'name="settings"',
+  "onPress={onSettings}"
+]) {
+  if (!projectsScreen.includes(expected)) {
+    throw new Error(`Expected ProjectsScreen to expose top-right settings access: ${expected}`);
+  }
 }
-if (!appScreen.includes("{shouldShowBottomNav ? (")) {
-  throw new Error("Expected App bottom navigation rendering to be route-gated");
+const settingsScreen = await readFile(
+  join(process.cwd(), "src/screens/SettingsScreen.tsx"),
+  "utf8"
+);
+for (const expected of [
+  "bootstrap: MobileBootstrap | null;",
+  "error: string | null;",
+  "onBack(): void;",
+  "StatusPill",
+  "bootstrap?.workspace.name",
+  "bootstrap?.host?.name",
+  "bootstrap?.phone.name",
+  "pairing?.apiUrl",
+  "pairing?.machineId",
+  "pairing?.hostMachineId",
+  "Back to Projects",
+  "Sign Out"
+]) {
+  if (!settingsScreen.includes(expected)) {
+    throw new Error(
+      `Expected SettingsScreen to consolidate workspace/settings content: ${expected}`
+    );
+  }
 }
 
 const notificationWatcher = await readFile(

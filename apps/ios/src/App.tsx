@@ -1,11 +1,8 @@
-import { Ionicons } from "@expo/vector-icons";
-import type { ComponentProps } from "react";
-import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import { ActivityIndicator, PanResponder, View } from "react-native";
 
 import { PairingScreen } from "./screens/PairingScreen";
 import { SplashScreen } from "./screens/SplashScreen";
-import { WorkspaceScreen } from "./screens/WorkspaceScreen";
 import { ProjectsScreen } from "./screens/ProjectsScreen";
 import { ProjectDetailScreen } from "./screens/ProjectDetailScreen";
 import { ConversationScreen } from "./screens/ConversationScreen";
@@ -19,46 +16,19 @@ import { useMobileStore } from "./state/mobile-store";
 import { colors } from "./theme";
 import type { ConversationSummary, ProjectSummary, RouteName } from "./types";
 
-type RootRouteName = Extract<RouteName, "workspace" | "projects" | "settings">;
-type IoniconName = ComponentProps<typeof Ionicons>["name"];
-
-const NAV_ITEMS: Array<{
-  activeIcon: IoniconName;
-  icon: IoniconName;
-  label: string;
-  route: RootRouteName;
-}> = [
-  {
-    activeIcon: "laptop",
-    icon: "laptop-outline",
-    label: "Workspace",
-    route: "workspace"
-  },
-  {
-    activeIcon: "folder",
-    icon: "folder-outline",
-    label: "Projects",
-    route: "projects"
-  },
-  {
-    activeIcon: "settings",
-    icon: "settings-outline",
-    label: "Settings",
-    route: "settings"
-  }
-];
+const GLOBAL_BACK_SWIPE_DISTANCE = 70;
+const GLOBAL_BACK_SWIPE_VERTICAL_TOLERANCE = 60;
 
 export default function App() {
   const store = useMobileStore();
   const [hasStarted, setHasStarted] = useState(false);
-  const [route, setRoute] = useState<RouteName>("workspace");
+  const [route, setRoute] = useState<RouteName>("projects");
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
   const [cachedProjects, setCachedProjects] = useState<ProjectSummary[]>([]);
   const [cachedConversationsByProject, setCachedConversationsByProject] = useState<
     Record<string, ConversationSummary[]>
   >({});
-  const shouldShowBottomNav = route !== "conversation";
   const openConversationFromNotification = useCallback(
     async (target: CodexCompletionNotificationTarget) => {
       const api = store.api;
@@ -108,6 +78,13 @@ export default function App() {
     },
     []
   );
+  const goBackOneLevel = useCallback(() => {
+    setRoute((currentRoute) => routeBackOneLevel(currentRoute, project));
+  }, [project]);
+  const globalBackSwipeResponder = useMemo(
+    () => createGlobalBackSwipeResponder(goBackOneLevel),
+    [goBackOneLevel]
+  );
   useThreadCompletionNotifications(store.api, store.isPaired, openConversationFromNotification);
   useMessagePreloader({
     api: store.api,
@@ -142,21 +119,17 @@ export default function App() {
         onApiUrlChange={store.setApiUrl}
         onPaired={(pairing) => {
           void store.savePairing(pairing);
-          setRoute("workspace");
+          setRoute("projects");
         }}
       />
     );
   }
 
   return (
-    <View style={{ backgroundColor: colors.canvas, flex: 1 }}>
-      {route === "workspace" ? (
-        <WorkspaceScreen
-          bootstrap={store.bootstrap}
-          error={store.bootstrapError}
-          onNavigate={setRoute}
-        />
-      ) : null}
+    <View
+      style={{ backgroundColor: colors.canvas, flex: 1 }}
+      {...globalBackSwipeResponder.panHandlers}
+    >
       {route === "projects" ? (
         <ProjectsScreen
           api={store.api}
@@ -166,6 +139,7 @@ export default function App() {
             setProject(nextProject);
             setRoute("project");
           }}
+          onSettings={() => setRoute("settings")}
         />
       ) : null}
       {route === "project" && project ? (
@@ -193,70 +167,19 @@ export default function App() {
       ) : null}
       {route === "settings" ? (
         <SettingsScreen
+          bootstrap={store.bootstrap}
+          error={store.bootstrapError}
+          onBack={() => setRoute("projects")}
           onSignOut={() => {
             void store.signOut();
-            setRoute("workspace");
+            setRoute("projects");
           }}
           pairing={store.pairing}
         />
       ) : null}
-
-      {shouldShowBottomNav ? (
-        <View style={styles.bottomNav}>
-          {NAV_ITEMS.map((item) => {
-            const isActive = route === item.route;
-
-            return (
-              <Pressable
-                accessibilityLabel={item.label}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: isActive }}
-                key={item.route}
-                onPress={() => setRoute(item.route)}
-                style={({ pressed }) => [
-                  styles.bottomNavItem,
-                  isActive && styles.bottomNavItemActive,
-                  pressed && styles.bottomNavItemPressed
-                ]}
-              >
-                <Ionicons
-                  color={isActive ? colors.primary : colors.muted}
-                  name={isActive ? item.activeIcon : item.icon}
-                  size={26}
-                />
-              </Pressable>
-            );
-          })}
-        </View>
-      ) : null}
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  bottomNav: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderTopWidth: 1,
-    flexDirection: "row",
-    paddingBottom: 18,
-    paddingHorizontal: 22,
-    paddingTop: 8
-  },
-  bottomNavItem: {
-    alignItems: "center",
-    borderRadius: 8,
-    flex: 1,
-    justifyContent: "center",
-    minHeight: 44
-  },
-  bottomNavItemActive: {
-    backgroundColor: colors.primarySoft
-  },
-  bottomNavItemPressed: {
-    opacity: 0.72
-  }
-});
 
 function fallbackProjectFromNotification(
   target: CodexCompletionNotificationTarget,
@@ -291,4 +214,35 @@ function fallbackConversationFromNotification(
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function routeBackOneLevel(route: RouteName, project: ProjectSummary | null): RouteName {
+  if (route === "conversation") {
+    return project ? "project" : "projects";
+  }
+
+  if (route === "project" || route === "settings" || route === "workspace") {
+    return "projects";
+  }
+
+  return route;
+}
+
+function createGlobalBackSwipeResponder(onBack: () => void) {
+  return PanResponder.create({
+    onMoveShouldSetPanResponder: (_event, gesture) => shouldStartGlobalBackSwipe(gesture),
+    onMoveShouldSetPanResponderCapture: (_event, gesture) => shouldStartGlobalBackSwipe(gesture),
+    onPanResponderRelease: (_event, gesture) => {
+      if (
+        gesture.dx >= GLOBAL_BACK_SWIPE_DISTANCE &&
+        Math.abs(gesture.dy) <= GLOBAL_BACK_SWIPE_VERTICAL_TOLERANCE
+      ) {
+        onBack();
+      }
+    }
+  });
+}
+
+function shouldStartGlobalBackSwipe(gesture: { dx: number; dy: number }) {
+  return gesture.dx > 18 && Math.abs(gesture.dy) < 36;
 }
