@@ -1618,7 +1618,7 @@ function codexThreadToConversationStatus(thread: CodexAppThread): ConversationSt
 }
 
 function isCodexThreadBusy(thread: CodexAppThread) {
-  return threadStatusType(thread.status) === "active";
+  return threadStatusType(thread.status) === "active" || thread.turns.some(isTurnInProgress);
 }
 
 function isCodexThreadMessageHistoryStable(thread: CodexAppThread) {

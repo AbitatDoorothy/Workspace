@@ -152,6 +152,80 @@ describe("local Codex bridge command queue and steer", () => {
       threadId: "thread_busy"
     });
   });
+
+  it("steers in-progress desktop turns even when the thread status summary is stale", async () => {
+    let startParams: Record<string, unknown> | null = null;
+    let steerParams: Record<string, unknown> | null = null;
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            status: { type: "idle" },
+            turns: [
+              createTurn({
+                completedAt: null,
+                id: "turn_desktop_current",
+                status: "inProgress"
+              })
+            ]
+          })
+        });
+      }
+
+      if (message.method === "thread/resume") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            status: { type: "active" },
+            turns: [
+              createTurn({
+                completedAt: null,
+                id: "turn_desktop_current",
+                status: "inProgress"
+              })
+            ]
+          })
+        });
+      }
+
+      if (message.method === "turn/start") {
+        startParams = message.params as Record<string, unknown>;
+        sendResult(socket, message.id, {
+          turn: createTurn({
+            completedAt: null,
+            id: "turn_started_wrongly",
+            status: "inProgress"
+          })
+        });
+      }
+
+      if (message.method === "turn/steer") {
+        steerParams = message.params as Record<string, unknown>;
+        sendResult(socket, message.id, { turnId: "turn_steered" });
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+
+    await expect(
+      bridge.continueConversation("codex_thread_thread_busy", {
+        delivery: "steer",
+        prompt: "stop"
+      })
+    ).resolves.toEqual({
+      conversationId: "codex_thread_thread_busy",
+      status: "running"
+    });
+
+    expect(startParams).toBeNull();
+    expect(steerParams).toEqual({
+      expectedTurnId: "turn_desktop_current",
+      input: [{ text: "stop", text_elements: [], type: "text" }],
+      threadId: "thread_busy"
+    });
+  });
 });
 
 async function waitFor(predicate: () => boolean) {
