@@ -12,6 +12,7 @@ const requiredFiles = [
   "src/state/message-preloader.ts",
   "src/state/mobile-store.ts",
   "src/screens/PairingScreen.tsx",
+  "src/screens/SplashScreen.tsx",
   "src/screens/WorkspaceScreen.tsx",
   "src/screens/ProjectsScreen.tsx",
   "src/screens/ProjectDetailScreen.tsx",
@@ -34,6 +35,9 @@ if (!packageJson.dependencies?.["expo-constants"]) {
 }
 if (!packageJson.dependencies?.["expo-crypto"]) {
   throw new Error("Expected abitat-ios to depend on expo-crypto for relay envelope nonces");
+}
+if (!packageJson.dependencies?.["expo-haptics"]) {
+  throw new Error("Expected abitat-ios to depend on expo-haptics for splash pulse feedback");
 }
 if (!packageJson.dependencies?.["@expo/vector-icons"]) {
   throw new Error("Expected abitat-ios to depend on @expo/vector-icons for bottom navigation");
@@ -101,6 +105,9 @@ if (!podfileLock.includes("ExpoCrypto (55.0.14)")) {
 }
 if (!podfileLock.includes("ExpoSharing (55.0.18)")) {
   throw new Error("Expected native iOS Pods to include ExpoSharing for generated file downloads");
+}
+if (!podfileLock.includes("ExpoHaptics (55.0.14)")) {
+  throw new Error("Expected native iOS Pods to include ExpoHaptics for splash pulse feedback");
 }
 
 const conversationScreen = await readFile(
@@ -499,6 +506,57 @@ for (const expected of [
 }
 
 const appScreen = await readFile(join(process.cwd(), "src/App.tsx"), "utf8");
+const splashScreen = await readFile(join(process.cwd(), "src/screens/SplashScreen.tsx"), "utf8");
+for (const expected of [
+  "SplashScreen",
+  "Animated.loop",
+  "SHOOTING_STARS",
+  "SHOOTING_STAR_REST_MS",
+  "LARGE_STAR_POINTS",
+  "STAR_POINTS",
+  "Haptics.impactAsync",
+  "ImpactFeedbackStyle.Heavy",
+  "ImpactFeedbackStyle.Medium",
+  "runHeartbeatPulse",
+  "pulseLogoWithHaptic",
+  "buttonFloat",
+  "styles.largeStar",
+  "styles.shootingStarHead",
+  "styles.shootingStarTail",
+  "onStart",
+  'accessibilityLabel="Start Abitat"'
+]) {
+  if (!splashScreen.includes(expected)) {
+    throw new Error(`Expected SplashScreen to include ${expected}`);
+  }
+}
+for (const removed of [
+  "cornerLogo",
+  "triggerHeartbeatHaptics",
+  "setInterval(triggerHeartbeatHaptics",
+  "starGlow",
+  "largeStarGlow",
+  "shadowOpacity: 0.26",
+  "shadowRadius: 24",
+  "ImpactFeedbackStyle.Light",
+  "Animated.delay(4800)"
+]) {
+  if (splashScreen.includes(removed)) {
+    throw new Error(`Expected SplashScreen to remove ${removed}`);
+  }
+}
+for (const expected of [
+  "hasStarted",
+  "setHasStarted",
+  "<SplashScreen",
+  "onStart={() => setHasStarted(true)}"
+]) {
+  if (!appScreen.includes(expected)) {
+    throw new Error(
+      `Expected App to gate the mobile interface behind the splash screen: ${expected}`
+    );
+  }
+}
 if (!appScreen.includes("useThreadCompletionNotifications")) {
   throw new Error("Expected App to start the thread completion notification watcher");
 }

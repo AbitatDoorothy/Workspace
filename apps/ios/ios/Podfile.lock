@@ -42,6 +42,8 @@ PODS:
     - ExpoModulesCore
   - ExpoFont (55.0.6):
     - ExpoModulesCore
+  - ExpoHaptics (55.0.14):
+    - ExpoModulesCore
   - ExpoImagePicker (55.0.20):
     - ExpoModulesCore
   - ExpoKeepAwake (55.0.7):
@@ -1878,6 +1880,7 @@ DEPENDENCIES:
   - "ExpoDomWebView (from `../../../node_modules/.pnpm/@expo+dom-webview@55.0.5_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+rea_f6d19358bdf24455540cc77a0b9ded43/node_modules/@expo/dom-webview/ios`)"
   - "ExpoFileSystem (from `../../../node_modules/.pnpm/expo-file-system@55.0.19_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5_/node_modules/expo-file-system/ios`)"
   - "ExpoFont (from `../../../node_modules/.pnpm/expo-font@55.0.6_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5__react@19.2.5/node_modules/expo-font/ios`)"
+  - "ExpoHaptics (from `../../../node_modules/.pnpm/expo-haptics@55.0.14_expo@55.0.19/node_modules/expo-haptics/ios`)"
   - "ExpoImagePicker (from `../../../node_modules/.pnpm/expo-image-picker@55.0.20_expo@55.0.19/node_modules/expo-image-picker/ios`)"
   - "ExpoKeepAwake (from `../../../node_modules/.pnpm/expo-keep-awake@55.0.7_expo@55.0.19_react@19.2.5/node_modules/expo-keep-awake/ios`)"
   - "ExpoLogBox (from `../../../node_modules/.pnpm/@expo+log-box@55.0.11_@expo+dom-webview@55.0.5_expo@55.0.19_react-native@0.83.6_@babel+_335922a94f8ca3e0d00201caa6f9c43a/node_modules/@expo/log-box`)"
@@ -1982,6 +1985,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.pnpm/expo-file-system@55.0.19_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5_/node_modules/expo-file-system/ios"
   ExpoFont:
     :path: "../../../node_modules/.pnpm/expo-font@55.0.6_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5__react@19.2.5/node_modules/expo-font/ios"
+  ExpoHaptics:
+    :path: "../../../node_modules/.pnpm/expo-haptics@55.0.14_expo@55.0.19/node_modules/expo-haptics/ios"
   ExpoImagePicker:
     :path: "../../../node_modules/.pnpm/expo-image-picker@55.0.20_expo@55.0.19/node_modules/expo-image-picker/ios"
   ExpoKeepAwake:
@@ -2157,6 +2162,7 @@ SPEC CHECKSUMS:
   ExpoDomWebView: 2b2fbd9a07de8790569257cbf9dfdaa31cf95c70
   ExpoFileSystem: 0b73b097e67c83622640168f620defc65a1a6f70
   ExpoFont: cdd7a1d574a376fa003c713eff49e0a4df8672c7
+  ExpoHaptics: 679f09dc37d5981e619bc197732007a3334e80b8
   ExpoImagePicker: 7c75b2f076d6f45598fcbd035908aebc4c2eb257
   ExpoKeepAwake: 861c66deb0f9f28f87882610195f26c4b88fba6f
   ExpoLogBox: 617da77cbc083627692b2ea050a3666808aef2cd

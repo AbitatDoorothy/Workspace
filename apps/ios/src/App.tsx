@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 
 import { PairingScreen } from "./screens/PairingScreen";
+import { SplashScreen } from "./screens/SplashScreen";
 import { WorkspaceScreen } from "./screens/WorkspaceScreen";
 import { ProjectsScreen } from "./screens/ProjectsScreen";
 import { ProjectDetailScreen } from "./screens/ProjectDetailScreen";
@@ -49,6 +50,7 @@ const NAV_ITEMS: Array<{
 
 export default function App() {
   const store = useMobileStore();
+  const [hasStarted, setHasStarted] = useState(false);
   const [route, setRoute] = useState<RouteName>("workspace");
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
@@ -112,6 +114,10 @@ export default function App() {
     enabled: store.isPaired,
     messageCacheScope: store.messageCacheScope
   });
+
+  if (!hasStarted) {
+    return <SplashScreen onStart={() => setHasStarted(true)} />;
+  }
 
   if (store.isRestoring) {
     return (
