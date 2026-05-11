@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -57,6 +58,7 @@ const STATUS_POLL_INTERVAL_MS = 2500;
 const FULL_MESSAGE_REFRESH_INTERVAL_MS = 12000;
 const COMPOSER_INPUT_MIN_HEIGHT = 48;
 const COMPOSER_INPUT_MAX_HEIGHT = 132;
+const GENERATED_FILES_MAX_HEIGHT = 188;
 
 export function ConversationScreen({
   api,
@@ -73,6 +75,7 @@ export function ConversationScreen({
   const [error, setError] = useState<string | null>(null);
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedFileSummary[]>([]);
   const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
+  const [isGeneratedFilesExpanded, setIsGeneratedFilesExpanded] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [showScrollToLatestButton, setShowScrollToLatestButton] = useState(false);
@@ -130,6 +133,7 @@ export function ConversationScreen({
     setAttachments([]);
     setGeneratedFiles([]);
     setDownloadingFileId(null);
+    setIsGeneratedFilesExpanded(false);
     setStatus(conversation.status);
     setIsHeaderExpanded(false);
     pendingAutoScrollRef.current = true;
@@ -158,7 +162,7 @@ export function ConversationScreen({
         setGeneratedFiles(files);
       }
     } catch (caught) {
-      if (activeConversationIdRef.current === conversationId) {
+      if (activeConversationIdRef.current === conversationId && !isTransientResponseError(caught)) {
         setError(caught instanceof Error ? caught.message : "Unable to load generated files");
       }
     } finally {
@@ -200,7 +204,9 @@ export function ConversationScreen({
         }
       } catch (caught) {
         if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Unable to load messages");
+          if (!isTransientResponseError(caught)) {
+            setError(caught instanceof Error ? caught.message : "Unable to load messages");
+          }
         }
       } finally {
         messageRefreshInFlightRef.current = false;
@@ -248,7 +254,9 @@ export function ConversationScreen({
         }
       } catch (caught) {
         if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Unable to refresh Codex status");
+          if (!isTransientResponseError(caught)) {
+            setError(caught instanceof Error ? caught.message : "Unable to refresh Codex status");
+          }
         }
       }
     }
@@ -642,29 +650,48 @@ export function ConversationScreen({
 
         {generatedFiles.length > 0 ? (
           <View style={styles.generatedFilesPanel}>
-            <Text style={sharedStyles.label}>Generated files</Text>
-            <View style={styles.generatedFilesList}>
-              {generatedFiles.map((file) => (
-                <Pressable
-                  accessibilityLabel={`Download ${file.name}`}
-                  accessibilityRole="button"
-                  disabled={downloadingFileId === file.id}
-                  key={file.id}
-                  onPress={() => void downloadGeneratedFile(file)}
-                  style={[
-                    styles.generatedFileChip,
-                    downloadingFileId === file.id ? styles.disabledAction : null
-                  ]}
-                >
-                  <Text numberOfLines={1} style={styles.generatedFileName}>
-                    {file.name}
-                  </Text>
-                  <Text style={styles.generatedFileMeta}>
-                    {downloadingFileId === file.id ? "Opening" : formatFileSize(file.size)}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+            <Pressable
+              accessibilityLabel="Toggle generated files"
+              accessibilityRole="button"
+              accessibilityState={{ expanded: isGeneratedFilesExpanded }}
+              hitSlop={8}
+              onPress={() => setIsGeneratedFilesExpanded((current) => !current)}
+              style={styles.generatedFilesHeader}
+            >
+              <Text style={sharedStyles.label}>Generated files</Text>
+              <Text style={styles.generatedFilesHeaderMeta}>
+                {generatedFiles.length} {generatedFiles.length === 1 ? "file" : "files"} ·{" "}
+                {isGeneratedFilesExpanded ? "Hide" : "Show"}
+              </Text>
+            </Pressable>
+            {isGeneratedFilesExpanded ? (
+              <ScrollView
+                nestedScrollEnabled
+                contentContainerStyle={styles.generatedFilesList}
+                style={styles.generatedFilesScroll}
+              >
+                {generatedFiles.map((file) => (
+                  <Pressable
+                    accessibilityLabel={`Download ${file.name}`}
+                    accessibilityRole="button"
+                    disabled={downloadingFileId === file.id}
+                    key={file.id}
+                    onPress={() => void downloadGeneratedFile(file)}
+                    style={[
+                      styles.generatedFileChip,
+                      downloadingFileId === file.id ? styles.disabledAction : null
+                    ]}
+                  >
+                    <Text numberOfLines={1} style={styles.generatedFileName}>
+                      {file.name}
+                    </Text>
+                    <Text style={styles.generatedFileMeta}>
+                      {downloadingFileId === file.id ? "Opening" : formatFileSize(file.size)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : null}
           </View>
         ) : null}
 
@@ -892,10 +919,32 @@ const styles = StyleSheet.create({
   generatedFilesList: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8
+    gap: 8,
+    paddingBottom: 2
   },
   generatedFilesPanel: {
-    gap: 8
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 8,
+    padding: 10
+  },
+  generatedFilesHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    justifyContent: "space-between",
+    minHeight: 32
+  },
+  generatedFilesHeaderMeta: {
+    color: colors.muted,
+    flexShrink: 0,
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  generatedFilesScroll: {
+    maxHeight: GENERATED_FILES_MAX_HEIGHT
   },
   headerToggle: {
     alignItems: "center",
@@ -1152,6 +1201,15 @@ function formatFileSize(size: number) {
   }
 
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isTransientResponseError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("Unexpected end of JSON input") ||
+    message.includes("Empty response from") ||
+    message.includes("Invalid JSON response")
+  );
 }
 
 export function mergeConversationMessages(

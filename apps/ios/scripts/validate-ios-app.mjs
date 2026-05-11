@@ -430,10 +430,15 @@ for (const expected of [
   "refreshGeneratedFiles",
   "downloadGeneratedFile",
   "generatedFiles",
+  "isGeneratedFilesExpanded",
   "GeneratedFileSummary",
   "FileSystem.writeAsStringAsync",
   "Sharing.isAvailableAsync",
   "Sharing.shareAsync",
+  "nestedScrollEnabled",
+  "styles.generatedFilesScroll",
+  "GENERATED_FILES_MAX_HEIGHT",
+  "isTransientResponseError",
   "sendGitShortcut",
   "pickImageAttachment",
   "pickFileAttachment",
@@ -441,6 +446,16 @@ for (const expected of [
 ]) {
   if (!conversationScreen.includes(expected)) {
     throw new Error(`Expected ConversationScreen to include ${expected}`);
+  }
+}
+for (const expected of [
+  'accessibilityLabel="Toggle generated files"',
+  "accessibilityState={{ expanded: isGeneratedFilesExpanded }}",
+  "setIsGeneratedFilesExpanded((current) => !current)",
+  "maxHeight: GENERATED_FILES_MAX_HEIGHT"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected generated files to render as a collapsible scroll area: ${expected}`);
   }
 }
 for (const expected of [
