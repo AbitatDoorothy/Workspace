@@ -23,6 +23,45 @@ afterEach(async () => {
 });
 
 describe("local Codex mobile status sync", () => {
+  it("hydrates stale active no-turn summaries before reporting mobile conversation status", async () => {
+    const listThread = createThread({
+      status: { activeFlags: [], type: "active" },
+      turns: [],
+      updatedAt: 1_778_000_060
+    });
+    const completedReadThread = createThread({
+      status: { type: "idle" },
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_070,
+          id: "turn_completed",
+          status: "completed"
+        })
+      ],
+      updatedAt: 1_778_000_070
+    });
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "thread/list") {
+        sendResult(socket, message.id, { data: [listThread], nextCursor: null });
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, { thread: completedReadThread });
+      }
+    });
+    const bridge = createBridge(serverUrl);
+
+    const [project] = await bridge.listProjects();
+    const [conversation] = await bridge.listProjectConversations(project.id);
+
+    expect(conversation).toEqual(
+      expect.objectContaining({
+        id: "codex_thread_thread_active",
+        status: "approved"
+      })
+    );
+  });
+
   it("prefers live active thread status over stale state DB and read snapshots", async () => {
     const staleThread = createThread({
       status: { type: "notLoaded" },

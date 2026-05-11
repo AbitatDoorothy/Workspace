@@ -103,6 +103,68 @@ describe("local Codex bridge diagnostics", () => {
 });
 
 describe("local Codex bridge loading performance", () => {
+  it("serves unchanged incremental message requests from the cached full history", async () => {
+    const threadReads: Array<{ includeTurns?: boolean; threadId?: string }> = [];
+    const thread = {
+      createdAt: 1_778_000_000,
+      cwd: "/Users/reece/Desktop/Fast Project",
+      ephemeral: false,
+      id: "thread_fast",
+      name: null,
+      preview: "Make loading faster",
+      status: { activeFlags: [], type: "idle" },
+      turns: [
+        {
+          completedAt: 1_778_000_010,
+          error: null,
+          id: "turn_1",
+          items: [
+            {
+              content: [{ text: "Hello", text_elements: [], type: "text" }],
+              id: "item_user",
+              type: "userMessage"
+            },
+            {
+              id: "item_agent",
+              text: "Hi there",
+              type: "agentMessage"
+            }
+          ],
+          startedAt: 1_778_000_000,
+          status: { type: "completed" }
+        }
+      ],
+      updatedAt: 1_778_000_010
+    };
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/read") {
+        const params = message.params as { includeTurns?: boolean; threadId?: string };
+        threadReads.push(params);
+        sendResult(socket, message.id, {
+          thread: params.includeTurns === false ? { ...thread, turns: [] } : thread
+        });
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+    const conversationId = "codex_thread_thread_fast";
+
+    const initialMessages = await bridge.listMessages(conversationId);
+    const latestSequence = Math.max(...initialMessages.map((message) => message.sequence));
+    const incrementalMessages = await bridge.listMessages(conversationId, {
+      afterSequence: latestSequence
+    });
+
+    expect(incrementalMessages).toEqual([]);
+    expect(threadReads).toEqual([
+      { includeTurns: true, threadId: "thread_fast" },
+      { includeTurns: false, threadId: "thread_fast" }
+    ]);
+  });
+
   it("lists project conversations without reading full thread history", async () => {
     const calls: string[] = [];
     const { serverUrl } = await startMockCodexAppServer((socket, message) => {
@@ -129,7 +191,16 @@ describe("local Codex bridge loading performance", () => {
               name: null,
               preview: "Make loading faster",
               status: { activeFlags: [], type: "active" },
-              turns: [],
+              turns: [
+                {
+                  completedAt: null,
+                  error: null,
+                  id: "turn_fast",
+                  items: [],
+                  startedAt: 1_778_000_050,
+                  status: "inProgress"
+                }
+              ],
               updatedAt: 1_778_000_050
             }
           ],
@@ -147,7 +218,16 @@ describe("local Codex bridge loading performance", () => {
             name: null,
             preview: "Make loading faster",
             status: { activeFlags: [], type: "active" },
-            turns: [],
+            turns: [
+              {
+                completedAt: null,
+                error: null,
+                id: "turn_fast",
+                items: [],
+                startedAt: 1_778_000_050,
+                status: "inProgress"
+              }
+            ],
             updatedAt: 1_778_000_050
           }
         });

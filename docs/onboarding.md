@@ -96,5 +96,7 @@ tail -f ~/Library/Logs/Abitat/mobile-control.log
 ```
 
 This is Abitat's Mac-side mobile-control log, not the Codex desktop app log. It records redacted
-JSON lines for pairing, relay, mobile requests, Codex thread/turn calls, message counts, and
-completion notifications. Review it before sharing, then send it to support if needed.
+JSON lines for pairing, relay, task submission, Codex thread/turn calls while work is active,
+message counts while Codex is running, and completion notifications. Idle polling and routine list
+refreshes are suppressed so the file does not grow continuously when no task is running. Review it
+before sharing, then send it to support if needed.

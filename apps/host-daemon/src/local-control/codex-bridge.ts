@@ -63,12 +63,6 @@ type CodexAppUserInput =
   | { type: "localImage"; path: string }
   | { type: "mention"; name: string; path: string };
 
-type CodexAppResponseItem = {
-  type: "message";
-  role: "assistant" | "user";
-  content: Array<{ type: "input_text"; text: string } | { type: "output_text"; text: string }>;
-};
-
 interface CodexAppStartTurnOptions {
   approvalPolicy?: "never";
   cwd?: string | null;
@@ -140,6 +134,12 @@ interface QueuedCodexTurnInput {
   prompt: string;
 }
 
+interface MessageHistoryCacheEntry {
+  messages: LocalCodexMessage[];
+  statusType: string | null | undefined;
+  updatedAt: number;
+}
+
 interface JsonRpcMessage {
   id?: number | string;
   method?: string;
@@ -172,6 +172,7 @@ export function createLocalCodexBridge(
     string,
     { expiresAt: number; promise: Promise<CodexAppThread[]> }
   >();
+  const messageHistoryCache = new Map<string, MessageHistoryCacheEntry>();
 
   async function listAllThreads(params: CodexAppThreadListParams = {}) {
     const cacheKey = threadListCacheKey(params);
@@ -272,10 +273,15 @@ export function createLocalCodexBridge(
   }
 
   function enqueueTurn(threadId: string, input: QueuedCodexTurnInput, options = { front: false }) {
+    invalidateMessageHistoryCache(threadId);
     const existing = queuedTurnsByThread.get(threadId) ?? [];
     const next = options.front ? [input, ...existing] : [...existing, input];
     queuedTurnsByThread.set(threadId, next);
     scheduleQueueDrain(threadId);
+  }
+
+  function invalidateMessageHistoryCache(threadId: string) {
+    messageHistoryCache.delete(threadId);
   }
 
   function scheduleQueueDrain(threadId: string, delayMs = QUEUED_TURN_POLL_INTERVAL_MS) {
@@ -333,6 +339,7 @@ export function createLocalCodexBridge(
     thread: CodexAppThread,
     input: QueuedCodexTurnInput
   ) {
+    invalidateMessageHistoryCache(threadId);
     let activeThread = thread;
     if (threadStatusType(activeThread.status) !== "active") {
       activeThread = (await client.resumeThread({ excludeTurns: false, threadId })).thread;
@@ -369,7 +376,19 @@ export function createLocalCodexBridge(
 
       if (isCodexThreadBusy(thread)) {
         if (delivery === "steer") {
-          await client.injectItems(threadId, steerItems(input.prompt, input.attachments));
+          const activeTurn = latestActiveTurn(thread);
+          if (!activeTurn) {
+            throw Object.assign(new Error("No active Codex turn is available to steer"), {
+              statusCode: 409
+            });
+          }
+
+          invalidateMessageHistoryCache(threadId);
+          await client.steerTurn(
+            threadId,
+            userInput(input.prompt, input.attachments),
+            activeTurn.id
+          );
           return {
             conversationId: externalCodexConversationId(threadId),
             status: "running"
@@ -401,31 +420,19 @@ export function createLocalCodexBridge(
 
     async listCompletionStates() {
       const threads = await readThreadsWithTurns(await loadAllThreads());
+      const states = threads.map((thread) => codexThreadToCompletionState(thread, workspaceId));
       logDiagnostics(diagnostics, "info", "completion.states.result", {
-        stateCount: threads.length
+        activeCount: states.filter((state) => isActiveMobileConversationStatus(state.status))
+          .length,
+        stateCount: states.length
       });
-      return threads
-        .sort((left, right) => right.updatedAt - left.updatedAt)
-        .map((thread) => codexThreadToCompletionState(thread, workspaceId));
+      return states.sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
     },
 
     async listMessages(conversationId, messageOptions = {}) {
       const threadId = toCodexThreadId(conversationId);
-      const messages = flattenThreadMessages(
-        await client.readThread(threadId, true),
-        externalCodexConversationId(threadId),
-        diagnostics
-      );
-      const filtered = messageOptions.includeRuntime
-        ? messages
-        : messages.filter((message) => message.role !== "runtime");
-      const returned =
-        typeof messageOptions.afterSequence === "number"
-          ? messageOptions.afterSequence >
-            filtered.reduce((max, message) => Math.max(max, message.sequence), 0)
-            ? filtered
-            : filtered.filter((message) => message.sequence > messageOptions.afterSequence!)
-          : filtered;
+      const messages = await readCachedThreadMessages(threadId, messageOptions.afterSequence);
+      const returned = filterThreadMessages(messages, messageOptions);
 
       logDiagnostics(diagnostics, "info", "messages.list.bridge_result", {
         ...messageCounts(messages),
@@ -435,10 +442,6 @@ export function createLocalCodexBridge(
         returned: returned.length,
         total: messages.length
       });
-
-      if (typeof messageOptions.afterSequence !== "number") {
-        return returned;
-      }
 
       return returned;
     },
@@ -487,6 +490,7 @@ export function createLocalCodexBridge(
         experimentalRawEvents: false,
         persistExtendedHistory: true
       });
+      invalidateMessageHistoryCache(thread.id);
       await client.startTurn(thread.id, userInput(input.prompt, input.attachments), {
         ...PHONE_FULL_ACCESS_TURN_OPTIONS,
         cwd,
@@ -521,6 +525,42 @@ export function createLocalCodexBridge(
       })
     );
   }
+
+  async function readCachedThreadMessages(threadId: string, afterSequence: number | undefined) {
+    const cached = messageHistoryCache.get(threadId);
+    if (typeof afterSequence === "number" && cached) {
+      const summary = await client.readThread(threadId, false).catch(() => null);
+      if (summary && canUseCachedMessageHistory(cached, summary)) {
+        return cached.messages;
+      }
+    }
+
+    const thread = await client.readThread(threadId, true);
+    const messages = flattenThreadMessages(
+      thread,
+      externalCodexConversationId(threadId),
+      diagnostics
+    );
+    if (isCodexThreadMessageHistoryStable(thread)) {
+      messageHistoryCache.set(threadId, {
+        messages,
+        statusType: threadStatusType(thread.status),
+        updatedAt: safeSeconds(thread.updatedAt, thread.createdAt)
+      });
+    } else {
+      invalidateMessageHistoryCache(threadId);
+    }
+
+    return messages;
+  }
+
+  function canUseCachedMessageHistory(cached: MessageHistoryCacheEntry, summary: CodexAppThread) {
+    return (
+      !isCodexThreadBusy(summary) &&
+      cached.statusType === threadStatusType(summary.status) &&
+      cached.updatedAt === safeSeconds(summary.updatedAt, summary.createdAt)
+    );
+  }
 }
 
 function createCodexAppClient(options: CreateLocalCodexBridgeOptions) {
@@ -553,12 +593,6 @@ function createCodexAppClient(options: CreateLocalCodexBridgeOptions) {
 
       return models;
     },
-
-    injectItems: (threadId: string, items: CodexAppResponseItem[]) =>
-      callCodexApp(serverUrl, codexBinaryPath, "thread/inject_items", {
-        items,
-        threadId
-      }),
 
     async listLoadedThreads(): Promise<string[]> {
       const threadIds: string[] = [];
@@ -658,7 +692,17 @@ function createCodexAppClient(options: CreateLocalCodexBridgeOptions) {
       input: CodexAppUserInput[],
       turnOptions: CodexAppStartTurnOptions
     ) =>
-      startTurnWithKeepAlive(serverUrl, codexBinaryPath, threadId, input, turnOptions, diagnostics)
+      startTurnWithKeepAlive(serverUrl, codexBinaryPath, threadId, input, turnOptions, diagnostics),
+
+    steerTurn: (threadId: string, input: CodexAppUserInput[], expectedTurnId: string) =>
+      steerTurnWithKeepAlive(
+        serverUrl,
+        codexBinaryPath,
+        threadId,
+        input,
+        expectedTurnId,
+        diagnostics
+      )
   };
 }
 
@@ -778,6 +822,90 @@ async function startTurnWithKeepAliveOnce(
       keepAliveStarted = true;
       keepTurnConnectionAlive(connection, threadId, response.turn.id);
     }
+
+    return response;
+  } finally {
+    if (!keepAliveStarted) {
+      connection.close();
+    }
+  }
+}
+
+async function steerTurnWithKeepAlive(
+  serverUrl: string,
+  codexBinaryPath: string,
+  threadId: string,
+  input: CodexAppUserInput[],
+  expectedTurnId: string,
+  diagnostics?: MobileControlDiagnosticsLogger
+) {
+  logDiagnostics(diagnostics, "info", "codex.turn_steer.call", {
+    ...turnInputDiagnostics(input),
+    expectedTurnId,
+    threadId
+  });
+  try {
+    const response = await steerTurnWithKeepAliveOnce(serverUrl, threadId, input, expectedTurnId);
+    logDiagnostics(diagnostics, "info", "codex.turn_steer.result", {
+      expectedTurnId,
+      threadId,
+      turnId: response.turnId
+    });
+    return response;
+  } catch (error) {
+    if (!isConnectionFailure(error) || !canStartLocalServer(serverUrl)) {
+      logDiagnostics(diagnostics, "error", "codex.turn_steer.failure", {
+        error: errorDiagnostics(error),
+        expectedTurnId,
+        threadId
+      });
+      throw error;
+    }
+
+    logDiagnostics(diagnostics, "warn", "codex.app_server.connect_failure", {
+      error: errorDiagnostics(error),
+      method: "turn/steer",
+      serverUrl
+    });
+    await ensureLocalAppServer(serverUrl, codexBinaryPath, diagnostics);
+    try {
+      const response = await steerTurnWithKeepAliveOnce(serverUrl, threadId, input, expectedTurnId);
+      logDiagnostics(diagnostics, "info", "codex.turn_steer.result", {
+        expectedTurnId,
+        threadId,
+        turnId: response.turnId
+      });
+      return response;
+    } catch (retryError) {
+      logDiagnostics(diagnostics, "error", "codex.turn_steer.failure", {
+        error: errorDiagnostics(retryError),
+        expectedTurnId,
+        threadId
+      });
+      throw retryError;
+    }
+  }
+}
+
+async function steerTurnWithKeepAliveOnce(
+  serverUrl: string,
+  threadId: string,
+  input: CodexAppUserInput[],
+  expectedTurnId: string
+) {
+  const connection = await JsonRpcConnection.connect(serverUrl);
+  let keepAliveStarted = false;
+
+  try {
+    await initializeConnection(connection);
+    const response = await connection.call<{ turnId: string }>("turn/steer", {
+      expectedTurnId,
+      input,
+      threadId
+    });
+
+    keepAliveStarted = true;
+    keepTurnConnectionAlive(connection, threadId, response.turnId);
 
     return response;
   } finally {
@@ -1109,7 +1237,7 @@ function mergeCodexThreadSnapshots(
       threadListActivityAt: abitatThreadListActivityAt
     })
       ? { activeFlags: [], type: "active" }
-      : preferredThreadStatus(baseThread.status, nextThread.status),
+      : preferredMergedThreadStatus(baseThread, nextThread),
     turns: nextThread.turns.length > 0 ? nextThread.turns : baseThread.turns,
     updatedAt: Math.max(
       safeSeconds(baseThread.updatedAt, baseThread.createdAt),
@@ -1124,6 +1252,17 @@ function preferredThreadStatus(baseStatus: CodexAppThreadStatus, nextStatus: Cod
   }
 
   return threadStatusRank(nextStatus) > threadStatusRank(baseStatus) ? nextStatus : baseStatus;
+}
+
+function preferredMergedThreadStatus(baseThread: CodexAppThread, nextThread: CodexAppThread) {
+  const baseLatestTurn = baseThread.turns.at(-1) ?? null;
+  const nextIsActiveSummary =
+    threadStatusType(nextThread.status) === "active" && nextThread.turns.length === 0;
+  if (nextIsActiveSummary && baseLatestTurn && isTurnTerminal(baseLatestTurn)) {
+    return baseThread.status;
+  }
+
+  return preferredThreadStatus(baseThread.status, nextThread.status);
 }
 
 function threadStatusRank(status: CodexAppThreadStatus) {
@@ -1187,12 +1326,18 @@ function isThreadListActivitySummaryStatus(status: CodexAppThreadStatus) {
 }
 
 function needsConversationStatusHydration(thread: CodexAppThread) {
-  return thread.turns.length === 0 && isThreadListActivitySummaryStatus(thread.status);
+  return (
+    thread.turns.length === 0 &&
+    (isThreadListActivitySummaryStatus(thread.status) ||
+      threadStatusType(thread.status) === "active")
+  );
 }
 
 function threadListActivitySeconds(thread: CodexAppThread) {
   const currentActivity =
-    thread.turns.length === 0 && isThreadListActivitySummaryStatus(thread.status)
+    thread.turns.length === 0 &&
+    (isThreadListActivitySummaryStatus(thread.status) ||
+      threadStatusType(thread.status) === "active")
       ? safeSeconds(thread.updatedAt, thread.createdAt)
       : null;
 
@@ -1476,6 +1621,21 @@ function isCodexThreadBusy(thread: CodexAppThread) {
   return threadStatusType(thread.status) === "active";
 }
 
+function isCodexThreadMessageHistoryStable(thread: CodexAppThread) {
+  return !isCodexThreadBusy(thread) && !thread.turns.some(isTurnInProgress);
+}
+
+function latestActiveTurn(thread: CodexAppThread) {
+  for (let index = thread.turns.length - 1; index >= 0; index -= 1) {
+    const turn = thread.turns[index];
+    if (turn && isTurnInProgress(turn)) {
+      return turn;
+    }
+  }
+
+  return null;
+}
+
 function isActiveMobileConversationStatus(status: ConversationStatus) {
   return status === "running" || status === "awaiting_approval";
 }
@@ -1546,6 +1706,19 @@ function isKnownCodexItemType(type: string) {
   );
 }
 
+function filterThreadMessages(
+  messages: LocalCodexMessage[],
+  options: { afterSequence?: number; includeRuntime?: boolean }
+) {
+  const filtered = options.includeRuntime
+    ? messages
+    : messages.filter((message) => message.role !== "runtime");
+
+  return typeof options.afterSequence === "number"
+    ? filtered.filter((message) => message.sequence > options.afterSequence!)
+    : filtered;
+}
+
 function messageCounts(messages: LocalCodexMessage[]) {
   const counts = {
     assistant: 0,
@@ -1612,21 +1785,6 @@ function userInputToText(input: CodexAppUserInput) {
     case "mention":
       return `[Mention: ${input.name}]`;
   }
-}
-
-function steerItems(
-  prompt: string,
-  attachments: LocalAttachmentReference[] = []
-): CodexAppResponseItem[] {
-  const text = userInput(prompt, attachments).map(userInputToText).filter(Boolean).join("\n");
-
-  return [
-    {
-      content: [{ text, type: "input_text" }],
-      role: "user",
-      type: "message"
-    }
-  ];
 }
 
 function turnModelSettings(modelSettings: CodexMobileModelSettings | undefined) {

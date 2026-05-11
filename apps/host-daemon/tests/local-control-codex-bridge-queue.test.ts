@@ -101,8 +101,9 @@ describe("local Codex bridge command queue and steer", () => {
     });
   });
 
-  it("steers active Codex turns by injecting a model-visible user message immediately", async () => {
+  it("steers active Codex turns by interrupting the current turn and starting a replacement", async () => {
     let injectParams: Record<string, unknown> | null = null;
+    let steerParams: Record<string, unknown> | null = null;
     const { serverUrl } = await startMockCodexAppServer((socket, message) => {
       if (message.method === "initialize") {
         sendResult(socket, message.id, {});
@@ -126,6 +127,11 @@ describe("local Codex bridge command queue and steer", () => {
         injectParams = message.params as Record<string, unknown>;
         sendResult(socket, message.id, {});
       }
+
+      if (message.method === "turn/steer") {
+        steerParams = message.params as Record<string, unknown>;
+        sendResult(socket, message.id, { turnId: "turn_steered" });
+      }
     });
     const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
 
@@ -139,14 +145,10 @@ describe("local Codex bridge command queue and steer", () => {
       status: "running"
     });
 
-    expect(injectParams).toEqual({
-      items: [
-        {
-          content: [{ text: "Change direction now", type: "input_text" }],
-          role: "user",
-          type: "message"
-        }
-      ],
+    expect(injectParams).toBeNull();
+    expect(steerParams).toEqual({
+      expectedTurnId: "turn_current",
+      input: [{ text: "Change direction now", text_elements: [], type: "text" }],
       threadId: "thread_busy"
     });
   });

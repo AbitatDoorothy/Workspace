@@ -173,6 +173,7 @@ export default function App() {
         <ConversationScreen
           api={store.api}
           conversation={conversation}
+          messageCacheScope={store.messageCacheScope}
           modelSettings={store.modelSettings}
           onBack={() => setRoute(project ? "project" : "projects")}
           onModelSettingsChange={store.saveModelSettings}

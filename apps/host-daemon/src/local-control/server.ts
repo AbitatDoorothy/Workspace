@@ -300,6 +300,9 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       if (method === "GET" && path === "/api/mobile/codex/completions") {
         const completions = await input.codex.listCompletionStates();
         logDiagnostics(diagnostics, "info", "completion.states.list.result", {
+          activeCount: completions.filter((completion) =>
+            isActiveCompletionStatus(completion.status)
+          ).length,
           count: completions.length,
           deviceId: actor.id
         });
@@ -869,6 +872,10 @@ function statusCode(error: unknown) {
   }
 
   return error instanceof SyntaxError ? 400 : 500;
+}
+
+function isActiveCompletionStatus(status: ConversationStatus | string) {
+  return status === "running" || status === "awaiting_approval" || status === "queued";
 }
 
 function errorMessage(error: unknown) {

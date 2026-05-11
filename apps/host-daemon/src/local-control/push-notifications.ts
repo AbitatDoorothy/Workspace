@@ -175,6 +175,7 @@ export function createLocalCodexCompletionNotifier(options: LocalCompletionNotif
       logDiagnostics(options.diagnostics, "debug", "completion.poll.start");
       const states = await options.codex.listCompletionStates();
       logDiagnostics(options.diagnostics, "info", "completion.poll.result", {
+        activeCount: states.filter(isActiveCompletionState).length,
         completeCount: states.filter((state) => state.isComplete).length,
         conversationId: states.length === 1 ? states[0]?.conversationId : undefined,
         stateCount: states.length
@@ -367,6 +368,12 @@ function snapshotCompletion(state: LocalCodexCompletionState): CompletionSnapsho
     status: state.status,
     updatedAt: state.updatedAt
   };
+}
+
+function isActiveCompletionState(state: LocalCodexCompletionState) {
+  return (
+    state.status === "running" || state.status === "awaiting_approval" || state.status === "queued"
+  );
 }
 
 function completionKey(state: LocalCodexCompletionState) {

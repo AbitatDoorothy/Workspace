@@ -8,6 +8,7 @@ const requiredFiles = [
   "src/api/client.ts",
   "src/components/CodexModelControls.tsx",
   "src/notifications/thread-completion-notifications.ts",
+  "src/state/message-cache.ts",
   "src/state/mobile-store.ts",
   "src/screens/PairingScreen.tsx",
   "src/screens/WorkspaceScreen.tsx",
@@ -111,6 +112,7 @@ const codexModelControls = await readFile(
 );
 const apiClient = await readFile(join(process.cwd(), "src/api/client.ts"), "utf8");
 const mobileStore = await readFile(join(process.cwd(), "src/state/mobile-store.ts"), "utf8");
+const messageCache = await readFile(join(process.cwd(), "src/state/message-cache.ts"), "utf8");
 const pairingScreen = await readFile(join(process.cwd(), "src/screens/PairingScreen.tsx"), "utf8");
 if (mobileStore.includes("https://workspace.abitat.io")) {
   throw new Error("Expected mobile-store to avoid hosted workspace.abitat.io defaults");
@@ -232,6 +234,22 @@ if (!conversationScreen.includes("latestConversationUpdatedAtRef")) {
 }
 if (!conversationScreen.includes("includeRuntime: false")) {
   throw new Error("Expected ConversationScreen to skip runtime output in mobile history requests");
+}
+for (const expected of [
+  "loadCachedConversationMessages",
+  "saveCachedConversationMessages",
+  "moveCachedConversationMessages",
+  "messageCacheScope",
+  "setMessages(cachedMessages)",
+  "latestSequenceRef.current = highestCachedMessageSequence(cachedMessages)",
+  "cachedAfterSequence > 0 ? cachedAfterSequence : undefined",
+  "void saveCachedConversationMessages(messageCacheScope, conversationId, nextMessages);"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(
+      `Expected ConversationScreen to integrate persistent message cache: ${expected}`
+    );
+  }
 }
 if (!conversationScreen.includes("const latestConversation = latestConversations.find")) {
   throw new Error("Expected ConversationScreen to refresh conversation status while open");
@@ -495,6 +513,9 @@ for (const expected of [
 if (!appScreen.includes("modelSettings={store.modelSettings}")) {
   throw new Error("Expected App to pass persisted Codex model settings to mobile chat screens");
 }
+if (!appScreen.includes("messageCacheScope={store.messageCacheScope}")) {
+  throw new Error("Expected App to pass the paired host cache scope to ConversationScreen");
+}
 if (!appScreen.includes("onModelSettingsChange={store.saveModelSettings}")) {
   throw new Error("Expected App to persist Codex model setting changes from chat screens");
 }
@@ -613,6 +634,16 @@ for (const expected of ["MODEL_SETTINGS_STORAGE_KEY", "modelSettings", "saveMode
   }
 }
 for (const expected of [
+  "clearCachedConversationMessages",
+  "messageCacheScopeFromPairing",
+  "messageCacheScope",
+  "await clearCachedConversationMessages()"
+]) {
+  if (!mobileStore.includes(expected)) {
+    throw new Error(`Expected mobile store to manage the persistent message cache: ${expected}`);
+  }
+}
+for (const expected of [
   "MODEL_SETTINGS_STORAGE_VERSION",
   "serializeModelSettings",
   "parsed.version !== MODEL_SETTINGS_STORAGE_VERSION",
@@ -647,6 +678,21 @@ for (const expected of [
 ]) {
   if (!codexModelSettings.includes(expected)) {
     throw new Error(`Expected Codex model settings to include ${expected}`);
+  }
+}
+
+for (const expected of [
+  "MESSAGE_CACHE_MAX_MESSAGES",
+  "MESSAGE_CACHE_MAX_BYTES",
+  "messageCacheScopeFromPairing",
+  "loadCachedConversationMessages",
+  "saveCachedConversationMessages",
+  "moveCachedConversationMessages",
+  "clearCachedConversationMessages",
+  "prepareMessagesForCache"
+]) {
+  if (!messageCache.includes(expected)) {
+    throw new Error(`Expected message-cache to include ${expected}`);
   }
 }
 

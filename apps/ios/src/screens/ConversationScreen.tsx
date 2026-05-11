@@ -22,6 +22,11 @@ import { CodexModelControls } from "../components/CodexModelControls";
 import { Button, StatusPill } from "../components/Controls";
 import { rememberRunningConversation } from "../notifications/thread-completion-notifications";
 import { FixedScreen } from "../components/Screen";
+import {
+  loadCachedConversationMessages,
+  moveCachedConversationMessages,
+  saveCachedConversationMessages
+} from "../state/message-cache";
 import { colors, sharedStyles } from "../theme";
 import type {
   CodexMobileModelSettings,
@@ -34,6 +39,7 @@ import type {
 interface ConversationScreenProps {
   api: ApiClient;
   conversation: ConversationSummary;
+  messageCacheScope: string;
   modelSettings: CodexMobileModelSettings;
   onBack(): void;
   onModelSettingsChange(next: CodexMobileModelSettings): void;
@@ -63,6 +69,7 @@ const GENERATED_FILES_MAX_HEIGHT = 188;
 export function ConversationScreen({
   api,
   conversation,
+  messageCacheScope,
   modelSettings,
   onBack,
   onModelSettingsChange
@@ -79,18 +86,25 @@ export function ConversationScreen({
   const [isSending, setIsSending] = useState(false);
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [showScrollToLatestButton, setShowScrollToLatestButton] = useState(false);
+  const [messageCacheLoadKey, setMessageCacheLoadKey] = useState(0);
   const listRef = useRef<FlatList<ConversationMessage> | null>(null);
+  const activeMessages = useMemo(
+    () => conversationMessagesForId(messages, activeConversation.id),
+    [activeConversation.id, messages]
+  );
   const newestFirstMessages = useMemo(
-    () => visibleConversationMessages(messages).reverse(),
-    [messages]
+    () => visibleConversationMessages(activeMessages).reverse(),
+    [activeMessages]
   );
   const lastSequence = useMemo(
-    () => messages.reduce((max, message) => Math.max(max, message.sequence), 0),
-    [messages]
+    () => activeMessages.reduce((max, message) => Math.max(max, message.sequence), 0),
+    [activeMessages]
   );
-  const latestMessageId = messages.length > 0 ? messages[messages.length - 1]?.id : "";
+  const latestMessageId =
+    activeMessages.length > 0 ? activeMessages[activeMessages.length - 1]?.id : "";
   const pendingAutoScrollRef = useRef(true);
   const latestSequenceRef = useRef(0);
+  const loadedCachedConversationIdRef = useRef<string | null>(null);
   const latestConversationUpdatedAtRef = useRef<string | null>(conversation.updatedAt ?? null);
   const latestStatusRef = useRef(conversation.status);
   const activeConversationIdRef = useRef(conversation.id);
@@ -128,7 +142,6 @@ export function ConversationScreen({
   useEffect(() => {
     setActiveConversation(conversation);
     setError(null);
-    setMessages([]);
     setPrompt("");
     setAttachments([]);
     setGeneratedFiles([]);
@@ -137,7 +150,13 @@ export function ConversationScreen({
     setStatus(conversation.status);
     setIsHeaderExpanded(false);
     pendingAutoScrollRef.current = true;
-    latestSequenceRef.current = 0;
+    if (isDraftConversation(conversation)) {
+      setMessages([]);
+      latestSequenceRef.current = 0;
+      loadedCachedConversationIdRef.current = conversation.id;
+    } else {
+      loadedCachedConversationIdRef.current = null;
+    }
     activeConversationIdRef.current = conversation.id;
     latestConversationUpdatedAtRef.current = conversation.updatedAt ?? null;
     latestStatusRef.current = conversation.status;
@@ -146,6 +165,37 @@ export function ConversationScreen({
     messageRefreshInFlightRef.current = false;
     pendingFullMessageRefreshRef.current = false;
   }, [conversation]);
+
+  useEffect(() => {
+    if (isDraftConversation(activeConversation)) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadCachedMessages() {
+      const cachedMessages = await loadCachedConversationMessages(
+        messageCacheScope,
+        activeConversation.id
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      loadedCachedConversationIdRef.current = activeConversation.id;
+      setMessages(cachedMessages);
+      latestSequenceRef.current = highestCachedMessageSequence(cachedMessages);
+      pendingAutoScrollRef.current = true;
+      setMessageCacheLoadKey((current) => current + 1);
+    }
+
+    void loadCachedMessages();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConversation.id, messageCacheScope]);
 
   async function refreshGeneratedFiles(conversationId = activeConversationIdRef.current) {
     if (isDraftConversationId(conversationId) || generatedFileRefreshInFlightRef.current) {
@@ -179,7 +229,13 @@ export function ConversationScreen({
     let cancelled = false;
 
     async function refreshMessages(afterSequence?: number) {
-      const isFullRefresh = typeof afterSequence !== "number";
+      if (loadedCachedConversationIdRef.current !== activeConversation.id) {
+        return;
+      }
+
+      const cachedAfterSequence =
+        typeof afterSequence === "number" ? afterSequence : latestSequenceRef.current;
+      const isFullRefresh = typeof afterSequence !== "number" && cachedAfterSequence === 0;
       if (messageRefreshInFlightRef.current) {
         if (isFullRefresh) {
           pendingFullMessageRefreshRef.current = true;
@@ -189,15 +245,28 @@ export function ConversationScreen({
 
       messageRefreshInFlightRef.current = true;
       try {
-        const nextMessages = await api.listMessages(activeConversation.id, afterSequence, {
-          includeRuntime: false
-        });
+        const nextMessages = await api.listMessages(
+          activeConversation.id,
+          cachedAfterSequence > 0 ? cachedAfterSequence : undefined,
+          {
+            includeRuntime: false
+          }
+        );
         if (!cancelled) {
           if (isFullRefresh) {
             lastFullMessageRefreshAtRef.current = Date.now();
           }
           setError(null);
-          setMessages((current) => mergeConversationMessages(current, nextMessages));
+          setMessages((current) =>
+            persistMergedConversationMessages(
+              messageCacheScope,
+              activeConversation.id,
+              mergeConversationMessages(
+                conversationMessagesForId(current, activeConversation.id),
+                nextMessages
+              )
+            )
+          );
           if (isFullRefresh || nextMessages.length > 0) {
             void refreshGeneratedFiles(activeConversation.id);
           }
@@ -280,7 +349,14 @@ export function ConversationScreen({
       clearInterval(statusTimer);
       appStateSubscription.remove();
     };
-  }, [api, activeConversation.id, activeConversation.projectId, activeConversation.status]);
+  }, [
+    api,
+    activeConversation.id,
+    activeConversation.projectId,
+    activeConversation.status,
+    messageCacheLoadKey,
+    messageCacheScope
+  ]);
 
   useEffect(() => {
     pendingAutoScrollRef.current = true;
@@ -309,7 +385,15 @@ export function ConversationScreen({
     });
 
     setError(null);
-    setMessages((current) => mergeConversationMessages(current, [optimisticMessage]));
+    setMessages((current) =>
+      persistMergedConversationMessages(
+        messageCacheScope,
+        conversationForSend.id,
+        mergeConversationMessages(conversationMessagesForId(current, conversationForSend.id), [
+          optimisticMessage
+        ])
+      )
+    );
     pendingAutoScrollRef.current = true;
 
     sendingCountRef.current += 1;
@@ -343,25 +427,44 @@ export function ConversationScreen({
 
         latestStatusRef.current = started.status;
         activeConversationIdRef.current = started.conversationId;
+        loadedCachedConversationIdRef.current = started.conversationId;
         latestConversationUpdatedAtRef.current = nextConversation.updatedAt ?? null;
         setActiveConversation(nextConversation);
         setStatus(started.status);
         rememberRunningConversation(started.conversationId);
+        void moveCachedConversationMessages(
+          messageCacheScope,
+          conversationForSend.id,
+          started.conversationId
+        );
         setMessages((current) =>
-          markLocalMessageSent(
-            reassignLocalConversationMessages(
-              current,
-              conversationForSend.id,
-              started.conversationId
-            ),
-            clientMessageId
+          persistMergedConversationMessages(
+            messageCacheScope,
+            started.conversationId,
+            markLocalMessageSent(
+              reassignLocalConversationMessages(
+                conversationMessagesForId(current, conversationForSend.id),
+                conversationForSend.id,
+                started.conversationId
+              ),
+              clientMessageId
+            )
           )
         );
         try {
           const next = await api.listMessages(started.conversationId, afterSequence, {
             includeRuntime: false
           });
-          setMessages((current) => mergeConversationMessages(current, next));
+          setMessages((current) =>
+            persistMergedConversationMessages(
+              messageCacheScope,
+              started.conversationId,
+              mergeConversationMessages(
+                conversationMessagesForId(current, started.conversationId),
+                next
+              )
+            )
+          );
           void refreshGeneratedFiles(started.conversationId);
         } catch (caught) {
           setError(caught instanceof Error ? caught.message : "Unable to refresh Codex messages");
@@ -384,21 +487,49 @@ export function ConversationScreen({
       );
       rememberRunningConversation(conversationForSend.id);
       setMessages((current) =>
-        continued.status === "queued"
-          ? markLocalMessageQueued(current, clientMessageId)
-          : markLocalMessageSent(current, clientMessageId)
+        persistMergedConversationMessages(
+          messageCacheScope,
+          conversationForSend.id,
+          continued.status === "queued"
+            ? markLocalMessageQueued(
+                conversationMessagesForId(current, conversationForSend.id),
+                clientMessageId
+              )
+            : markLocalMessageSent(
+                conversationMessagesForId(current, conversationForSend.id),
+                clientMessageId
+              )
+        )
       );
       try {
         const next = await api.listMessages(conversationForSend.id, afterSequence, {
           includeRuntime: false
         });
-        setMessages((current) => mergeConversationMessages(current, next));
+        setMessages((current) =>
+          persistMergedConversationMessages(
+            messageCacheScope,
+            conversationForSend.id,
+            mergeConversationMessages(
+              conversationMessagesForId(current, conversationForSend.id),
+              next
+            )
+          )
+        );
         void refreshGeneratedFiles(conversationForSend.id);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Unable to refresh Codex messages");
       }
     } catch (caught) {
-      setMessages((current) => markLocalMessageFailed(current, clientMessageId));
+      setMessages((current) =>
+        persistMergedConversationMessages(
+          messageCacheScope,
+          conversationForSend.id,
+          markLocalMessageFailed(
+            conversationMessagesForId(current, conversationForSend.id),
+            clientMessageId
+          )
+        )
+      );
       setError(caught instanceof Error ? caught.message : "Unable to continue Codex");
     } finally {
       sendingCountRef.current = Math.max(0, sendingCountRef.current - 1);
@@ -1212,6 +1343,19 @@ function isTransientResponseError(error: unknown) {
   );
 }
 
+function highestCachedMessageSequence(messages: ConversationMessage[]) {
+  return messages.reduce((highest, message) => Math.max(highest, message.sequence), 0);
+}
+
+function persistMergedConversationMessages(
+  messageCacheScope: string,
+  conversationId: string,
+  nextMessages: ConversationMessage[]
+) {
+  void saveCachedConversationMessages(messageCacheScope, conversationId, nextMessages);
+  return nextMessages;
+}
+
 export function mergeConversationMessages(
   current: ConversationMessage[],
   incoming: ConversationMessage[]
@@ -1290,6 +1434,10 @@ function hasMatchingServerMessage(
 
 export function visibleConversationMessages(messages: ConversationMessage[]) {
   return messages.filter((message) => message.role !== "runtime");
+}
+
+function conversationMessagesForId(messages: ConversationMessage[], conversationId: string) {
+  return messages.filter((message) => message.conversationId === conversationId);
 }
 
 export function safeMessageContent(content: string) {
