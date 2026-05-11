@@ -234,11 +234,24 @@ if (!conversationScreen.includes("shouldForceMessageRefreshAfterStatusPoll")) {
     "Expected ConversationScreen to force a message refresh from desktop status updates"
   );
 }
-if (!conversationScreen.includes("const canSendNow = !isSending;")) {
-  throw new Error("Expected ConversationScreen to allow queued phone sends while Codex is running");
+if (
+  !conversationScreen.includes(
+    "const canSendNow = !isDraftConversation(activeConversation) || !isSending;"
+  )
+) {
+  throw new Error(
+    "Expected ConversationScreen to keep existing Codex threads queueable while a send is in flight"
+  );
 }
 if (!conversationScreen.includes("{sendButtonLabel(status, isSending)}")) {
   throw new Error("Expected ConversationScreen to label busy Codex turns as queueable");
+}
+if (
+  !conversationScreen.includes(
+    'if (!canAcceptConversationInput(status)) {\n    return "Queue";\n  }\n\n  if (isSending) {'
+  )
+) {
+  throw new Error("Expected ConversationScreen to prefer Queue over Sending for busy turns");
 }
 if (conversationScreen.includes('source === "codex_app" && status === "running"')) {
   throw new Error("Expected ConversationScreen not to allow sends into running Codex app turns");

@@ -90,9 +90,8 @@ export function ConversationScreen({
   const messageRefreshInFlightRef = useRef(false);
   const pendingFullMessageRefreshRef = useRef(false);
   const sendingCountRef = useRef(0);
-  const canSendNow = !isSending;
-  const canSteerNow =
-    !isDraftConversation(activeConversation) && isConversationBusyStatus(status) && !isSending;
+  const canSendNow = !isDraftConversation(activeConversation) || !isSending;
+  const canSteerNow = !isDraftConversation(activeConversation) && isConversationBusyStatus(status);
 
   function scrollToLatest(animated = true) {
     requestAnimationFrame(() => {
@@ -852,16 +851,16 @@ function isConversationBusyStatus(status: string) {
 }
 
 function sendButtonLabel(status: string, isSending: boolean) {
-  if (isSending) {
-    return "Sending";
-  }
-
   if (status === "awaiting_approval") {
     return "Queue";
   }
 
   if (!canAcceptConversationInput(status)) {
     return "Queue";
+  }
+
+  if (isSending) {
+    return "Sending";
   }
 
   return "Send";
