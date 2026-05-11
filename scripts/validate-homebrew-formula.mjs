@@ -15,7 +15,7 @@ const npmTarballUrl = `https://registry.npmjs.org/@abitat_reece/cli/-/cli-${vers
 for (const expected of [
   "class Abitat < Formula",
   'desc "Remote Codex control from Mac and iPhone"',
-  'homepage "https://github.com/AbitatDoorothy/Workspace"',
+  'homepage "https://github.com/AbitatDoorothy/homebrew-abitat"',
   `url "${npmTarballUrl}"`,
   'depends_on "node@22"',
   'depends_on "python" => :build',
