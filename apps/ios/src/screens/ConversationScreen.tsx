@@ -46,6 +46,7 @@ interface PendingAttachment {
 
 interface SendConversationInput {
   attachments?: PendingAttachment[];
+  delivery?: "queue" | "steer";
   prompt: string;
 }
 
@@ -89,7 +90,8 @@ export function ConversationScreen({
   const messageRefreshInFlightRef = useRef(false);
   const pendingFullMessageRefreshRef = useRef(false);
   const sendingCountRef = useRef(0);
-  const canSendNow = canAcceptConversationInput(status) && !isSending;
+  const canSendNow = !isDraftConversation(activeConversation) || !isSending;
+  const canSteerNow = !isDraftConversation(activeConversation) && isConversationBusyStatus(status);
 
   function scrollToLatest(animated = true) {
     requestAnimationFrame(() => {
@@ -245,6 +247,7 @@ export function ConversationScreen({
     const conversationForSend = activeConversation;
     const isStartingDraftConversation = isDraftConversation(conversationForSend);
     const queuedAttachments = input.attachments ?? [];
+    const delivery = input.delivery ?? "queue";
     const submittedPrompt = promptForSend(input.prompt, queuedAttachments);
     const clientMessageId = `ios-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const afterSequence = lastSequence;
@@ -319,13 +322,22 @@ export function ConversationScreen({
       const continued = await api.continueConversation(conversationForSend.id, {
         attachments: uploadedConversationAttachments,
         clientMessageId,
+        delivery,
         effort: modelSettings.effort,
         model: modelSettings.model,
         prompt: submittedPrompt
       });
-      setStatus(continued.status);
+      setStatus(
+        continued.status === "queued" && isConversationBusyStatus(status)
+          ? status
+          : continued.status
+      );
       rememberRunningConversation(conversationForSend.id);
-      setMessages((current) => markLocalMessageSent(current, clientMessageId));
+      setMessages((current) =>
+        continued.status === "queued"
+          ? markLocalMessageQueued(current, clientMessageId)
+          : markLocalMessageSent(current, clientMessageId)
+      );
       try {
         const next = await api.listMessages(conversationForSend.id, afterSequence, {
           includeRuntime: false
@@ -353,7 +365,28 @@ export function ConversationScreen({
 
     setPrompt("");
     setAttachments([]);
-    void sendConversation({ attachments: queuedAttachments, prompt: queuedPrompt });
+    void sendConversation({
+      attachments: queuedAttachments,
+      delivery: "queue",
+      prompt: queuedPrompt
+    });
+  }
+
+  function steerConversation() {
+    const queuedPrompt = prompt;
+    const queuedAttachments = attachments;
+
+    if (!canSendPrompt(queuedPrompt, queuedAttachments) || !canSteerNow) {
+      return;
+    }
+
+    setPrompt("");
+    setAttachments([]);
+    void sendConversation({
+      attachments: queuedAttachments,
+      delivery: "steer",
+      prompt: queuedPrompt
+    });
   }
 
   function sendGitShortcut() {
@@ -361,7 +394,7 @@ export function ConversationScreen({
       return;
     }
 
-    void sendConversation({ prompt: "git" });
+    void sendConversation({ delivery: "queue", prompt: "git" });
   }
 
   async function pickImageAttachment() {
@@ -490,6 +523,9 @@ export function ConversationScreen({
                   {message.metadata?.localStatus === "sending" ? (
                     <Text style={styles.sendingLabel}>Sending</Text>
                   ) : null}
+                  {message.metadata?.localStatus === "queued" ? (
+                    <Text style={styles.sendingLabel}>Queued</Text>
+                  ) : null}
                   {message.metadata?.localStatus === "failed" ? (
                     <Text accessibilityLabel="Message failed to send" style={styles.failedSend}>
                       !
@@ -595,6 +631,18 @@ export function ConversationScreen({
               >
                 {sendButtonLabel(status, isSending)}
               </Button>
+              <Pressable
+                accessibilityLabel="Steer running Codex turn"
+                accessibilityRole="button"
+                disabled={!canSendPrompt(prompt, attachments) || !canSteerNow}
+                onPress={steerConversation}
+                style={[
+                  styles.steerButton,
+                  !canSendPrompt(prompt, attachments) || !canSteerNow ? styles.disabledAction : null
+                ]}
+              >
+                <Text style={styles.steerButtonText}>Steer</Text>
+              </Pressable>
             </View>
           </View>
         </View>
@@ -670,6 +718,7 @@ const styles = StyleSheet.create({
     gap: 8
   },
   composerButton: {
+    gap: 8,
     justifyContent: "flex-end",
     width: 92
   },
@@ -738,6 +787,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800"
   },
+  steerButton: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceHigh,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 36,
+    paddingHorizontal: 12
+  },
+  steerButtonText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "900"
+  },
   toolButton: {
     alignItems: "center",
     backgroundColor: colors.surfaceHigh,
@@ -787,16 +851,16 @@ function isConversationBusyStatus(status: string) {
 }
 
 function sendButtonLabel(status: string, isSending: boolean) {
-  if (isSending) {
-    return "Sending";
-  }
-
   if (status === "awaiting_approval") {
-    return "Waiting";
+    return "Queue";
   }
 
   if (!canAcceptConversationInput(status)) {
-    return "Running";
+    return "Queue";
+  }
+
+  if (isSending) {
+    return "Sending";
   }
 
   return "Send";
@@ -854,6 +918,20 @@ function markLocalMessageFailed(messages: ConversationMessage[], clientMessageId
           metadata: {
             ...(message.metadata ?? {}),
             localStatus: "failed"
+          }
+        }
+      : message
+  );
+}
+
+function markLocalMessageQueued(messages: ConversationMessage[], clientMessageId: string) {
+  return messages.map((message) =>
+    message.id === clientMessageId
+      ? {
+          ...message,
+          metadata: {
+            ...(message.metadata ?? {}),
+            localStatus: "queued"
           }
         }
       : message
@@ -958,6 +1036,7 @@ function messageMergeKey(message: ConversationMessage) {
 function isLocalMessage(message: ConversationMessage) {
   return (
     message.metadata?.localStatus === "sending" ||
+    message.metadata?.localStatus === "queued" ||
     message.metadata?.localStatus === "sent" ||
     message.metadata?.localStatus === "failed"
   );

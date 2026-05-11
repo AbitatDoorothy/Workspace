@@ -65,6 +65,8 @@ export interface LocalCodexMessage {
   createdAt: string;
 }
 
+export type LocalCodexDeliveryMode = "queue" | "steer";
+
 export interface LocalCodexCompletionState {
   conversationId: string;
   failed: boolean;
@@ -86,6 +88,7 @@ export interface LocalCodexBridge {
     conversationId: string,
     input: {
       attachments?: LocalAttachmentReference[];
+      delivery?: LocalCodexDeliveryMode;
       modelSettings?: CodexMobileModelSettings;
       prompt: string;
     }
@@ -397,14 +400,17 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       if (messageMatch && method === "POST") {
         const body = await readJson(request);
         const prompt = stringValue(body.content) || requiredPrompt(body);
+        const delivery = deliveryMode(body.delivery);
         logDiagnostics(diagnostics, "info", "conversation.continue.request", {
           ...promptDiagnostics(prompt),
           conversationId: messageMatch.conversationId,
+          delivery,
           deviceId: actor.id
         });
         let continued: Awaited<ReturnType<LocalCodexBridge["continueConversation"]>>;
         try {
           continued = await input.codex.continueConversation(messageMatch.conversationId, {
+            delivery,
             prompt
           });
         } catch (error) {
@@ -429,11 +435,13 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       if (continueMatch && method === "POST") {
         const body = await readJson(request);
         const attachments = attachmentReferences(body.attachments);
+        const delivery = deliveryMode(body.delivery);
         const prompt = requiredPrompt(body);
         logDiagnostics(diagnostics, "info", "conversation.continue.request", {
           ...promptDiagnostics(prompt),
           ...attachmentDiagnostics(attachments),
           conversationId: continueMatch.conversationId,
+          delivery,
           deviceId: actor.id,
           model: stringValue(body.model) || undefined
         });
@@ -441,6 +449,7 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
         try {
           continued = await input.codex.continueConversation(continueMatch.conversationId, {
             attachments,
+            delivery,
             modelSettings: modelSettings(body),
             prompt
           });
@@ -749,6 +758,10 @@ async function saveAttachment(directory: string, body: Record<string, unknown>) 
     path,
     size: bytes.byteLength
   };
+}
+
+function deliveryMode(input: unknown): LocalCodexDeliveryMode | undefined {
+  return input === "queue" || input === "steer" ? input : undefined;
 }
 
 function safeFileName(value: string) {
