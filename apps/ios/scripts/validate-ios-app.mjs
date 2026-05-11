@@ -39,6 +39,9 @@ if (!packageJson.dependencies?.["expo-crypto"]) {
 if (!packageJson.dependencies?.["expo-haptics"]) {
   throw new Error("Expected abitat-ios to depend on expo-haptics for splash pulse feedback");
 }
+if (!packageJson.dependencies?.["expo-clipboard"]) {
+  throw new Error("Expected abitat-ios to depend on expo-clipboard for message copying");
+}
 if (!packageJson.dependencies?.["@expo/vector-icons"]) {
   throw new Error("Expected abitat-ios to depend on @expo/vector-icons for bottom navigation");
 }
@@ -109,6 +112,9 @@ if (!podfileLock.includes("ExpoSharing (55.0.18)")) {
 if (!podfileLock.includes("ExpoHaptics (55.0.14)")) {
   throw new Error("Expected native iOS Pods to include ExpoHaptics for splash pulse feedback");
 }
+if (!podfileLock.includes("ExpoClipboard (55.0.13)")) {
+  throw new Error("Expected native iOS Pods to include ExpoClipboard for message copying");
+}
 
 const conversationScreen = await readFile(
   join(process.cwd(), "src/screens/ConversationScreen.tsx"),
@@ -163,6 +169,20 @@ if (!conversationScreen.includes("scrollToOffset({ animated, offset: 0 })")) {
 }
 if (!conversationScreen.includes("KeyboardAvoidingView")) {
   throw new Error("Expected ConversationScreen to keep the composer above the iOS keyboard");
+}
+for (const expected of [
+  'import * as Clipboard from "expo-clipboard";',
+  "Clipboard.setStringAsync",
+  "copyMessageText",
+  "const text = stripCodexAppDirectives(message.content);",
+  "accessibilityLabel={`Copy ${message.role} message`}",
+  "selectable",
+  "contextMenuHidden={false}",
+  "copiedMessageId"
+]) {
+  if (!conversationScreen.includes(expected)) {
+    throw new Error(`Expected ConversationScreen to support message copying: ${expected}`);
+  }
 }
 if (!conversationScreen.includes("styles.keyboardAvoidingScreen")) {
   throw new Error("Expected ConversationScreen to use an outer keyboard-avoiding screen wrapper");

@@ -32,6 +32,8 @@ PODS:
     - ExpoModulesCore
   - ExpoCamera (55.0.16):
     - ExpoModulesCore
+  - ExpoClipboard (55.0.13):
+    - ExpoModulesCore
   - ExpoCrypto (55.0.14):
     - ExpoModulesCore
   - ExpoDocumentPicker (55.0.13):
@@ -1875,6 +1877,7 @@ DEPENDENCIES:
   - "Expo (from `../../../node_modules/.pnpm/expo@55.0.19_@babel+core@7.29.0_@expo+dom-webview@55.0.5_react-dom@19.2.5_react@19.2.5__6e2481d2a92d439656bec5589abd745a/node_modules/expo`)"
   - "ExpoAsset (from `../../../node_modules/.pnpm/expo-asset@55.0.16_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19._fe355e54f046e1c389423174b8f7c469/node_modules/expo-asset/ios`)"
   - "ExpoCamera (from `../../../node_modules/.pnpm/expo-camera@55.0.16_@types+emscripten@1.41.5_expo@55.0.19_react-native@0.83.6_@babel+co_68e4044e70ac46c3bc36210f831e7e6c/node_modules/expo-camera/ios`)"
+  - "ExpoClipboard (from `../../../node_modules/.pnpm/expo-clipboard@55.0.13_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react_34bda0d58376c9682ef28f6b9838bbce/node_modules/expo-clipboard/ios`)"
   - "ExpoCrypto (from `../../../node_modules/.pnpm/expo-crypto@55.0.14_expo@55.0.19/node_modules/expo-crypto/ios`)"
   - "ExpoDocumentPicker (from `../../../node_modules/.pnpm/expo-document-picker@55.0.13_expo@55.0.19/node_modules/expo-document-picker/ios`)"
   - "ExpoDomWebView (from `../../../node_modules/.pnpm/@expo+dom-webview@55.0.5_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+rea_f6d19358bdf24455540cc77a0b9ded43/node_modules/@expo/dom-webview/ios`)"
@@ -1975,6 +1978,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.pnpm/expo-asset@55.0.16_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19._fe355e54f046e1c389423174b8f7c469/node_modules/expo-asset/ios"
   ExpoCamera:
     :path: "../../../node_modules/.pnpm/expo-camera@55.0.16_@types+emscripten@1.41.5_expo@55.0.19_react-native@0.83.6_@babel+co_68e4044e70ac46c3bc36210f831e7e6c/node_modules/expo-camera/ios"
+  ExpoClipboard:
+    :path: "../../../node_modules/.pnpm/expo-clipboard@55.0.13_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react_34bda0d58376c9682ef28f6b9838bbce/node_modules/expo-clipboard/ios"
   ExpoCrypto:
     :path: "../../../node_modules/.pnpm/expo-crypto@55.0.14_expo@55.0.19/node_modules/expo-crypto/ios"
   ExpoDocumentPicker:
@@ -2157,6 +2162,7 @@ SPEC CHECKSUMS:
   Expo: 8d901a968aee7a848334798753b63c4a8bf08bd4
   ExpoAsset: f56ed740b6a127da2bfd90832cf688ae309d4410
   ExpoCamera: 0ed88db61b7dc54712a98b8baaf415a3be88b76b
+  ExpoClipboard: 5d1b0cd2686406f21e616f2d9b3431259dee2e6a
   ExpoCrypto: 9fd0b78215cffa1aa20de026d452242401aa37dc
   ExpoDocumentPicker: be59b82799ae30811e3f37a7521d6622baa63a19
   ExpoDomWebView: 2b2fbd9a07de8790569257cbf9dfdaa31cf95c70
