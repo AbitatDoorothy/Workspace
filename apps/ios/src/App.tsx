@@ -13,6 +13,7 @@ import {
   type CodexCompletionNotificationTarget,
   useThreadCompletionNotifications
 } from "./notifications/thread-completion-notifications";
+import { useMessagePreloader } from "./state/message-preloader";
 import { useMobileStore } from "./state/mobile-store";
 import { colors } from "./theme";
 import type { ConversationSummary, ProjectSummary, RouteName } from "./types";
@@ -106,6 +107,11 @@ export default function App() {
     []
   );
   useThreadCompletionNotifications(store.api, store.isPaired, openConversationFromNotification);
+  useMessagePreloader({
+    api: store.api,
+    enabled: store.isPaired,
+    messageCacheScope: store.messageCacheScope
+  });
 
   if (store.isRestoring) {
     return (

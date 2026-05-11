@@ -7,10 +7,27 @@ export const MESSAGE_CACHE_MAX_BYTES = 2 * 1024 * 1024;
 
 const MESSAGE_CACHE_DIRECTORY = "message-cache";
 const MESSAGE_CACHE_VERSION = 1;
+const MESSAGE_CACHE_INDEX_VERSION = 1;
 
 interface CachedConversationMessages {
   messages: ConversationMessage[];
   version: typeof MESSAGE_CACHE_VERSION;
+}
+
+interface CachedConversationMessageIndex {
+  entries: MessageCacheIndexEntry[];
+  version: typeof MESSAGE_CACHE_INDEX_VERSION;
+}
+
+export interface MessageCacheIndexEntry {
+  conversationId: string;
+  latestSequence: number;
+  lastSyncedAt: string;
+  projectId?: string;
+  prompt?: string;
+  status?: string;
+  updatedAt?: string;
+  workspaceId?: string;
 }
 
 export function messageCacheScopeFromPairing(pairing: PairingState | null) {
@@ -48,7 +65,10 @@ export async function loadCachedConversationMessages(
 export async function saveCachedConversationMessages(
   scope: string,
   conversationId: string,
-  messages: ConversationMessage[]
+  messages: ConversationMessage[],
+  metadata: Partial<
+    Pick<MessageCacheIndexEntry, "projectId" | "prompt" | "status" | "updatedAt" | "workspaceId">
+  > = {}
 ) {
   const path = await conversationCachePath(scope, conversationId);
   if (!path) {
@@ -56,12 +76,19 @@ export async function saveCachedConversationMessages(
   }
 
   await ensureMessageCacheDirectory();
+  const preparedMessages = prepareMessagesForCache(messages);
   const body: CachedConversationMessages = {
     version: MESSAGE_CACHE_VERSION,
-    messages: prepareMessagesForCache(messages)
+    messages: preparedMessages
   };
 
   await FileSystem.writeAsStringAsync(path, JSON.stringify(body));
+  await upsertMessageCacheIndexEntry(scope, {
+    conversationId,
+    latestSequence: highestCachedMessageSequence(preparedMessages),
+    lastSyncedAt: new Date().toISOString(),
+    ...metadata
+  });
 }
 
 export async function moveCachedConversationMessages(
@@ -90,6 +117,7 @@ export async function moveCachedConversationMessages(
   if (sourcePath) {
     await FileSystem.deleteAsync(sourcePath, { idempotent: true });
   }
+  await removeMessageCacheIndexEntry(scope, fromConversationId);
 }
 
 export async function clearCachedConversationMessages() {
@@ -114,6 +142,62 @@ export function prepareMessagesForCache(messages: ConversationMessage[]) {
   return prepared;
 }
 
+export function highestCachedMessageSequence(messages: ConversationMessage[]) {
+  return messages.reduce((highest, message) => Math.max(highest, message.sequence), 0);
+}
+
+export async function loadMessageCacheIndex(scope: string): Promise<MessageCacheIndexEntry[]> {
+  const path = await messageCacheIndexPath(scope);
+  if (!path) {
+    return [];
+  }
+
+  try {
+    const raw = await FileSystem.readAsStringAsync(path);
+    const parsed = JSON.parse(raw) as Partial<CachedConversationMessageIndex>;
+
+    if (parsed.version !== MESSAGE_CACHE_INDEX_VERSION || !Array.isArray(parsed.entries)) {
+      return [];
+    }
+
+    return prepareMessageCacheIndexEntries(parsed.entries);
+  } catch {
+    return [];
+  }
+}
+
+export async function upsertMessageCacheIndexEntry(scope: string, entry: MessageCacheIndexEntry) {
+  const entries = await loadMessageCacheIndex(scope);
+  const existing = entries.find((candidate) => candidate.conversationId === entry.conversationId);
+  const nextEntries = prepareMessageCacheIndexEntries([
+    ...entries.filter((candidate) => candidate.conversationId !== entry.conversationId),
+    { ...existing, ...entry }
+  ]);
+  await saveMessageCacheIndex(scope, nextEntries);
+}
+
+async function saveMessageCacheIndex(scope: string, entries: MessageCacheIndexEntry[]) {
+  const path = await messageCacheIndexPath(scope);
+  if (!path) {
+    return;
+  }
+
+  await ensureMessageCacheDirectory();
+  const body: CachedConversationMessageIndex = {
+    entries: prepareMessageCacheIndexEntries(entries),
+    version: MESSAGE_CACHE_INDEX_VERSION
+  };
+  await FileSystem.writeAsStringAsync(path, JSON.stringify(body));
+}
+
+async function removeMessageCacheIndexEntry(scope: string, conversationId: string) {
+  const entries = await loadMessageCacheIndex(scope);
+  await saveMessageCacheIndex(
+    scope,
+    entries.filter((entry) => entry.conversationId !== conversationId)
+  );
+}
+
 async function conversationCachePath(scope: string, conversationId: string) {
   const directory = messageCacheDirectory();
   if (!directory) {
@@ -121,6 +205,15 @@ async function conversationCachePath(scope: string, conversationId: string) {
   }
 
   return `${directory}${safeCachePathPart(scope)}--${safeCachePathPart(conversationId)}.json`;
+}
+
+async function messageCacheIndexPath(scope: string) {
+  const directory = messageCacheDirectory();
+  if (!directory) {
+    return null;
+  }
+
+  return `${directory}${safeCachePathPart(scope)}--index.json`;
 }
 
 function messageCacheDirectory() {
@@ -154,6 +247,41 @@ function mergeCachedMessages(messages: ConversationMessage[]) {
 
     return left.createdAt.localeCompare(right.createdAt);
   });
+}
+
+function prepareMessageCacheIndexEntries(entries: MessageCacheIndexEntry[]) {
+  const byConversationId = new Map<string, MessageCacheIndexEntry>();
+
+  for (const entry of entries) {
+    if (!isCacheableIndexEntry(entry)) {
+      continue;
+    }
+
+    byConversationId.set(entry.conversationId, {
+      conversationId: entry.conversationId,
+      latestSequence: Math.max(0, Math.floor(entry.latestSequence)),
+      lastSyncedAt: entry.lastSyncedAt,
+      ...(entry.projectId ? { projectId: entry.projectId } : {}),
+      ...(entry.prompt ? { prompt: entry.prompt } : {}),
+      ...(entry.status ? { status: entry.status } : {}),
+      ...(entry.updatedAt ? { updatedAt: entry.updatedAt } : {}),
+      ...(entry.workspaceId ? { workspaceId: entry.workspaceId } : {})
+    });
+  }
+
+  return [...byConversationId.values()].sort((left, right) =>
+    right.lastSyncedAt.localeCompare(left.lastSyncedAt)
+  );
+}
+
+function isCacheableIndexEntry(entry: MessageCacheIndexEntry) {
+  return (
+    typeof entry.conversationId === "string" &&
+    entry.conversationId.trim().length > 0 &&
+    Number.isFinite(entry.latestSequence) &&
+    typeof entry.lastSyncedAt === "string" &&
+    entry.lastSyncedAt.trim().length > 0
+  );
 }
 
 function isCacheableMessage(message: ConversationMessage) {

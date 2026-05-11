@@ -9,6 +9,7 @@ const requiredFiles = [
   "src/components/CodexModelControls.tsx",
   "src/notifications/thread-completion-notifications.ts",
   "src/state/message-cache.ts",
+  "src/state/message-preloader.ts",
   "src/state/mobile-store.ts",
   "src/screens/PairingScreen.tsx",
   "src/screens/WorkspaceScreen.tsx",
@@ -113,6 +114,10 @@ const codexModelControls = await readFile(
 const apiClient = await readFile(join(process.cwd(), "src/api/client.ts"), "utf8");
 const mobileStore = await readFile(join(process.cwd(), "src/state/mobile-store.ts"), "utf8");
 const messageCache = await readFile(join(process.cwd(), "src/state/message-cache.ts"), "utf8");
+const messagePreloader = await readFile(
+  join(process.cwd(), "src/state/message-preloader.ts"),
+  "utf8"
+);
 const pairingScreen = await readFile(join(process.cwd(), "src/screens/PairingScreen.tsx"), "utf8");
 if (mobileStore.includes("https://workspace.abitat.io")) {
   throw new Error("Expected mobile-store to avoid hosted workspace.abitat.io defaults");
@@ -519,6 +524,12 @@ if (!appScreen.includes("messageCacheScope={store.messageCacheScope}")) {
 if (!appScreen.includes("onModelSettingsChange={store.saveModelSettings}")) {
   throw new Error("Expected App to persist Codex model setting changes from chat screens");
 }
+if (!appScreen.includes("useMessagePreloader")) {
+  throw new Error("Expected App to start the global message preloader after pairing");
+}
+if (!appScreen.includes("messageCacheScope: store.messageCacheScope")) {
+  throw new Error("Expected App to scope message preloading to the paired Mac");
+}
 if (!appScreen.includes('onBack={() => setRoute(project ? "project" : "projects")')) {
   throw new Error("Expected App to route conversation back actions to the project page");
 }
@@ -684,6 +695,10 @@ for (const expected of [
 for (const expected of [
   "MESSAGE_CACHE_MAX_MESSAGES",
   "MESSAGE_CACHE_MAX_BYTES",
+  "MessageCacheIndexEntry",
+  "loadMessageCacheIndex",
+  "upsertMessageCacheIndexEntry",
+  "highestCachedMessageSequence",
   "messageCacheScopeFromPairing",
   "loadCachedConversationMessages",
   "saveCachedConversationMessages",
@@ -693,6 +708,26 @@ for (const expected of [
 ]) {
   if (!messageCache.includes(expected)) {
     throw new Error(`Expected message-cache to include ${expected}`);
+  }
+}
+
+for (const expected of [
+  "useMessagePreloader",
+  "PRELOAD_POLL_INTERVAL_MS",
+  "MAX_PRELOAD_CONVERSATIONS_PER_TICK",
+  "api.listCompletionStates()",
+  "api.listMessages",
+  "loadMessageCacheIndex",
+  "loadCachedConversationMessages",
+  "saveCachedConversationMessages",
+  "upsertMessageCacheIndexEntry",
+  "highestCachedMessageSequence",
+  "AppState.addEventListener",
+  "isPreloadCandidate",
+  "includeRuntime: false"
+]) {
+  if (!messagePreloader.includes(expected)) {
+    throw new Error(`Expected message preloader to include ${expected}`);
   }
 }
 
