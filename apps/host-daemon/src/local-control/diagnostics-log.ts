@@ -56,6 +56,7 @@ const TASK_EVENTS = [
 const ACTIVITY_SCOPED_EVENTS = new Set([
   "codex.thread.messages_flattened",
   "codex.thread_read.call",
+  "codex.thread_read.unmaterialized",
   "codex.thread_read.result",
   "completion.poll.result",
   "completion.states.list.result",

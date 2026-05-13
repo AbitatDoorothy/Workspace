@@ -9,11 +9,13 @@ import type { ListRenderItemInfo, NativeScrollEvent, NativeSyntheticEvent } from
 import {
   ActionSheetIOS,
   ActivityIndicator,
+  Animated,
   AppState,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -21,6 +23,7 @@ import {
   StatusBar,
   Text,
   TextInput,
+  type PanResponderGestureState,
   View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -64,9 +67,11 @@ interface SendConversationInput {
   attachments?: PendingAttachment[];
   delivery?: "queue" | "steer";
   prompt: string;
+  replyTo?: ReplyTargetSnapshot | null;
 }
 
 type FeatherIconName = keyof typeof Feather.glyphMap;
+type ReplyTargetSnapshot = Pick<ConversationMessage, "content" | "id" | "role">;
 
 const MESSAGE_POLL_INTERVAL_MS = 1800;
 const STATUS_POLL_INTERVAL_MS = 2500;
@@ -74,6 +79,9 @@ const FULL_MESSAGE_REFRESH_INTERVAL_MS = 12000;
 const COMPOSER_INPUT_MIN_HEIGHT = 48;
 const COMPOSER_INPUT_MAX_HEIGHT = 132;
 const GENERATED_FILES_MAX_HEIGHT = 188;
+const REPLY_SWIPE_DISTANCE = 48;
+const REPLY_SWIPE_REVEAL_MAX = 58;
+const REPLY_SWIPE_VELOCITY = 0.28;
 
 const CHAT_STARS = [
   { left: "5%", opacity: 0.42, size: 1, top: "8%" },
@@ -115,6 +123,7 @@ export function ConversationScreen({
   const [isSending, setIsSending] = useState(false);
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [replyTargetMessage, setReplyTargetMessage] = useState<ReplyTargetSnapshot | null>(null);
   const [showScrollToLatestButton, setShowScrollToLatestButton] = useState(false);
   const [messageCacheLoadKey, setMessageCacheLoadKey] = useState(0);
   const [editingQueuedMessageId, setEditingQueuedMessageId] = useState<string | null>(null);
@@ -191,6 +200,10 @@ export function ConversationScreen({
   useEffect(() => {
     latestSequenceRef.current = lastSequence;
   }, [lastSequence]);
+
+  useEffect(() => {
+    clearReplyTarget();
+  }, [activeConversation.id]);
 
   useEffect(() => {
     setActiveConversation(conversation);
@@ -440,7 +453,8 @@ export function ConversationScreen({
     const isStartingDraftConversation = isDraftConversation(conversationForSend);
     const queuedAttachments = input.attachments ?? [];
     const delivery = input.delivery ?? "queue";
-    const submittedPrompt = promptForSend(input.prompt, queuedAttachments);
+    const displayPrompt = promptForSend(input.prompt, queuedAttachments);
+    const submittedPrompt = replyPromptForSend(displayPrompt, input.replyTo ?? null);
     const clientMessageId = `ios-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const afterSequence = lastSequence;
     const optimisticLocalStatus =
@@ -455,7 +469,8 @@ export function ConversationScreen({
       conversationId: conversationForSend.id,
       createdAt: new Date().toISOString(),
       localStatus: optimisticLocalStatus,
-      prompt: submittedPrompt,
+      prompt: displayPrompt,
+      replyTarget: input.replyTo ?? null,
       sequence: afterSequence + 1
     });
 
@@ -495,7 +510,7 @@ export function ConversationScreen({
         const nextConversation = {
           ...conversationForSend,
           id: started.conversationId,
-          prompt: submittedPrompt,
+          prompt: displayPrompt,
           status: started.status,
           updatedAt: new Date().toISOString()
         };
@@ -620,6 +635,7 @@ export function ConversationScreen({
 
     const queuedPrompt = prompt;
     const queuedAttachments = attachments;
+    const queuedReplyTarget = replyTargetMessage;
 
     if (!canSendPrompt(queuedPrompt, queuedAttachments) || !canSendNow) {
       return;
@@ -627,10 +643,12 @@ export function ConversationScreen({
 
     setPrompt("");
     setAttachments([]);
+    clearReplyTarget();
     void sendConversation({
       attachments: queuedAttachments,
       delivery: "queue",
-      prompt: queuedPrompt
+      prompt: queuedPrompt,
+      replyTo: queuedReplyTarget
     });
   }
 
@@ -762,7 +780,7 @@ export function ConversationScreen({
       return;
     }
 
-    const submittedPrompt = queuedMessageSubmittedPrompt(message);
+    const submittedPrompt = queuedMessageDisplayPrompt(message);
     if (!submittedPrompt) {
       return;
     }
@@ -793,10 +811,14 @@ export function ConversationScreen({
 
     setError(null);
     try {
+      const editedSubmittedPrompt = replyPromptForSend(
+        editedPrompt,
+        replyTargetFromMetadata(queuedMessage.metadata?.replyTarget)
+      );
       const result = await api.updateQueuedTurn(
         activeConversation.id,
         queuedMessageClientId(queuedMessage),
-        { prompt: editedPrompt }
+        { prompt: editedSubmittedPrompt }
       );
       if (!result.updated) {
         setError("Queued message is already being processed.");
@@ -844,8 +866,25 @@ export function ConversationScreen({
     );
   }
 
+  function selectReplyTarget(message: ConversationMessage) {
+    const content = conversationMessageDisplayContent(message).trim();
+    if (!content) {
+      return;
+    }
+
+    setReplyTargetMessage({
+      content,
+      id: message.id,
+      role: message.role
+    });
+  }
+
+  function clearReplyTarget() {
+    setReplyTargetMessage(null);
+  }
+
   async function copyMessageText(message: ConversationMessage) {
-    const text = stripCodexAppDirectives(message.content);
+    const text = conversationMessageDisplayContent(message);
     if (!text) {
       return;
     }
@@ -953,6 +992,34 @@ export function ConversationScreen({
     }
   }
 
+  function renderReplyTargetPreview() {
+    if (!replyTargetMessage) {
+      return null;
+    }
+
+    return (
+      <View style={styles.replyPreview}>
+        <View style={styles.replyPreviewBar} />
+        <View style={styles.replyPreviewBody}>
+          <Text style={styles.replyPreviewLabel}>
+            Replying to {replyRoleLabel(replyTargetMessage.role)}
+          </Text>
+          <Text numberOfLines={2} style={styles.replyPreviewText}>
+            {replyTargetMessage.content}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityLabel="Cancel reply target"
+          accessibilityRole="button"
+          onPress={clearReplyTarget}
+          style={styles.replyPreviewClose}
+        >
+          <Feather color="#d6d6dc" name="x" size={16} />
+        </Pressable>
+      </View>
+    );
+  }
+
   function renderQueuedMessageStack() {
     if (queuedLocalMessages.length === 0) {
       return null;
@@ -967,7 +1034,7 @@ export function ConversationScreen({
         contentContainerStyle={styles.queueStack}
       >
         {queuedLocalMessages.map((message) => {
-          const submittedPrompt = queuedMessageSubmittedPrompt(message) ?? "";
+          const submittedPrompt = queuedMessageDisplayPrompt(message) ?? "";
           const isEditing = editingQueuedMessageId === message.id;
 
           return (
@@ -1023,63 +1090,13 @@ export function ConversationScreen({
   }
 
   function renderMessageItem({ item: message }: ListRenderItemInfo<ConversationMessage>) {
-    const isUserMessage = message.role === "user";
-    const localStatus =
-      typeof message.metadata?.localStatus === "string" ? message.metadata.localStatus : null;
-    const roleLabel = isUserMessage
-      ? "USER"
-      : message.role === "assistant"
-        ? "CODEX"
-        : message.role.toUpperCase();
-
     return (
-      <View
-        style={[
-          styles.messageBlock,
-          isUserMessage ? styles.userMessageBlock : styles.codexMessageBlock
-        ]}
-      >
-        <View
-          style={[
-            styles.messageMetaRow,
-            isUserMessage ? styles.userMessageMetaRow : styles.codexMessageMetaRow
-          ]}
-        >
-          <Text style={styles.messageRoleLabel}>{roleLabel}</Text>
-          <Pressable
-            accessibilityLabel={`Copy ${message.role} message`}
-            accessibilityRole="button"
-            onPress={() => void copyMessageText(message)}
-            style={styles.copyButton}
-          >
-            <Text style={styles.copyButtonText}>
-              {copiedMessageId === message.id ? "Copied" : "Copy"}
-            </Text>
-          </Pressable>
-          {localStatus === "sending" ? <Text style={styles.sendingLabel}>Sending</Text> : null}
-          {localStatus === "failed" ? (
-            <Text accessibilityLabel="Message failed to send" style={styles.failedSend}>
-              !
-            </Text>
-          ) : null}
-        </View>
-        <View
-          style={[
-            styles.messageCard,
-            isUserMessage ? styles.userMessageCard : styles.codexMessageCard
-          ]}
-        >
-          <Text
-            selectable
-            style={[
-              styles.messageText,
-              isUserMessage ? styles.userMessageText : styles.codexMessageText
-            ]}
-          >
-            {safeMessageContent(message.content)}
-          </Text>
-        </View>
-      </View>
+      <ReplyableMessageItem
+        copied={copiedMessageId === message.id}
+        message={message}
+        onCopy={copyMessageText}
+        onReply={selectReplyTarget}
+      />
     );
   }
 
@@ -1195,6 +1212,7 @@ export function ConversationScreen({
 
           <View style={styles.composerShell}>
             {renderQueuedMessageStack()}
+            {renderReplyTargetPreview()}
             {attachments.length > 0 ? (
               <View style={styles.attachmentList}>
                 {attachments.map((attachment) => (
@@ -1321,6 +1339,108 @@ export function ConversationScreen({
         </View>
       </SafeAreaView>
     </KeyboardAvoidingView>
+  );
+}
+
+function ReplyableMessageItem({
+  copied,
+  message,
+  onCopy,
+  onReply
+}: {
+  copied: boolean;
+  message: ConversationMessage;
+  onCopy(message: ConversationMessage): void | Promise<void>;
+  onReply(message: ConversationMessage): void;
+}) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const isUserMessage = message.role === "user";
+  const localStatus =
+    typeof message.metadata?.localStatus === "string" ? message.metadata.localStatus : null;
+  const roleLabel = replyRoleLabel(message.role);
+  const replySwipeResponder = useMemo(
+    () =>
+      createReplySwipeResponder({
+        onCancel: () => {
+          Animated.spring(translateX, {
+            friction: 18,
+            tension: 150,
+            toValue: 0,
+            useNativeDriver: true
+          }).start();
+        },
+        onCommit: () => {
+          onReply(message);
+          Animated.spring(translateX, {
+            friction: 18,
+            tension: 150,
+            toValue: 0,
+            useNativeDriver: true
+          }).start();
+        },
+        onMove: (distance) => {
+          translateX.setValue(-Math.min(REPLY_SWIPE_REVEAL_MAX, Math.abs(distance)));
+        }
+      }),
+    [message, onReply, translateX]
+  );
+
+  return (
+    <View
+      style={[
+        styles.messageBlock,
+        isUserMessage ? styles.userMessageBlock : styles.codexMessageBlock
+      ]}
+    >
+      <View
+        style={[
+          styles.messageMetaRow,
+          isUserMessage ? styles.userMessageMetaRow : styles.codexMessageMetaRow
+        ]}
+      >
+        <Text style={styles.messageRoleLabel}>{roleLabel}</Text>
+        <Pressable
+          accessibilityLabel={`Copy ${message.role} message`}
+          accessibilityRole="button"
+          onPress={() => void onCopy(message)}
+          style={styles.copyButton}
+        >
+          <Text style={styles.copyButtonText}>{copied ? "Copied" : "Copy"}</Text>
+        </Pressable>
+        {localStatus === "sending" ? <Text style={styles.sendingLabel}>Sending</Text> : null}
+        {localStatus === "failed" ? (
+          <Text accessibilityLabel="Message failed to send" style={styles.failedSend}>
+            !
+          </Text>
+        ) : null}
+      </View>
+      <Animated.View
+        {...replySwipeResponder.panHandlers}
+        style={[
+          styles.replySwipeShell,
+          {
+            transform: [{ translateX }]
+          }
+        ]}
+      >
+        <View
+          style={[
+            styles.messageCard,
+            isUserMessage ? styles.userMessageCard : styles.codexMessageCard
+          ]}
+        >
+          <Text
+            selectable
+            style={[
+              styles.messageText,
+              isUserMessage ? styles.userMessageText : styles.codexMessageText
+            ]}
+          >
+            {conversationMessageDisplayContent(message)}
+          </Text>
+        </View>
+      </Animated.View>
+    </View>
   );
 }
 
@@ -1647,6 +1767,54 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 0.8
   },
+  replyPreview: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(255,255,255,0.13)",
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 54,
+    paddingHorizontal: 12,
+    paddingVertical: 9
+  },
+  replyPreviewBar: {
+    alignSelf: "stretch",
+    backgroundColor: "#ffffff",
+    borderRadius: 999,
+    opacity: 0.7,
+    width: 3
+  },
+  replyPreviewBody: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0
+  },
+  replyPreviewClose: {
+    alignItems: "center",
+    borderRadius: 999,
+    height: 30,
+    justifyContent: "center",
+    width: 30
+  },
+  replyPreviewLabel: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0,
+    textTransform: "uppercase"
+  },
+  replyPreviewText: {
+    color: "#f5f5f5",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 16
+  },
+  replySwipeShell: {
+    overflow: "hidden",
+    position: "relative"
+  },
   messageBlock: {
     gap: 7,
     marginBottom: 16
@@ -1813,6 +1981,99 @@ function promptForSend(prompt: string, attachments: PendingAttachment[]) {
   return attachments.length === 1 ? "Review the attached file." : "Review the attached files.";
 }
 
+function replyPromptForSend(prompt: string, replyTo: ReplyTargetSnapshot | null) {
+  const replyContent = replyTo?.content.trim();
+  if (!replyTo || !replyContent) {
+    return prompt;
+  }
+
+  return `Reply to this previous message from ${replyRoleLabel(replyTo.role)}:
+
+"""
+${replyContent}
+"""
+
+User reply:
+${prompt}`;
+}
+
+function replyRoleLabel(role: ConversationMessage["role"]) {
+  if (role === "user") {
+    return "USER";
+  }
+
+  if (role === "assistant") {
+    return "CODEX";
+  }
+
+  return role.toUpperCase();
+}
+
+function replyTargetFromMetadata(value: unknown): ReplyTargetSnapshot | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.content !== "string" ||
+    !isConversationMessageRole(candidate.role)
+  ) {
+    return null;
+  }
+
+  return {
+    content: candidate.content,
+    id: candidate.id,
+    role: candidate.role
+  };
+}
+
+function isConversationMessageRole(value: unknown): value is ConversationMessage["role"] {
+  return value === "user" || value === "assistant" || value === "system" || value === "runtime";
+}
+
+function createReplySwipeResponder(input: {
+  onCancel(): void;
+  onCommit(): void;
+  onMove(distance: number): void;
+}) {
+  return PanResponder.create({
+    onMoveShouldSetPanResponder: (_event, gesture) => shouldStartReplySwipe(gesture),
+    onMoveShouldSetPanResponderCapture: (_event, gesture) => shouldStartReplySwipe(gesture),
+    onPanResponderMove: (_event, gesture) => {
+      input.onMove(gesture.dx);
+    },
+    onPanResponderRelease: (_event, gesture) => {
+      if (shouldCommitReplySwipe(gesture)) {
+        input.onCommit();
+      } else {
+        input.onCancel();
+      }
+    },
+    onPanResponderTerminate: input.onCancel,
+    onPanResponderTerminationRequest: () => false,
+    onShouldBlockNativeResponder: () => true
+  });
+}
+
+function shouldStartReplySwipe(gesture: Pick<PanResponderGestureState, "dx" | "dy">) {
+  return (
+    gesture.dx < -8 &&
+    Math.abs(gesture.dy) < 44 &&
+    Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.05
+  );
+}
+
+function shouldCommitReplySwipe(gesture: Pick<PanResponderGestureState, "dx" | "dy" | "vx">) {
+  return (
+    Math.abs(gesture.dy) < Math.max(52, Math.abs(gesture.dx) * 0.68) &&
+    (gesture.dx <= -REPLY_SWIPE_DISTANCE ||
+      (gesture.vx <= -REPLY_SWIPE_VELOCITY && gesture.dx <= -24))
+  );
+}
+
 function createOptimisticMessage(input: {
   attachmentNames: string[];
   clientMessageId: string;
@@ -1820,6 +2081,7 @@ function createOptimisticMessage(input: {
   createdAt: string;
   localStatus: "queued" | "sending";
   prompt: string;
+  replyTarget?: ReplyTargetSnapshot | null;
   sequence: number;
 }): ConversationMessage {
   return {
@@ -1831,8 +2093,10 @@ function createOptimisticMessage(input: {
       afterSequence: input.sequence - 1,
       attachmentNames: input.attachmentNames,
       clientMessageId: input.clientMessageId,
+      displayPrompt: input.prompt,
       localStatus: input.localStatus,
-      submittedPrompt: input.prompt
+      replyTarget: input.replyTarget ?? null,
+      submittedPrompt: replyPromptForSend(input.prompt, input.replyTarget ?? null)
     },
     role: "user",
     sequence: input.sequence,
@@ -1929,6 +2193,17 @@ function queuedMessageSubmittedPrompt(message: ConversationMessage) {
   return content.length > 0 ? content : null;
 }
 
+function queuedMessageDisplayPrompt(message: ConversationMessage) {
+  const displayPrompt = message.metadata?.displayPrompt;
+
+  if (typeof displayPrompt === "string" && displayPrompt.trim().length > 0) {
+    return displayPrompt.trim();
+  }
+
+  const submittedPrompt = queuedMessageSubmittedPrompt(message);
+  return submittedPrompt ? displayReplyPromptText(submittedPrompt) : null;
+}
+
 function removeLocalQueuedMessage(messages: ConversationMessage[], messageId: string) {
   return messages.filter((message) => message.id !== messageId);
 }
@@ -1952,7 +2227,11 @@ function updateLocalQueuedMessagePrompt(
           ),
           metadata: {
             ...(message.metadata ?? {}),
-            submittedPrompt: prompt
+            displayPrompt: prompt,
+            submittedPrompt: replyPromptForSend(
+              prompt,
+              replyTargetFromMetadata(message.metadata?.replyTarget)
+            )
           }
         }
       : message
@@ -2120,7 +2399,7 @@ function hasMatchingServerMessage(
 export function visibleConversationMessages(messages: ConversationMessage[]) {
   return messages.filter(
     (message) =>
-      message.role !== "runtime" && stripCodexAppDirectives(message.content).trim().length > 0
+      message.role !== "runtime" && conversationMessageDisplayContent(message).trim().length > 0
   );
 }
 
@@ -2128,15 +2407,39 @@ function conversationMessagesForId(messages: ConversationMessage[], conversation
   return messages.filter((message) => message.conversationId === conversationId);
 }
 
+function conversationMessageDisplayContent(message: ConversationMessage) {
+  const displayPrompt = message.metadata?.displayPrompt;
+  if (typeof displayPrompt === "string" && displayPrompt.trim().length > 0) {
+    return safeMessageContent(displayPrompt);
+  }
+
+  return safeMessageContent(message.content);
+}
+
 export function safeMessageContent(content: string) {
   const maxLength = 8_000;
-  const visibleContent = stripCodexAppDirectives(content);
+  const visibleContent = displayReplyPromptText(stripCodexAppDirectives(content));
 
   if (visibleContent.length <= maxLength) {
     return visibleContent;
   }
 
   return `${visibleContent.slice(0, maxLength)}\n\n[Message truncated for iPhone stability.]`;
+}
+
+function displayReplyPromptText(content: string) {
+  if (!content.startsWith("Reply to this previous message from ")) {
+    return content;
+  }
+
+  const marker = '\n"""\n\nUser reply:\n';
+  const markerIndex = content.lastIndexOf(marker);
+  if (markerIndex === -1) {
+    return content;
+  }
+
+  const displayText = content.slice(markerIndex + marker.length).trim();
+  return displayText.length > 0 ? displayText : content;
 }
 
 export function stripCodexAppDirectives(content: string) {

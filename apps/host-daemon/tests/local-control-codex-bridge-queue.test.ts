@@ -441,7 +441,13 @@ async function startMockCodexAppServer(
 
   server.on("connection", (socket) => {
     socket.on("message", (raw) => {
-      onMessage(socket, JSON.parse(raw.toString()));
+      const message = JSON.parse(raw.toString());
+      if (message.method === "thread/loaded/list") {
+        sendResult(socket, message.id, { data: [], nextCursor: null });
+        return;
+      }
+
+      onMessage(socket, message);
     });
   });
 

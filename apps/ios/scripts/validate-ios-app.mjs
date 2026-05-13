@@ -229,7 +229,7 @@ for (const expected of [
   'import * as Clipboard from "expo-clipboard";',
   "Clipboard.setStringAsync",
   "copyMessageText",
-  "const text = stripCodexAppDirectives(message.content);",
+  "const text = conversationMessageDisplayContent(message);",
   "accessibilityLabel={`Copy ${message.role} message`}",
   "selectable",
   "contextMenuHidden={false}",
@@ -278,7 +278,7 @@ for (const expected of [
   "git-stage",
   "git-commit",
   "git-push",
-  "stripCodexAppDirectives(message.content).trim().length > 0"
+  "conversationMessageDisplayContent(message).trim().length > 0"
 ]) {
   if (!conversationScreen.includes(expected)) {
     throw new Error(`Expected ConversationScreen to hide Codex app directives: ${expected}`);
@@ -407,6 +407,25 @@ for (const expected of [
   '? "queued"',
   ': "sending"',
   "renderQueuedMessageStack()",
+  "renderReplyTargetPreview()",
+  "replyTargetMessage",
+  "selectReplyTarget(message:",
+  "clearReplyTarget",
+  "Replying to",
+  'accessibilityLabel="Cancel reply target"',
+  "ReplyableMessageItem",
+  "createReplySwipeResponder",
+  "onMoveShouldSetPanResponderCapture",
+  "onPanResponderTerminationRequest: () => false",
+  "shouldStartReplySwipe",
+  "shouldCommitReplySwipe",
+  "REPLY_SWIPE_DISTANCE",
+  "REPLY_SWIPE_VELOCITY",
+  "conversationMessageDisplayContent",
+  "displayReplyPromptText",
+  "replyPromptForSend",
+  "Reply to this previous message from",
+  "User reply:",
   "deleteQueuedMessage",
   "editQueuedMessage",
   "saveQueuedMessageEdit",
