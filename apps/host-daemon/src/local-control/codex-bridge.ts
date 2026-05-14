@@ -37,6 +37,7 @@ const START_TIMEOUT_MS = 15_000;
 const TURN_KEEPALIVE_TIMEOUT_MS = 30 * 60_000;
 const QUEUED_TURN_POLL_INTERVAL_MS = 250;
 const THREAD_LIST_CACHE_TTL_MS = 2_500;
+const LOCAL_STARTED_TURN_MATERIALIZATION_GRACE_MS = 5 * 60_000;
 const MAX_CODEX_MESSAGE_CONTENT_LENGTH = 12_000;
 const MAX_CONTEXT_SYNC_TURNS_WITHOUT_CURSOR = 6;
 const HIDDEN_CODEX_ITEM_TYPES = new Set(["reasoning"]);
@@ -148,6 +149,11 @@ interface MessageHistoryCacheEntry {
   updatedAt: number;
 }
 
+interface LocallyStartedTurn {
+  startedAtMs: number;
+  turnId: string;
+}
+
 interface JsonRpcMessage {
   id?: number | string;
   method?: string;
@@ -182,12 +188,49 @@ export function createLocalCodexBridge(
   >();
   const messageHistoryCache = new Map<string, MessageHistoryCacheEntry>();
   const modelContextSyncedTurnIds = new Map<string, string>();
+  const locallyStartedTurnsByThread = new Map<string, LocallyStartedTurn>();
+
+  function rememberLocallyStartedTurn(threadId: string, turnId: string | null | undefined) {
+    if (!turnId) {
+      return;
+    }
+
+    locallyStartedTurnsByThread.set(threadId, {
+      startedAtMs: Date.now(),
+      turnId
+    });
+  }
+
+  function locallyStartedTurnForThread(thread: CodexAppThread) {
+    const tracked = locallyStartedTurnsByThread.get(thread.id);
+    if (!tracked) {
+      return null;
+    }
+
+    const turn = thread.turns.find((candidate) => candidate.id === tracked.turnId);
+    if (turn) {
+      if (isTurnTerminal(turn)) {
+        locallyStartedTurnsByThread.delete(thread.id);
+        return null;
+      }
+
+      return tracked;
+    }
+
+    if (Date.now() - tracked.startedAtMs > LOCAL_STARTED_TURN_MATERIALIZATION_GRACE_MS) {
+      locallyStartedTurnsByThread.delete(thread.id);
+      return null;
+    }
+
+    return tracked;
+  }
 
   async function listAllThreads(params: CodexAppThreadListParams = {}) {
     const cacheKey = threadListCacheKey(params);
     const cached = threadListCache.get(cacheKey);
     const now = Date.now();
-    if (cached && cached.expiresAt > now) {
+    const canUseCache = locallyStartedTurnsByThread.size === 0;
+    if (canUseCache && cached && cached.expiresAt > now) {
       return cached.promise;
     }
 
@@ -195,10 +238,12 @@ export function createLocalCodexBridge(
       threadListCache.delete(cacheKey);
       throw error;
     });
-    threadListCache.set(cacheKey, {
-      expiresAt: now + THREAD_LIST_CACHE_TTL_MS,
-      promise
-    });
+    if (canUseCache) {
+      threadListCache.set(cacheKey, {
+        expiresAt: now + THREAD_LIST_CACHE_TTL_MS,
+        promise
+      });
+    }
     return promise;
   }
 
@@ -211,9 +256,19 @@ export function createLocalCodexBridge(
     const liveThreads = await listAllThreadsOnce({ ...params, useStateDbOnly: false }).catch(
       () => []
     );
-    const loadedThreads = await listLoadedThreads(params).catch(() => []);
+    const listedThreads = mergeCodexThreadLists(stateThreads, liveThreads);
+    const listedThreadIds = new Set(listedThreads.map((thread) => thread.id));
+    const loadedThreadIds = await client.listLoadedThreads().catch(() => []);
+    const hasLoadedOnlyThreads = loadedThreadIds.some((threadId) => !listedThreadIds.has(threadId));
+    const archivedThreadIds = hasLoadedOnlyThreads
+      ? await listArchivedThreadIds(params).catch(() => new Set<string>())
+      : new Set<string>();
+    const loadedThreads = await listLoadedThreads(loadedThreadIds, params, {
+      archivedThreadIds,
+      listedThreadIds
+    }).catch(() => []);
 
-    return mergeCodexThreadLists(stateThreads, liveThreads, loadedThreads);
+    return mergeCodexThreadLists(listedThreads, loadedThreads);
   }
 
   async function listAllThreadsOnce(params: CodexAppThreadListParams) {
@@ -229,17 +284,80 @@ export function createLocalCodexBridge(
     return threads;
   }
 
-  async function listLoadedThreads(params: CodexAppThreadListParams) {
-    const loadedThreadIds = await client.listLoadedThreads();
+  async function listLoadedThreads(
+    loadedThreadIds: string[],
+    params: CodexAppThreadListParams,
+    input: { archivedThreadIds: Set<string>; listedThreadIds: Set<string> }
+  ) {
     const threads: Array<CodexAppThread | null> = await Promise.all(
       loadedThreadIds.map(async (threadId): Promise<CodexAppThread | null> => {
         const thread = await client.readThread(threadId, false).catch(() => null);
-        return thread ? { ...thread, abitatLoadedFromAppServer: true } : null;
+        const loadedThread = thread ? { ...thread, abitatLoadedFromAppServer: true } : null;
+        return loadedThread ? loadedThreadForList(loadedThread, params, input) : null;
       })
     );
 
-    return threads.filter((thread): thread is CodexAppThread =>
-      Boolean(thread && !thread.ephemeral && thread.cwd && threadMatchesListParams(thread, params))
+    return threads.filter((thread): thread is CodexAppThread => Boolean(thread));
+  }
+
+  async function loadedThreadForList(
+    thread: CodexAppThread,
+    params: CodexAppThreadListParams,
+    input: { archivedThreadIds: Set<string>; listedThreadIds: Set<string> }
+  ) {
+    if (!thread || thread.ephemeral || !thread.cwd || !threadMatchesListParams(thread, params)) {
+      return null;
+    }
+
+    if ((params.archived ?? false) !== false) {
+      return thread;
+    }
+
+    if (input.archivedThreadIds.has(thread.id)) {
+      return null;
+    }
+
+    if (input.listedThreadIds.has(thread.id)) {
+      return thread;
+    }
+
+    if (!isCodexThreadBusy(thread)) {
+      return null;
+    }
+
+    if (thread.turns.length === 0 && threadStatusType(thread.status) === "active") {
+      const hydratedThread = await client.readThread(thread.id, true).catch(() => thread);
+      const mergedThread = {
+        ...mergeCodexThreadSnapshots(hydratedThread, thread),
+        abitatLoadedFromAppServer: true
+      };
+      return isCodexThreadBusy(mergedThread) ? mergedThread : null;
+    }
+
+    return thread;
+  }
+
+  async function listArchivedThreadIds(params: CodexAppThreadListParams) {
+    if ((params.archived ?? false) !== false) {
+      return new Set<string>();
+    }
+
+    const archivedParams = {
+      ...params,
+      archived: true,
+      cursor: null
+    };
+    const stateArchivedThreads = await listAllThreadsOnce({
+      ...archivedParams,
+      useStateDbOnly: true
+    });
+    const liveArchivedThreads = await listAllThreadsOnce({
+      ...archivedParams,
+      useStateDbOnly: false
+    }).catch(() => []);
+
+    return new Set(
+      mergeCodexThreadLists(stateArchivedThreads, liveArchivedThreads).map((thread) => thread.id)
     );
   }
 
@@ -284,7 +402,23 @@ export function createLocalCodexBridge(
   function enqueueTurn(threadId: string, input: QueuedCodexTurnInput, options = { front: false }) {
     invalidateMessageHistoryCache(threadId);
     const existing = queuedTurnsByThread.get(threadId) ?? [];
-    const next = options.front ? [input, ...existing] : [...existing, input];
+    const existingIndex = input.clientMessageId
+      ? existing.findIndex((turn) => turn.clientMessageId === input.clientMessageId)
+      : -1;
+    if (existingIndex >= 0 && !options.front) {
+      queuedTurnsByThread.set(
+        threadId,
+        existing.map((turn, turnIndex) => (turnIndex === existingIndex ? input : turn))
+      );
+      scheduleQueueDrain(threadId);
+      return;
+    }
+
+    const withoutDuplicate =
+      existingIndex >= 0
+        ? existing.filter((_turn, turnIndex) => turnIndex !== existingIndex)
+        : existing;
+    const next = options.front ? [input, ...withoutDuplicate] : [...withoutDuplicate, input];
     queuedTurnsByThread.set(threadId, next);
     scheduleQueueDrain(threadId);
   }
@@ -365,7 +499,8 @@ export function createLocalCodexBridge(
       return;
     }
 
-    if (isCodexThreadBusy(thread)) {
+    const locallyStartedTurn = locallyStartedTurnForThread(thread);
+    if (isCodexThreadBusy(thread) || locallyStartedTurn) {
       scheduleQueueDrain(threadId);
       return;
     }
@@ -406,6 +541,7 @@ export function createLocalCodexBridge(
       ...turnModelSettings(input.modelSettings)
     });
     rememberModelContextSyncedTurn(threadId, started.turn.id);
+    rememberLocallyStartedTurn(threadId, started.turn.id);
   }
 
   return {
@@ -429,22 +565,25 @@ export function createLocalCodexBridge(
       const threadId = toCodexThreadId(conversationId);
       const thread = await client.readThread(threadId, true);
       const delivery = input.delivery ?? "queue";
+      const locallyStartedTurn = locallyStartedTurnForThread(thread);
 
-      if (isCodexThreadBusy(thread)) {
+      if (isCodexThreadBusy(thread) || locallyStartedTurn) {
         if (delivery === "steer") {
           const activeTurn = latestActiveTurn(thread);
-          if (!activeTurn) {
+          const activeTurnId = activeTurn?.id ?? locallyStartedTurn?.turnId ?? null;
+          if (!activeTurnId) {
             throw Object.assign(new Error("No active Codex turn is available to steer"), {
               statusCode: 409
             });
           }
 
           invalidateMessageHistoryCache(threadId);
-          await client.steerTurn(
+          const steered = await client.steerTurn(
             threadId,
             userInput(input.prompt, input.attachments),
-            activeTurn.id
+            activeTurnId
           );
+          rememberLocallyStartedTurn(threadId, steered.turnId);
           if (input.clientMessageId) {
             deleteQueuedTurn(threadId, input.clientMessageId);
           }
@@ -499,7 +638,11 @@ export function createLocalCodexBridge(
 
     async listCompletionStates() {
       const threads = await readThreadsWithTurns(await loadAllThreads());
-      const states = threads.map((thread) => codexThreadToCompletionState(thread, workspaceId));
+      const states = threads.map((thread) =>
+        codexThreadToCompletionState(thread, workspaceId, {
+          forceRunning: Boolean(locallyStartedTurnForThread(thread))
+        })
+      );
       logDiagnostics(diagnostics, "info", "completion.states.result", {
         activeCount: states.filter((state) => isActiveMobileConversationStatus(state.status))
           .length,
@@ -561,7 +704,11 @@ export function createLocalCodexBridge(
       return threads
         .filter((thread) => externalCodexProjectId(thread.cwd) === projectId)
         .sort((left, right) => right.updatedAt - left.updatedAt)
-        .map((thread) => codexThreadToConversation(thread, workspaceId, userId));
+        .map((thread) =>
+          codexThreadToConversation(thread, workspaceId, userId, {
+            forceRunning: Boolean(locallyStartedTurnForThread(thread))
+          })
+        );
     },
 
     listProjects,
@@ -584,6 +731,7 @@ export function createLocalCodexBridge(
         }
       );
       rememberModelContextSyncedTurn(thread.id, started.turn.id);
+      rememberLocallyStartedTurn(thread.id, started.turn.id);
 
       return {
         conversationId: externalCodexConversationId(thread.id),
@@ -1597,7 +1745,8 @@ function maxOptionalSeconds(...values: Array<number | null | undefined>) {
 function codexThreadToConversation(
   thread: CodexAppThread,
   workspaceId: string,
-  userId: string
+  userId: string,
+  options: { forceRunning?: boolean } = {}
 ): LocalCodexConversationSummary {
   return {
     agentId: "codex_app",
@@ -1610,7 +1759,7 @@ function codexThreadToConversation(
     prompt: codexThreadTitle(thread),
     runtimeSessionId: thread.id,
     source: "codex_app",
-    status: codexThreadToConversationStatus(thread),
+    status: codexThreadToConversationStatus(thread, options),
     type: "investigation",
     updatedAt: secondsToIso(safeSeconds(thread.updatedAt, thread.createdAt)),
     workspaceId,
@@ -1618,9 +1767,13 @@ function codexThreadToConversation(
   };
 }
 
-function codexThreadToCompletionState(thread: CodexAppThread, workspaceId: string) {
+function codexThreadToCompletionState(
+  thread: CodexAppThread,
+  workspaceId: string,
+  options: { forceRunning?: boolean } = {}
+) {
   const latestTurn = thread.turns.at(-1) ?? null;
-  const status = codexThreadToConversationStatus(thread);
+  const status = codexThreadToConversationStatus(thread, options);
   const activelyWorking = isActiveMobileConversationStatus(status);
   const failed =
     !activelyWorking &&
@@ -1830,10 +1983,21 @@ function mimeTypeForPath(path: string) {
   }
 }
 
-function codexThreadToConversationStatus(thread: CodexAppThread): ConversationStatus {
+function codexThreadToConversationStatus(
+  thread: CodexAppThread,
+  options: { forceRunning?: boolean } = {}
+): ConversationStatus {
+  if (options.forceRunning) {
+    return "running";
+  }
+
   const latestTurn = thread.turns.at(-1) ?? null;
 
   if (threadStatusType(thread.status) === "active") {
+    if (latestTurn && isTurnCompleted(latestTurn)) {
+      return "approved";
+    }
+
     if (hasActiveFlag(thread.status, "waitingOnApproval")) {
       return "awaiting_approval";
     }
@@ -1857,11 +2021,16 @@ function codexThreadToConversationStatus(thread: CodexAppThread): ConversationSt
 }
 
 function isCodexThreadBusy(thread: CodexAppThread) {
-  return threadStatusType(thread.status) === "active" || thread.turns.some(isTurnInProgress);
+  const latestTurn = thread.turns.at(-1) ?? null;
+  return (
+    (threadStatusType(thread.status) === "active" &&
+      !(latestTurn && isTurnCompleted(latestTurn))) ||
+    Boolean(latestTurn && isTurnInProgress(latestTurn))
+  );
 }
 
 function isCodexThreadMessageHistoryStable(thread: CodexAppThread) {
-  return !isCodexThreadBusy(thread) && !thread.turns.some(isTurnInProgress);
+  return !isCodexThreadBusy(thread);
 }
 
 function latestActiveTurn(thread: CodexAppThread) {

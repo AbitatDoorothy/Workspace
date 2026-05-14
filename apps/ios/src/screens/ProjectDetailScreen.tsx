@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -42,8 +42,12 @@ export function ProjectDetailScreen({
 }: ProjectDetailScreenProps) {
   const [conversations, setConversations] = useState<ConversationSummary[]>(initialConversations);
   const [error, setError] = useState<string | null>(null);
+  const conversationsRef = useRef(initialConversations);
+  const conversationRefreshInFlightRef = useRef(false);
+  const conversationRefreshRequestIdRef = useRef(0);
 
   useEffect(() => {
+    conversationsRef.current = initialConversations;
     setConversations(initialConversations);
   }, [initialConversations, project.id]);
 
@@ -55,17 +59,36 @@ export function ProjectDetailScreen({
     let cancelled = false;
 
     async function loadConversations() {
+      if (conversationRefreshInFlightRef.current) {
+        return;
+      }
+
+      conversationRefreshInFlightRef.current = true;
+      const requestId = ++conversationRefreshRequestIdRef.current;
       try {
         const nextConversations = await api.listConversations(project.id);
 
-        if (!cancelled) {
+        if (!cancelled && requestId === conversationRefreshRequestIdRef.current) {
+          conversationsRef.current = nextConversations;
           setConversations(nextConversations);
           onConversationsLoaded?.(project.id, nextConversations);
           setError(null);
         }
       } catch (caught) {
-        if (!cancelled) {
+        if (isTransientConversationListError(caught)) {
+          console.warn(`[conversation-list] transient refresh failure: ${errorMessage(caught)}`);
+          if (!cancelled && conversationsRef.current.length === 0) {
+            setError(null);
+          }
+          return;
+        }
+
+        if (!cancelled && requestId === conversationRefreshRequestIdRef.current) {
           setError(caught instanceof Error ? caught.message : "Unable to load conversations");
+        }
+      } finally {
+        if (requestId === conversationRefreshRequestIdRef.current) {
+          conversationRefreshInFlightRef.current = false;
         }
       }
     }
@@ -74,6 +97,7 @@ export function ProjectDetailScreen({
     const timer = setInterval(loadConversations, 1800);
     return () => {
       cancelled = true;
+      conversationRefreshInFlightRef.current = false;
       clearInterval(timer);
     };
   }, [api, project.id, onConversationsLoaded, refreshEnabled]);
@@ -192,6 +216,19 @@ export function ProjectDetailScreen({
         </Pressable>
       </View>
     </SafeAreaView>
+  );
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isTransientConversationListError(error: unknown) {
+  const message = errorMessage(error);
+  return (
+    message.includes("Unexpected end of JSON input") ||
+    message.includes("Empty response from") ||
+    message.includes("Invalid JSON response")
   );
 }
 

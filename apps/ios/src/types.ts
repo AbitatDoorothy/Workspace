@@ -105,6 +105,16 @@ export interface GeneratedFileDownload extends GeneratedFileSummary {
   dataBase64: string;
 }
 
+export interface MobileDiagnosticsLogDownload {
+  clearedAt: string;
+  dataBase64: string;
+  mimeType: "text/plain";
+  name: string;
+  size: number;
+  totalSize: number;
+  truncated: boolean;
+}
+
 export type CodexReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface CodexMobileModelSettings {

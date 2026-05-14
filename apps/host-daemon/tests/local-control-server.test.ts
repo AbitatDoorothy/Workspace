@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -141,6 +141,24 @@ describe("local control server", () => {
           method: "POST"
         })
       ).resolves.toEqual({ ok: true });
+
+      const logPath = join(directory, "mobile-control.log");
+      await writeFile(logPath, "first diagnostic\nsecond diagnostic\n", "utf8");
+      diagnostics.logPath = logPath;
+      await expect(
+        fetchJson(`${endpoint}/api/mobile/diagnostics/log`, { headers: auth })
+      ).resolves.toEqual({
+        log: {
+          clearedAt: expect.any(String),
+          dataBase64: Buffer.from("first diagnostic\nsecond diagnostic\n").toString("base64"),
+          mimeType: "text/plain",
+          name: "abitat-mobile-control.log",
+          size: 35,
+          totalSize: 35,
+          truncated: false
+        }
+      });
+      await expect(readFile(logPath, "utf8")).resolves.toBe("");
 
       await expect(
         fetchJson(`${endpoint}/api/mobile/projects/codex_project_demo/conversations`, {
@@ -475,7 +493,10 @@ async function fetchJson(url: string, init?: RequestInit) {
 
 function createMemoryDiagnostics() {
   const events: Array<Record<string, unknown>> = [];
-  const logger: MobileControlDiagnosticsLogger & { events: Array<Record<string, unknown>> } = {
+  const logger: MobileControlDiagnosticsLogger & {
+    events: Array<Record<string, unknown>>;
+    logPath?: string;
+  } = {
     events,
     log(level, event, fields = {}) {
       events.push({ event, level, ...fields });

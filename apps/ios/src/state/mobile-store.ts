@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createApiClient, createPairingClient } from "../api/client";
 import { DEFAULT_CODEX_MODEL_SETTINGS, isCodexReasoningEffort } from "../codex-model-settings";
 import { clearCachedConversationMessages, messageCacheScopeFromPairing } from "./message-cache";
+import { clearCachedNavigationData } from "./navigation-cache";
 import type { CodexMobileModelSettings, MobileBootstrap, PairingState } from "../types";
 
 const STORAGE_KEY = "abitat.mobile.pairing";
@@ -117,6 +118,7 @@ export function useMobileStore() {
     await SecureStore.deleteItemAsync(STORAGE_KEY);
     await SecureStore.deleteItemAsync(MODEL_SETTINGS_STORAGE_KEY);
     await clearCachedConversationMessages();
+    await clearCachedNavigationData();
   }, []);
 
   const saveModelSettings = useCallback(async (nextModelSettings: CodexMobileModelSettings) => {

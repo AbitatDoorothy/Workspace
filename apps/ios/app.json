@@ -17,7 +17,7 @@
         "NSCameraUsageDescription": "Abitat scans the pairing QR code shown on your Mac.",
         "UIBackgroundModes": ["fetch", "remote-notification"]
       },
-      "buildNumber": "12"
+      "buildNumber": "15"
     },
     "plugins": [
       "expo-secure-store",

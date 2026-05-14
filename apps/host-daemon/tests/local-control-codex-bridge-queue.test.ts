@@ -232,6 +232,132 @@ describe("local Codex bridge command queue and steer", () => {
     });
   });
 
+  it("does not duplicate queued phone commands when the phone retries the same client message", async () => {
+    let isRunning = true;
+    const turnStarts: Array<Record<string, unknown>> = [];
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            status: isRunning ? { activeFlags: [], type: "active" } : { type: "idle" },
+            turns: [
+              createTurn({
+                completedAt: isRunning ? null : 1_778_000_050,
+                id: "turn_current",
+                status: isRunning ? "inProgress" : "completed"
+              })
+            ]
+          })
+        });
+      }
+
+      if (message.method === "thread/resume") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            status: { activeFlags: [], type: "active" },
+            turns: [
+              createTurn({
+                completedAt: 1_778_000_050,
+                id: "turn_current",
+                status: "completed"
+              })
+            ]
+          })
+        });
+      }
+
+      if (message.method === "turn/start") {
+        turnStarts.push(message.params as Record<string, unknown>);
+        sendResult(socket, message.id, {
+          turn: createTurn({
+            completedAt: null,
+            id: `turn_retry_${turnStarts.length}`,
+            status: "inProgress"
+          })
+        });
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+
+    await bridge.continueConversation("codex_thread_thread_busy", {
+      clientMessageId: "ios-retry-queued",
+      prompt: "Retry this once idle"
+    });
+    await bridge.continueConversation("codex_thread_thread_busy", {
+      clientMessageId: "ios-retry-queued",
+      prompt: "Retry this once idle"
+    });
+
+    isRunning = false;
+    await waitFor(() => turnStarts.length === 1);
+    await delay(450);
+    expect(turnStarts).toHaveLength(1);
+    expect(turnStarts[0]).toMatchObject({
+      input: [{ text: "Retry this once idle", text_elements: [], type: "text" }],
+      threadId: "thread_busy"
+    });
+  });
+
+  it("starts phone commands when only an older stale turn is still marked in progress", async () => {
+    let startParams: Record<string, unknown> | null = null;
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/read" || message.method === "thread/resume") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            status: { type: "idle" },
+            turns: [
+              createTurn({
+                completedAt: null,
+                id: "turn_stale_in_progress",
+                status: "inProgress"
+              }),
+              createTurn({
+                completedAt: 1_778_000_080,
+                id: "turn_latest_completed",
+                status: "completed"
+              })
+            ]
+          })
+        });
+      }
+
+      if (message.method === "turn/start") {
+        startParams = message.params as Record<string, unknown>;
+        sendResult(socket, message.id, {
+          turn: createTurn({
+            completedAt: null,
+            id: "turn_started_after_stale",
+            status: "inProgress"
+          })
+        });
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+
+    await expect(
+      bridge.continueConversation("codex_thread_thread_busy", {
+        clientMessageId: "ios-after-stale-turn",
+        prompt: "This should start immediately"
+      })
+    ).resolves.toEqual({
+      conversationId: "codex_thread_thread_busy",
+      status: "running"
+    });
+
+    expect(startParams).toMatchObject({
+      input: [{ text: "This should start immediately", text_elements: [], type: "text" }],
+      threadId: "thread_busy"
+    });
+  });
+
   it("steers active Codex turns by interrupting the current turn and starting a replacement", async () => {
     let injectParams: Record<string, unknown> | null = null;
     let steerParams: Record<string, unknown> | null = null;

@@ -19,6 +19,7 @@ import type {
   GeneratedFileDownload,
   GeneratedFileSummary,
   LocalPairingPayload,
+  MobileDiagnosticsLogDownload,
   MobileBootstrap,
   PairingState,
   ProjectSummary,
@@ -74,6 +75,7 @@ export interface ApiClient {
     options?: { forceRefresh?: boolean; includeRuntime?: boolean }
   ): Promise<ConversationMessage[]>;
   downloadGeneratedFile(conversationId: string, fileId: string): Promise<GeneratedFileDownload>;
+  requestMobileControlLog(): Promise<MobileDiagnosticsLogDownload>;
   listProjects(): Promise<ProjectSummary[]>;
   listRemoteSignals(sessionId: string): Promise<RemoteControlSignal[]>;
   registerPushToken(input: { platform: "ios"; provider: "expo"; token: string }): Promise<void>;
@@ -174,6 +176,10 @@ export function createApiClient(pairing: PairingState): ApiClient {
       get(pairing, `/api/mobile/conversations/${conversationId}/files/${fileId}/download`).then(
         (body) => body.file as GeneratedFileDownload
       ),
+    requestMobileControlLog: () =>
+      get(pairing, "/api/mobile/diagnostics/log").then(
+        (body) => body.log as MobileDiagnosticsLogDownload
+      ),
     listProjects: () =>
       get(pairing, "/api/mobile/projects").then((body) => body.projects as ProjectSummary[]),
     listRemoteSignals: (sessionId) =>
@@ -256,7 +262,7 @@ async function del(pairing: PairingState, path: string) {
 }
 
 async function request(pairing: PairingState, path: string, init: RequestInit) {
-  if (pairing.transport === "relay" && pairing.relayId) {
+  if (isRelayPairing(pairing)) {
     return relayRequest(pairing, path, init);
   }
 
@@ -276,9 +282,13 @@ async function request(pairing: PairingState, path: string, init: RequestInit) {
 }
 
 async function relayRequest(pairing: PairingState, path: string, init: RequestInit) {
+  if (!pairing.relayId) {
+    throw new Error("Relay pairing is missing its relay id. Re-pair this iPhone with the Mac.");
+  }
+
   const response = await postRelay(
     pairing.apiUrl,
-    pairing.relayId ?? "",
+    pairing.relayId,
     sha256Hex(pairing.clientToken),
     {
       body: parseRequestBody(init.body),
@@ -296,6 +306,10 @@ async function relayRequest(pairing: PairingState, path: string, init: RequestIn
   }
 
   return response.body as Record<string, any>;
+}
+
+function isRelayPairing(pairing: PairingState) {
+  return pairing.transport === "relay" || Boolean(pairing.relayId);
 }
 
 async function postRelay(
@@ -385,12 +399,12 @@ function parsePairingPayloadUrl(value: string): LocalPairingPayload | null {
     manualCode: params.manualCode ?? params.code,
     relayId: params.relayId,
     expiresAt: params.expiresAt,
-    transport: params.transport ?? "manual"
+    transport: params.transport ?? (params.relayId ? "relay" : "manual")
   });
 }
 
 function normalizePairingPayload(value: Record<string, unknown>): LocalPairingPayload | null {
-  const transport = value.transport;
+  const transport = value.transport ?? (typeof value.relayId === "string" ? "relay" : undefined);
   if (
     transport !== "local" &&
     transport !== "tailscale" &&

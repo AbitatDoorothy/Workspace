@@ -10,6 +10,7 @@ const requiredFiles = [
   "src/notifications/thread-completion-notifications.ts",
   "src/state/message-cache.ts",
   "src/state/message-preloader.ts",
+  "src/state/navigation-cache.ts",
   "src/state/mobile-store.ts",
   "src/screens/PairingScreen.tsx",
   "src/screens/SplashScreen.tsx",
@@ -155,6 +156,10 @@ const messagePreloader = await readFile(
   join(process.cwd(), "src/state/message-preloader.ts"),
   "utf8"
 );
+const navigationCache = await readFile(
+  join(process.cwd(), "src/state/navigation-cache.ts"),
+  "utf8"
+);
 const pairingScreen = await readFile(join(process.cwd(), "src/screens/PairingScreen.tsx"), "utf8");
 const remoteControlScreen = await readFile(
   join(process.cwd(), "src/screens/RemoteControlScreen.tsx"),
@@ -177,6 +182,14 @@ if (!apiClient.includes('transport !== "relay"')) {
 }
 if (!apiClient.includes("postRelay(") || !apiClient.includes("encryptRelayEnvelope")) {
   throw new Error("Expected iOS API client to route relay requests through encrypted envelopes");
+}
+if (
+  !apiClient.includes("isRelayPairing(pairing)") ||
+  !apiClient.includes("Boolean(pairing.relayId)")
+) {
+  throw new Error(
+    "Expected iOS API client to keep relay routing for saved pairings with relay ids"
+  );
 }
 if (!pairingScreen.includes("CameraView") || !pairingScreen.includes("onBarcodeScanned")) {
   throw new Error("Expected PairingScreen to scan Mac-generated QR payloads");
@@ -370,6 +383,10 @@ for (const expected of [
   "const nextStatus = latestConversation?.status ?? activeConversation.status;",
   "latestStatusRef.current = nextStatus;",
   "setStatus(nextStatus);",
+  "statusRefreshGenerationRef",
+  "applyLocalConversationStatus",
+  "const requestGeneration = statusRefreshGenerationRef.current;",
+  "requestGeneration !== statusRefreshGenerationRef.current",
   "isConversationBusyStatus(input.previousStatus) && !isConversationBusyStatus(input.nextStatus)"
 ]) {
   if (!conversationScreen.includes(expected)) {
@@ -422,7 +439,11 @@ for (const expected of [
   "REPLY_SWIPE_DISTANCE",
   "REPLY_SWIPE_VELOCITY",
   "conversationMessageDisplayContent",
+  "conversationMessageReplyPreview",
   "displayReplyPromptText",
+  "parseReplyPrompt",
+  "quotedMessagePreview",
+  "quotedMessagePreviewText",
   "replyPromptForSend",
   "Reply to this previous message from",
   "User reply:",
@@ -435,6 +456,11 @@ for (const expected of [
   "removeLocalQueuedMessage",
   "updateLocalQueuedMessagePrompt",
   "markLocalMessageSending",
+  "drainReadyQueuedMessages",
+  "queuedDrainInFlightRef",
+  "resendQueuedLocalMessage",
+  "macQueuedAt",
+  "hasMacQueuedAcknowledgement",
   "scrollToLatest(true);",
   "styles.queueStack",
   "styles.queueStackScroll",
@@ -558,7 +584,14 @@ for (const removed of [
 for (const expected of [
   "initialConversations",
   "onConversationsLoaded",
-  "setConversations(initialConversations)"
+  "setConversations(initialConversations)",
+  "conversationRefreshRequestIdRef",
+  "requestId === conversationRefreshRequestIdRef.current",
+  "conversationRefreshInFlightRef",
+  "if (conversationRefreshInFlightRef.current) {",
+  "isTransientConversationListError",
+  "console.warn(`[conversation-list] transient refresh failure:",
+  "return;"
 ]) {
   if (!projectDetailScreen.includes(expected)) {
     throw new Error(
@@ -914,8 +947,13 @@ for (const expected of [
   "openConversationFromNotification",
   "api.listProjects()",
   "api.listConversations(target.projectId)",
+  "loadCachedNavigationData",
+  "saveCachedProjects",
+  "saveCachedProjectConversations",
   "cachedProjects",
   "cachedConversationsByProject",
+  "cachedConversationsByProjectRef",
+  "setCachedConversationsByProject(data.conversationsByProject)",
   "updateCachedConversations",
   'setRoute("conversation")'
 ]) {
@@ -937,6 +975,19 @@ if (!appScreen.includes("useMessagePreloader")) {
 }
 if (!appScreen.includes("messageCacheScope: store.messageCacheScope")) {
   throw new Error("Expected App to scope message preloading to the paired Mac");
+}
+for (const expected of [
+  "NAVIGATION_CACHE_DIRECTORY",
+  "loadCachedNavigationData",
+  "saveCachedProjects",
+  "saveCachedProjectConversations",
+  "clearCachedNavigationData",
+  "conversationsByProject",
+  "prepareCachedConversations"
+]) {
+  if (!navigationCache.includes(expected)) {
+    throw new Error(`Expected navigation cache to persist project/thread lists: ${expected}`);
+  }
 }
 if (!appScreen.includes("onBack={goBackOneLevel}")) {
   throw new Error("Expected App back actions to use the shared one-level route helper");
@@ -1021,10 +1072,15 @@ const settingsScreen = await readFile(
   "utf8"
 );
 for (const expected of [
+  "api: ApiClient;",
   "onSignOut(): void;",
+  "requestMobileControlLog",
+  "requestLogProgress",
   "settingsScreen",
   "settingsPanel",
   "ABITAT",
+  'accessibilityLabel="Request Mac diagnostics log"',
+  "REQUEST LOG",
   'accessibilityLabel="Disconnect iPhone from Mac"',
   "onPress={onSignOut}",
   "DISCONNECT"
@@ -1134,6 +1190,8 @@ for (const expected of [
   "GeneratedFileSummary",
   "listGeneratedFiles",
   "downloadGeneratedFile",
+  "requestMobileControlLog",
+  "/api/mobile/diagnostics/log",
   "/api/mobile/conversations/${conversationId}/files",
   "/api/mobile/conversations/${conversationId}/files/${fileId}/download"
 ]) {
@@ -1149,9 +1207,11 @@ for (const expected of ["MODEL_SETTINGS_STORAGE_KEY", "modelSettings", "saveMode
 }
 for (const expected of [
   "clearCachedConversationMessages",
+  "clearCachedNavigationData",
   "messageCacheScopeFromPairing",
   "messageCacheScope",
-  "await clearCachedConversationMessages()"
+  "await clearCachedConversationMessages()",
+  "await clearCachedNavigationData()"
 ]) {
   if (!mobileStore.includes(expected)) {
     throw new Error(`Expected mobile store to manage the persistent message cache: ${expected}`);

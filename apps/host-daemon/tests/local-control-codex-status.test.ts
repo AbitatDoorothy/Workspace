@@ -427,6 +427,284 @@ describe("local Codex mobile status sync", () => {
     );
   });
 
+  it("treats active thread snapshots with a completed latest turn as approved", async () => {
+    const completedActiveThread = createThread({
+      id: "thread_completed_active",
+      preview: "Completed active thread",
+      status: { activeFlags: [], type: "active" },
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_050,
+          id: "turn_completed",
+          status: "completed"
+        })
+      ]
+    });
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "thread/list") {
+        sendResult(socket, message.id, { data: [completedActiveThread], nextCursor: null });
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, { thread: completedActiveThread });
+      }
+    });
+    const bridge = createBridge(serverUrl);
+
+    const [project] = await bridge.listProjects();
+    const [conversation] = await bridge.listProjectConversations(project.id);
+    const [completion] = await bridge.listCompletionStates();
+
+    expect(conversation).toEqual(
+      expect.objectContaining({
+        id: "codex_thread_thread_completed_active",
+        status: "approved"
+      })
+    );
+    expect(completion).toEqual(
+      expect.objectContaining({
+        conversationId: "codex_thread_thread_completed_active",
+        failed: false,
+        isComplete: true,
+        latestTurnId: "turn_completed",
+        status: "approved"
+      })
+    );
+  });
+
+  it("keeps a locally started mobile turn running while Codex snapshots lag behind", async () => {
+    const staleCompletedThread = createThread({
+      id: "thread_mobile_started",
+      preview: "Mobile started thread",
+      status: { type: "idle" },
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_050,
+          id: "turn_previous",
+          status: "completed"
+        })
+      ],
+      updatedAt: 1_778_000_050
+    });
+    const completedMobileThread = createThread({
+      id: "thread_mobile_started",
+      preview: "Mobile started thread",
+      status: { type: "idle" },
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_050,
+          id: "turn_previous",
+          status: "completed"
+        }),
+        createTurn({
+          completedAt: 1_778_000_090,
+          id: "turn_mobile_started",
+          status: "completed"
+        })
+      ],
+      updatedAt: 1_778_000_090
+    });
+    let exposeCompletedTurn = false;
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/list" || message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          data:
+            message.method === "thread/list"
+              ? [exposeCompletedTurn ? completedMobileThread : staleCompletedThread]
+              : undefined,
+          nextCursor: message.method === "thread/list" ? null : undefined,
+          thread:
+            message.method === "thread/read"
+              ? exposeCompletedTurn
+                ? completedMobileThread
+                : staleCompletedThread
+              : undefined
+        });
+      }
+
+      if (message.method === "thread/resume") {
+        sendResult(socket, message.id, { thread: staleCompletedThread });
+      }
+
+      if (message.method === "turn/start") {
+        sendResult(socket, message.id, {
+          turn: createTurn({
+            completedAt: null,
+            id: "turn_mobile_started",
+            status: "inProgress"
+          })
+        });
+      }
+    });
+    const bridge = createBridge(serverUrl);
+
+    await expect(
+      bridge.continueConversation("codex_thread_thread_mobile_started", {
+        prompt: "git"
+      })
+    ).resolves.toEqual({
+      conversationId: "codex_thread_thread_mobile_started",
+      status: "running"
+    });
+
+    const [project] = await bridge.listProjects();
+    const [runningConversation] = await bridge.listProjectConversations(project.id);
+    const [runningCompletion] = await bridge.listCompletionStates();
+
+    expect(runningConversation).toEqual(
+      expect.objectContaining({
+        id: "codex_thread_thread_mobile_started",
+        status: "running"
+      })
+    );
+    expect(runningCompletion).toEqual(
+      expect.objectContaining({
+        conversationId: "codex_thread_thread_mobile_started",
+        isComplete: false,
+        latestTurnId: "turn_previous",
+        status: "running"
+      })
+    );
+
+    exposeCompletedTurn = true;
+    const [approvedConversation] = await bridge.listProjectConversations(project.id);
+    const [approvedCompletion] = await bridge.listCompletionStates();
+
+    expect(approvedConversation).toEqual(
+      expect.objectContaining({
+        id: "codex_thread_thread_mobile_started",
+        status: "approved"
+      })
+    );
+    expect(approvedCompletion).toEqual(
+      expect.objectContaining({
+        conversationId: "codex_thread_thread_mobile_started",
+        isComplete: true,
+        latestTurnId: "turn_mobile_started",
+        status: "approved"
+      })
+    );
+  });
+
+  it("does not reintroduce loaded-only archived threads into mobile project lists", async () => {
+    const visibleThread = createThread({
+      id: "thread_visible",
+      preview: "Visible thread",
+      status: { type: "idle" },
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_050,
+          id: "turn_visible",
+          status: "completed"
+        })
+      ]
+    });
+    const archivedLoadedThread = createThread({
+      id: "thread_archived",
+      preview: "Archived loaded thread",
+      status: { type: "idle" },
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_060,
+          id: "turn_archived",
+          status: "completed"
+        })
+      ]
+    });
+    const { serverUrl } = await startMockCodexAppServer(
+      (socket, message) => {
+        const params = message.params as { threadId?: string };
+        if (message.method === "thread/list") {
+          sendResult(socket, message.id, { data: [visibleThread], nextCursor: null });
+        }
+
+        if (message.method === "thread/read") {
+          sendResult(socket, message.id, {
+            thread:
+              params.threadId === archivedLoadedThread.id ? archivedLoadedThread : visibleThread
+          });
+        }
+      },
+      { loadedThreadIds: [visibleThread.id, archivedLoadedThread.id] }
+    );
+    const bridge = createBridge(serverUrl);
+
+    const [project] = await bridge.listProjects();
+    const conversations = await bridge.listProjectConversations(project.id);
+
+    expect(conversations.map((conversation) => conversation.id)).toEqual([
+      "codex_thread_thread_visible"
+    ]);
+  });
+
+  it("does not rescue loaded archived threads that still look active in summary reads", async () => {
+    const visibleThread = createThread({
+      id: "thread_visible",
+      preview: "Visible thread",
+      status: { type: "idle" },
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_050,
+          id: "turn_visible",
+          status: "completed"
+        })
+      ]
+    });
+    const archivedActiveSummary = createThread({
+      id: "thread_archived_active",
+      preview: "Archived active summary",
+      status: { activeFlags: [], type: "active" },
+      turns: []
+    });
+    const archivedHydratedThread = createThread({
+      id: "thread_archived_active",
+      preview: "Archived active summary",
+      status: { type: "idle" },
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_060,
+          id: "turn_archived",
+          status: "completed"
+        })
+      ]
+    });
+    const { serverUrl } = await startMockCodexAppServer(
+      (socket, message) => {
+        const params = message.params as { includeTurns?: boolean; threadId?: string };
+        if (message.method === "thread/list") {
+          sendResult(socket, message.id, { data: [visibleThread], nextCursor: null });
+        }
+
+        if (message.method === "thread/read") {
+          if (params.threadId === archivedActiveSummary.id) {
+            sendResult(socket, message.id, {
+              thread: params.includeTurns ? archivedHydratedThread : archivedActiveSummary
+            });
+            return;
+          }
+
+          sendResult(socket, message.id, { thread: visibleThread });
+        }
+      },
+      {
+        archivedThreads: [archivedHydratedThread],
+        loadedThreadIds: [visibleThread.id, archivedActiveSummary.id]
+      }
+    );
+    const bridge = createBridge(serverUrl);
+
+    const [project] = await bridge.listProjects();
+    const conversations = await bridge.listProjectConversations(project.id);
+
+    expect(conversations.map((conversation) => conversation.id)).toEqual([
+      "codex_thread_thread_visible"
+    ]);
+  });
+
   it("keeps genuinely interrupted inactive Codex threads cancelled", async () => {
     const interruptedThread = createThread({
       id: "thread_interrupted",
@@ -486,7 +764,7 @@ async function startMockCodexAppServer(
     socket: WebSocket,
     message: { id?: number; method?: string; params?: unknown }
   ) => void,
-  options: { loadedThreadIds?: string[] } = {}
+  options: { archivedThreads?: unknown[]; loadedThreadIds?: string[] } = {}
 ) {
   const server = new WebSocketServer({ port: 0 });
   openServers.push(server);
@@ -503,6 +781,14 @@ async function startMockCodexAppServer(
 
       if (message.method === "thread/loaded/list") {
         sendResult(socket, message.id, { data: options.loadedThreadIds ?? [], nextCursor: null });
+        return;
+      }
+
+      if (
+        message.method === "thread/list" &&
+        (message.params as { archived?: boolean } | undefined)?.archived === true
+      ) {
+        sendResult(socket, message.id, { data: options.archivedThreads ?? [], nextCursor: null });
         return;
       }
 

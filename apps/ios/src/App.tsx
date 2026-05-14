@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -22,6 +22,11 @@ import {
 } from "./notifications/thread-completion-notifications";
 import { useMessagePreloader } from "./state/message-preloader";
 import { useMobileStore } from "./state/mobile-store";
+import {
+  loadCachedNavigationData,
+  saveCachedProjectConversations,
+  saveCachedProjects
+} from "./state/navigation-cache";
 import { colors } from "./theme";
 import type { ConversationSummary, ProjectSummary, RouteName } from "./types";
 
@@ -68,6 +73,75 @@ function AppContent() {
   const [cachedConversationsByProject, setCachedConversationsByProject] = useState<
     Record<string, ConversationSummary[]>
   >({});
+  const cachedProjectsRef = useRef<ProjectSummary[]>([]);
+  const cachedConversationsByProjectRef = useRef<Record<string, ConversationSummary[]>>({});
+  const navigationCacheNetworkRevisionRef = useRef(0);
+  const updateCachedProjects = useCallback(
+    (nextProjects: ProjectSummary[]) => {
+      if (areProjectListsEqual(cachedProjectsRef.current, nextProjects)) {
+        return;
+      }
+
+      navigationCacheNetworkRevisionRef.current += 1;
+      cachedProjectsRef.current = nextProjects;
+      setCachedProjects(nextProjects);
+      void saveCachedProjects(store.messageCacheScope, nextProjects);
+    },
+    [store.messageCacheScope]
+  );
+  const updateCachedConversations = useCallback(
+    (projectId: string, nextConversations: ConversationSummary[]) => {
+      const currentConversations = cachedConversationsByProjectRef.current[projectId] ?? [];
+      if (areConversationListsEqual(currentConversations, nextConversations)) {
+        return;
+      }
+
+      navigationCacheNetworkRevisionRef.current += 1;
+      const nextConversationsByProject = {
+        ...cachedConversationsByProjectRef.current,
+        [projectId]: nextConversations
+      };
+      cachedConversationsByProjectRef.current = nextConversationsByProject;
+      setCachedConversationsByProject(nextConversationsByProject);
+      void saveCachedProjectConversations(store.messageCacheScope, projectId, nextConversations);
+    },
+    [store.messageCacheScope]
+  );
+  useEffect(() => {
+    if (!store.isPaired) {
+      cachedProjectsRef.current = [];
+      cachedConversationsByProjectRef.current = {};
+      setCachedProjects([]);
+      setCachedConversationsByProject({});
+      return;
+    }
+
+    let cancelled = false;
+    cachedProjectsRef.current = [];
+    cachedConversationsByProjectRef.current = {};
+    setCachedProjects([]);
+    setCachedConversationsByProject({});
+    const cacheLoadRevision = navigationCacheNetworkRevisionRef.current;
+
+    loadCachedNavigationData(store.messageCacheScope)
+      .then((data) => {
+        if (cancelled || cacheLoadRevision !== navigationCacheNetworkRevisionRef.current) {
+          return;
+        }
+
+        cachedProjectsRef.current = data.projects;
+        cachedConversationsByProjectRef.current = data.conversationsByProject;
+        setCachedProjects(data.projects);
+        setCachedConversationsByProject(data.conversationsByProject);
+      })
+      .catch((caught) => {
+        console.warn(`[navigation-cache] ${errorMessage(caught)}`);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [store.isPaired, store.messageCacheScope]);
   const openConversationFromNotification = useCallback(
     async (target: CodexCompletionNotificationTarget) => {
       const api = store.api;
@@ -107,15 +181,6 @@ function AppContent() {
       setRoute("conversation");
     },
     [store.api, store.pairing?.workspaceId]
-  );
-  const updateCachedConversations = useCallback(
-    (projectId: string, nextConversations: ConversationSummary[]) => {
-      setCachedConversationsByProject((current) => ({
-        ...current,
-        [projectId]: nextConversations
-      }));
-    },
-    []
   );
   const goBackOneLevel = useCallback(() => {
     setRoute((currentRoute) => routeBackOneLevel(currentRoute, project));
@@ -288,7 +353,7 @@ function AppContent() {
           api={store.api}
           initialProjects={cachedProjects}
           isConnected={store.bootstrap?.host?.status === "online"}
-          onProjectsLoaded={setCachedProjects}
+          onProjectsLoaded={updateCachedProjects}
           onProject={(nextProject) => {
             setProject(nextProject);
             navigateToRoute("project");
@@ -333,6 +398,7 @@ function AppContent() {
     if (routeName === "settings") {
       return (
         <SettingsScreen
+          api={store.api}
           onBack={goBackOneLevel}
           onSignOut={() => {
             void store.signOut();
@@ -449,6 +515,51 @@ function fallbackConversationFromNotification(
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function areProjectListsEqual(left: ProjectSummary[], right: ProjectSummary[]) {
+  return areListsEqual(left, right, projectCacheKey);
+}
+
+function areConversationListsEqual(left: ConversationSummary[], right: ConversationSummary[]) {
+  return areListsEqual(left, right, conversationCacheKey);
+}
+
+function areListsEqual<T>(left: T[], right: T[], cacheKey: (item: T) => string) {
+  return (
+    left.length === right.length &&
+    left.every((item, index) => cacheKey(item) === cacheKey(right[index]))
+  );
+}
+
+function projectCacheKey(project: ProjectSummary) {
+  return [
+    project.id,
+    project.workspaceId,
+    project.name,
+    project.repoUrl,
+    project.hostLocalPath ?? "",
+    project.repoSyncStatus,
+    project.conversationCount ?? "",
+    project.source ?? ""
+  ].join("\u0001");
+}
+
+function conversationCacheKey(conversation: ConversationSummary) {
+  return [
+    conversation.id,
+    conversation.workspaceId,
+    conversation.projectId,
+    conversation.prompt,
+    conversation.status,
+    conversation.type,
+    conversation.createdAt ?? "",
+    conversation.updatedAt ?? "",
+    conversation.mobileOpenState ?? "",
+    conversation.runtimeSessionId ?? "",
+    conversation.source ?? "",
+    conversation.worktreePath ?? ""
+  ].join("\u0001");
 }
 
 function routeBackOneLevel(route: RouteName, project: ProjectSummary | null): RouteName {

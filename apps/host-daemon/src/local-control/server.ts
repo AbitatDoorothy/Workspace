@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, stat, truncate, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 
@@ -19,6 +19,7 @@ import {
   attachmentDiagnostics,
   errorDiagnostics,
   logDiagnostics,
+  mobileControlDiagnosticsLogPath,
   promptDiagnostics,
   type MobileControlDiagnosticsLogger
 } from "./diagnostics-log.js";
@@ -180,6 +181,7 @@ interface RemoteSignal {
 }
 
 const LOCAL_WORKSPACE_ID = "local";
+const MOBILE_DIAGNOSTICS_LOG_LIMIT_BYTES = 3 * 1024 * 1024;
 
 export async function startLocalControlServer(input: StartLocalControlServerInput) {
   const identity = await input.store.getMacIdentity();
@@ -352,6 +354,12 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
           stage: stringValue(body.stage)
         });
         writeJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (method === "GET" && path === "/api/mobile/diagnostics/log") {
+        const log = await readAndClearMobileDiagnosticsLog(diagnostics);
+        writeJson(response, 200, { log });
         return;
       }
 
@@ -713,6 +721,84 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
     server,
     close: () => closeServer(server)
   };
+}
+
+async function readAndClearMobileDiagnosticsLog(
+  diagnostics: MobileControlDiagnosticsLogger | undefined
+) {
+  await diagnostics?.flush?.();
+  const logPath = mobileDiagnosticsLogPath(diagnostics);
+  const file = await readTailBytes(logPath, MOBILE_DIAGNOSTICS_LOG_LIMIT_BYTES);
+  await clearDiagnosticsLog(logPath);
+
+  return {
+    clearedAt: new Date().toISOString(),
+    dataBase64: file.buffer.toString("base64"),
+    mimeType: "text/plain",
+    name: "abitat-mobile-control.log",
+    size: file.buffer.byteLength,
+    totalSize: file.totalSize,
+    truncated: file.truncated
+  };
+}
+
+function mobileDiagnosticsLogPath(diagnostics: MobileControlDiagnosticsLogger | undefined) {
+  if (diagnostics && "logPath" in diagnostics && typeof diagnostics.logPath === "string") {
+    return diagnostics.logPath;
+  }
+
+  return mobileControlDiagnosticsLogPath();
+}
+
+async function readTailBytes(path: string, limitBytes: number) {
+  try {
+    const stats = await stat(path);
+    const totalSize = stats.size;
+    if (totalSize <= limitBytes) {
+      return {
+        buffer: await readFile(path),
+        totalSize,
+        truncated: false
+      };
+    }
+
+    const handle = await open(path, "r");
+    try {
+      const buffer = Buffer.alloc(limitBytes);
+      await handle.read(buffer, 0, limitBytes, totalSize - limitBytes);
+      return {
+        buffer,
+        totalSize,
+        truncated: true
+      };
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return {
+        buffer: Buffer.alloc(0),
+        totalSize: 0,
+        truncated: false
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function clearDiagnosticsLog(path: string) {
+  try {
+    await truncate(path, 0);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, "", "utf8");
+      return;
+    }
+
+    throw error;
+  }
 }
 
 async function requireMobileDevice(request: IncomingMessage, store: LocalControlStore) {

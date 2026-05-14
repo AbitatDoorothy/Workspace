@@ -82,6 +82,7 @@ const GENERATED_FILES_MAX_HEIGHT = 188;
 const REPLY_SWIPE_DISTANCE = 48;
 const REPLY_SWIPE_REVEAL_MAX = 58;
 const REPLY_SWIPE_VELOCITY = 0.28;
+const QUEUED_LOCAL_DRAIN_RETRY_INTERVAL_MS = 4_000;
 
 const CHAT_STARS = [
   { left: "5%", opacity: 0.42, size: 1, top: "8%" },
@@ -159,7 +160,10 @@ export function ConversationScreen({
   const generatedFileRefreshInFlightRef = useRef(false);
   const messageRefreshInFlightRef = useRef(false);
   const pendingFullMessageRefreshRef = useRef(false);
+  const queuedDrainInFlightRef = useRef(false);
+  const queuedDrainAttemptedAtRef = useRef(new Map<string, number>());
   const sendingCountRef = useRef(0);
+  const statusRefreshGenerationRef = useRef(0);
   const canSendNow = !isDraftConversation(activeConversation) || !isSending;
   const canSteerNow = !isDraftConversation(activeConversation) && isConversationBusyStatus(status);
   const threadTitle = activeConversation.prompt || "New Thread";
@@ -177,6 +181,12 @@ export function ConversationScreen({
         : "send";
   const canSubmitComposer =
     editingQueuedMessageId !== null ? prompt.trim().length > 0 : hasComposerPayload && canSendNow;
+
+  function applyLocalConversationStatus(nextStatus: string) {
+    statusRefreshGenerationRef.current += 1;
+    latestStatusRef.current = nextStatus;
+    setStatus(nextStatus);
+  }
 
   function scrollToLatest(animated = true) {
     requestAnimationFrame(() => {
@@ -374,12 +384,17 @@ export function ConversationScreen({
     }
 
     async function refreshStatus() {
+      const requestGeneration = statusRefreshGenerationRef.current;
       try {
         const latestConversations = await api.listConversations(activeConversation.projectId);
         const latestConversation = latestConversations.find(
           (candidate) => candidate.id === activeConversation.id
         );
         if (!cancelled) {
+          if (requestGeneration !== statusRefreshGenerationRef.current) {
+            return;
+          }
+
           const nextStatus = latestConversation?.status ?? activeConversation.status;
           const nextUpdatedAt = latestConversation?.updatedAt ?? null;
           const previousStatus = latestStatusRef.current;
@@ -448,6 +463,20 @@ export function ConversationScreen({
     };
   }, [latestMessageId]);
 
+  useEffect(() => {
+    if (
+      isDraftConversation(activeConversation) ||
+      isConversationBusyStatus(status) ||
+      isSending ||
+      editingQueuedMessageId !== null ||
+      queuedLocalMessages.length === 0
+    ) {
+      return;
+    }
+
+    void drainReadyQueuedMessages();
+  }, [activeConversation.id, editingQueuedMessageId, isSending, queuedLocalMessages, status]);
+
   async function sendConversation(input: SendConversationInput) {
     const conversationForSend = activeConversation;
     const isStartingDraftConversation = isDraftConversation(conversationForSend);
@@ -515,12 +544,11 @@ export function ConversationScreen({
           updatedAt: new Date().toISOString()
         };
 
-        latestStatusRef.current = started.status;
         activeConversationIdRef.current = started.conversationId;
         loadedCachedConversationIdRef.current = started.conversationId;
         latestConversationUpdatedAtRef.current = nextConversation.updatedAt ?? null;
         setActiveConversation(nextConversation);
-        setStatus(started.status);
+        applyLocalConversationStatus(started.status);
         rememberRunningConversation(started.conversationId);
         void moveCachedConversationMessages(
           messageCacheScope,
@@ -570,11 +598,11 @@ export function ConversationScreen({
         model: modelSettings.model,
         prompt: submittedPrompt
       });
-      setStatus(
+      const nextStatus =
         continued.status === "queued" && isConversationBusyStatus(status)
           ? status
-          : continued.status
-      );
+          : continued.status;
+      applyLocalConversationStatus(nextStatus);
       rememberRunningConversation(conversationForSend.id);
       setMessages((current) =>
         persistMergedConversationMessages(
@@ -583,7 +611,8 @@ export function ConversationScreen({
           continued.status === "queued"
             ? markLocalMessageQueued(
                 conversationMessagesForId(current, conversationForSend.id),
-                clientMessageId
+                clientMessageId,
+                { macAcknowledged: true }
               )
             : markLocalMessageSent(
                 conversationMessagesForId(current, conversationForSend.id),
@@ -690,11 +719,11 @@ export function ConversationScreen({
         prompt: submittedPrompt
       });
 
-      setStatus(
+      const nextStatus =
         continued.status === "queued" && isConversationBusyStatus(status)
           ? status
-          : continued.status
-      );
+          : continued.status;
+      applyLocalConversationStatus(nextStatus);
       rememberRunningConversation(conversationForSend.id);
       setMessages((current) =>
         persistMergedConversationMessages(
@@ -741,6 +770,118 @@ export function ConversationScreen({
     }
   }
 
+  async function drainReadyQueuedMessages() {
+    if (queuedDrainInFlightRef.current) {
+      return;
+    }
+
+    const queuedMessage = nextQueuedLocalMessageForRetry(
+      queuedLocalMessages,
+      queuedDrainAttemptedAtRef.current
+    );
+    if (!queuedMessage) {
+      return;
+    }
+
+    queuedDrainInFlightRef.current = true;
+    queuedDrainAttemptedAtRef.current.set(queuedMessageClientId(queuedMessage), Date.now());
+    try {
+      await resendQueuedLocalMessage(queuedMessage);
+    } finally {
+      queuedDrainInFlightRef.current = false;
+    }
+  }
+
+  async function resendQueuedLocalMessage(message: ConversationMessage) {
+    const submittedPrompt = queuedMessageSubmittedPrompt(message);
+    if (!submittedPrompt) {
+      return;
+    }
+
+    const clientMessageId = queuedMessageClientId(message);
+    const conversationForSend = activeConversation;
+
+    setError(null);
+    setMessages((current) =>
+      persistMergedConversationMessages(
+        messageCacheScope,
+        conversationForSend.id,
+        markLocalMessageSending(
+          conversationMessagesForId(current, conversationForSend.id),
+          message.id
+        )
+      )
+    );
+    pendingAutoScrollRef.current = true;
+    scrollToLatest(true);
+
+    try {
+      const continued = await api.continueConversation(conversationForSend.id, {
+        attachments: [],
+        clientMessageId,
+        delivery: "queue",
+        effort: modelSettings.effort,
+        model: modelSettings.model,
+        prompt: submittedPrompt
+      });
+
+      const nextStatus =
+        continued.status === "queued" && isConversationBusyStatus(status)
+          ? status
+          : continued.status;
+      applyLocalConversationStatus(nextStatus);
+      rememberRunningConversation(conversationForSend.id);
+      setMessages((current) =>
+        persistMergedConversationMessages(
+          messageCacheScope,
+          conversationForSend.id,
+          continued.status === "queued"
+            ? markLocalMessageQueued(
+                conversationMessagesForId(current, conversationForSend.id),
+                message.id,
+                { macAcknowledged: true }
+              )
+            : markLocalMessageSent(
+                conversationMessagesForId(current, conversationForSend.id),
+                message.id
+              )
+        )
+      );
+
+      try {
+        const next = await api.listMessages(conversationForSend.id, lastSequence, {
+          forceRefresh: true,
+          includeRuntime: false
+        });
+        setMessages((current) =>
+          persistMergedConversationMessages(
+            messageCacheScope,
+            conversationForSend.id,
+            mergeConversationMessages(
+              conversationMessagesForId(current, conversationForSend.id),
+              next
+            )
+          )
+        );
+        void refreshGeneratedFiles(conversationForSend.id);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Unable to refresh Codex messages");
+      }
+    } catch (caught) {
+      setMessages((current) =>
+        persistMergedConversationMessages(
+          messageCacheScope,
+          conversationForSend.id,
+          markLocalMessageQueued(
+            conversationMessagesForId(current, conversationForSend.id),
+            message.id
+          )
+        )
+      );
+      setError(caught instanceof Error ? caught.message : "Unable to send queued message");
+    }
+  }
+
   async function deleteQueuedMessage(message: ConversationMessage) {
     if (!isQueuedLocalMessage(message)) {
       return;
@@ -759,6 +900,7 @@ export function ConversationScreen({
         setEditingQueuedMessageId(null);
         setPrompt("");
       }
+      queuedDrainAttemptedAtRef.current.delete(clientMessageId);
 
       setMessages((current) =>
         persistMergedConversationMessages(
@@ -824,6 +966,7 @@ export function ConversationScreen({
         setError("Queued message is already being processed.");
         return;
       }
+      queuedDrainAttemptedAtRef.current.delete(queuedMessageClientId(queuedMessage));
 
       setMessages((current) =>
         persistMergedConversationMessages(
@@ -1358,6 +1501,7 @@ function ReplyableMessageItem({
   const localStatus =
     typeof message.metadata?.localStatus === "string" ? message.metadata.localStatus : null;
   const roleLabel = replyRoleLabel(message.role);
+  const replyPreview = conversationMessageReplyPreview(message);
   const replySwipeResponder = useMemo(
     () =>
       createReplySwipeResponder({
@@ -1438,6 +1582,32 @@ function ReplyableMessageItem({
           >
             {conversationMessageDisplayContent(message)}
           </Text>
+          {replyPreview ? (
+            <View
+              style={[
+                styles.quotedMessagePreview,
+                isUserMessage ? styles.userQuotedMessagePreview : null
+              ]}
+            >
+              <Text
+                style={[
+                  styles.quotedMessagePreviewLabel,
+                  isUserMessage ? styles.userQuotedMessagePreviewLabel : null
+                ]}
+              >
+                Reply to {replyPreview.roleLabel}
+              </Text>
+              <Text
+                numberOfLines={2}
+                style={[
+                  styles.quotedMessagePreviewText,
+                  isUserMessage ? styles.userQuotedMessagePreviewText : null
+                ]}
+              >
+                {replyPreview.content}
+              </Text>
+            </View>
+          ) : null}
         </View>
       </Animated.View>
     </View>
@@ -1767,6 +1937,31 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 0.8
   },
+  quotedMessagePreview: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.14)",
+    borderLeftColor: "rgba(255,255,255,0.62)",
+    borderLeftWidth: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 3,
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  quotedMessagePreviewLabel: {
+    color: "rgba(255,255,255,0.68)",
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 0,
+    textTransform: "uppercase"
+  },
+  quotedMessagePreviewText: {
+    color: "rgba(255,255,255,0.88)",
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 15
+  },
   replyPreview: {
     alignItems: "center",
     backgroundColor: "rgba(255,255,255,0.06)",
@@ -1928,6 +2123,17 @@ const styles = StyleSheet.create({
   },
   userMessageText: {
     color: "#111111"
+  },
+  userQuotedMessagePreview: {
+    backgroundColor: "#d7d7d7",
+    borderColor: "#c4c4c4",
+    borderLeftColor: "#777777"
+  },
+  userQuotedMessagePreviewLabel: {
+    color: "rgba(17,17,17,0.58)"
+  },
+  userQuotedMessagePreviewText: {
+    color: "#4b4b4b"
   }
 });
 
@@ -2126,14 +2332,19 @@ function markLocalMessageFailed(messages: ConversationMessage[], clientMessageId
   );
 }
 
-function markLocalMessageQueued(messages: ConversationMessage[], clientMessageId: string) {
+function markLocalMessageQueued(
+  messages: ConversationMessage[],
+  clientMessageId: string,
+  options: { macAcknowledged?: boolean } = {}
+) {
   return messages.map((message) =>
     message.id === clientMessageId
       ? {
           ...message,
           metadata: {
             ...(message.metadata ?? {}),
-            localStatus: "queued"
+            localStatus: "queued",
+            ...(options.macAcknowledged ? { macQueuedAt: new Date().toISOString() } : {})
           }
         }
       : message
@@ -2174,6 +2385,27 @@ function canSteerQueuedLocalMessage(message: ConversationMessage, canSteerNow: b
 
 function isQueuedLocalMessage(message: ConversationMessage) {
   return message.metadata?.localStatus === "queued";
+}
+
+function hasMacQueuedAcknowledgement(message: ConversationMessage) {
+  return typeof message.metadata?.macQueuedAt === "string";
+}
+
+function nextQueuedLocalMessageForRetry(
+  messages: ConversationMessage[],
+  attemptedAtByClientId: Map<string, number>
+) {
+  const now = Date.now();
+  return (
+    messages.find((message) => {
+      if (hasMacQueuedAcknowledgement(message)) {
+        return false;
+      }
+
+      const lastAttemptedAt = attemptedAtByClientId.get(queuedMessageClientId(message)) ?? 0;
+      return now - lastAttemptedAt >= QUEUED_LOCAL_DRAIN_RETRY_INTERVAL_MS;
+    }) ?? null
+  );
 }
 
 function queuedMessageClientId(message: ConversationMessage) {
@@ -2416,6 +2648,28 @@ function conversationMessageDisplayContent(message: ConversationMessage) {
   return safeMessageContent(message.content);
 }
 
+function conversationMessageReplyPreview(message: ConversationMessage) {
+  const metadataReplyTarget = replyTargetFromMetadata(message.metadata?.replyTarget);
+  if (metadataReplyTarget) {
+    return {
+      content: safeReplyPreviewContent(metadataReplyTarget.content),
+      roleLabel: replyRoleLabel(metadataReplyTarget.role)
+    };
+  }
+
+  const submittedPrompt =
+    typeof message.metadata?.submittedPrompt === "string" ? message.metadata.submittedPrompt : "";
+  const parsedReplyPrompt = parseReplyPrompt(submittedPrompt || message.content);
+  if (!parsedReplyPrompt) {
+    return null;
+  }
+
+  return {
+    content: safeReplyPreviewContent(parsedReplyPrompt.replyContent),
+    roleLabel: parsedReplyPrompt.roleLabel
+  };
+}
+
 export function safeMessageContent(content: string) {
   const maxLength = 8_000;
   const visibleContent = displayReplyPromptText(stripCodexAppDirectives(content));
@@ -2428,18 +2682,52 @@ export function safeMessageContent(content: string) {
 }
 
 function displayReplyPromptText(content: string) {
-  if (!content.startsWith("Reply to this previous message from ")) {
+  const parsedReplyPrompt = parseReplyPrompt(content);
+  if (!parsedReplyPrompt) {
     return content;
   }
 
-  const marker = '\n"""\n\nUser reply:\n';
-  const markerIndex = content.lastIndexOf(marker);
-  if (markerIndex === -1) {
-    return content;
+  return parsedReplyPrompt.userReply.length > 0 ? parsedReplyPrompt.userReply : content;
+}
+
+function parseReplyPrompt(content: string) {
+  const normalized = content.replace(/\r\n/g, "\n").trim();
+  const prefix = "Reply to this previous message from ";
+  const roleEndMarker = ':\n\n"""';
+  const replyEndMarker = '\n"""\n\nUser reply:\n';
+  if (!normalized.startsWith(prefix)) {
+    return null;
   }
 
-  const displayText = content.slice(markerIndex + marker.length).trim();
-  return displayText.length > 0 ? displayText : content;
+  const roleEndIndex = normalized.indexOf(roleEndMarker, prefix.length);
+  const replyEndIndex = normalized.lastIndexOf(replyEndMarker);
+  if (roleEndIndex === -1 || replyEndIndex === -1 || replyEndIndex <= roleEndIndex) {
+    return null;
+  }
+
+  const roleLabel = normalized.slice(prefix.length, roleEndIndex).trim();
+  const replyContent = normalized.slice(roleEndIndex + roleEndMarker.length, replyEndIndex).trim();
+  const userReply = normalized.slice(replyEndIndex + replyEndMarker.length).trim();
+  if (!roleLabel || !replyContent || !userReply) {
+    return null;
+  }
+
+  return {
+    replyContent,
+    roleLabel,
+    userReply
+  };
+}
+
+function safeReplyPreviewContent(content: string) {
+  const cleaned = stripCodexAppDirectives(content).trim();
+  const maxLength = 420;
+
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+
+  return `${cleaned.slice(0, maxLength).trim()}...`;
 }
 
 export function stripCodexAppDirectives(content: string) {
