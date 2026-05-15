@@ -1,6 +1,6 @@
 import net from "node:net";
 
-export const DEFAULT_CODEX_APP_SERVER_URL = "ws://127.0.0.1:47777";
+export const DEFAULT_CODEX_APP_SERVER_URL = "stdio://";
 export const DEFAULT_IPHONE_LOGIN_PASSWORD = "abitat-local";
 export const DEFAULT_MACHINE_ID = "machine_demo";
 export const DEFAULT_WEB_HOST = "0.0.0.0";
@@ -90,6 +90,15 @@ export function parseWebSocketEndpoint(value) {
     host: url.hostname,
     port: Number(url.port || (url.protocol === "wss:" ? 443 : 80))
   };
+}
+
+export function isWebSocketCodexAppServerUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "ws:" || url.protocol === "wss:";
+  } catch {
+    return false;
+  }
 }
 
 export function parseNextDevLock(raw) {

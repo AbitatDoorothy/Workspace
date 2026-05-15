@@ -1,4 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { normalize } from "node:path";
+import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 
 import WebSocket from "ws";
@@ -15,7 +17,7 @@ import type {
   CodexAppUserInput
 } from "./codex-app-service";
 
-const DEFAULT_SERVER_URL = "ws://127.0.0.1:47777";
+const DEFAULT_SERVER_URL = "stdio://";
 const DEFAULT_CODEX_BINARY = "/Applications/Codex.app/Contents/Resources/codex";
 const REQUEST_TIMEOUT_MS = 30_000;
 const START_TIMEOUT_MS = 15_000;
@@ -24,6 +26,7 @@ const TURN_KEEPALIVE_TIMEOUT_MS = 30 * 60_000;
 let spawnedAppServer: ChildProcess | null = null;
 let nextRequestId = 1;
 const activeTurnKeepAlives = new Set<Promise<void>>();
+const sharedStdioConnections = new Map<string, Promise<JsonRpcConnection>>();
 
 interface JsonRpcMessage {
   id: number | string;
@@ -31,6 +34,14 @@ interface JsonRpcMessage {
   params?: unknown;
   result?: unknown;
   error?: { message?: string; code?: number; data?: unknown };
+}
+
+interface JsonRpcTransport {
+  close(): void;
+  onClose(handler: () => void): void;
+  onError(handler: (error: Error) => void): void;
+  onMessage(handler: (raw: string) => void): void;
+  send(payload: string, callback: (error?: Error) => void): void;
 }
 
 interface CodexAppClientOptions {
@@ -151,23 +162,24 @@ async function callCodexApp<TResult>(
   params: unknown
 ): Promise<TResult> {
   try {
-    return await callCodexAppOnce<TResult>(serverUrl, method, params);
+    return await callCodexAppOnce<TResult>(serverUrl, codexBinaryPath, method, params);
   } catch (error) {
     if (!isConnectionFailure(error) || !canStartLocalServer(serverUrl)) {
       throw error;
     }
 
     await ensureLocalAppServer(serverUrl, codexBinaryPath);
-    return callCodexAppOnce<TResult>(serverUrl, method, params);
+    return callCodexAppOnce<TResult>(serverUrl, codexBinaryPath, method, params);
   }
 }
 
 async function callCodexAppOnce<TResult>(
   serverUrl: string,
+  codexBinaryPath: string,
   method: string,
   params: unknown
 ): Promise<TResult> {
-  const connection = await JsonRpcConnection.connect(serverUrl);
+  const connection = await JsonRpcConnection.connect(serverUrl, codexBinaryPath);
 
   try {
     await initializeConnection(connection);
@@ -186,24 +198,25 @@ async function startTurnWithKeepAlive(
   options: CodexAppStartTurnOptions
 ) {
   try {
-    return await startTurnWithKeepAliveOnce(serverUrl, threadId, input, options);
+    return await startTurnWithKeepAliveOnce(serverUrl, codexBinaryPath, threadId, input, options);
   } catch (error) {
     if (!isConnectionFailure(error) || !canStartLocalServer(serverUrl)) {
       throw error;
     }
 
     await ensureLocalAppServer(serverUrl, codexBinaryPath);
-    return startTurnWithKeepAliveOnce(serverUrl, threadId, input, options);
+    return startTurnWithKeepAliveOnce(serverUrl, codexBinaryPath, threadId, input, options);
   }
 }
 
 async function startTurnWithKeepAliveOnce(
   serverUrl: string,
+  codexBinaryPath: string,
   threadId: string,
   input: CodexAppUserInput[],
   options: CodexAppStartTurnOptions
 ) {
-  const connection = await JsonRpcConnection.connect(serverUrl);
+  const connection = await JsonRpcConnection.connect(serverUrl, codexBinaryPath);
   let keepAliveStarted = false;
 
   try {
@@ -227,16 +240,18 @@ async function startTurnWithKeepAliveOnce(
 }
 
 async function initializeConnection(connection: JsonRpcConnection) {
-  await connection.call("initialize", {
-    capabilities: {
-      experimentalApi: true
-    },
-    clientInfo: {
-      name: "abitat-workspace",
-      version: "0.1.0"
-    }
+  await connection.initialize(async () => {
+    await connection.call("initialize", {
+      capabilities: {
+        experimentalApi: true
+      },
+      clientInfo: {
+        name: "abitat-workspace",
+        version: "0.1.0"
+      }
+    });
+    connection.notify("initialized");
   });
-  connection.notify("initialized");
 }
 
 function keepTurnConnectionAlive(connection: JsonRpcConnection, threadId: string, turnId: string) {
@@ -409,30 +424,11 @@ function isTurnFinishedNotification(
   );
 }
 
-class JsonRpcConnection {
-  private readonly pending = new Map<
-    number,
-    { reject(error: Error): void; resolve(value: unknown): void; timer: NodeJS.Timeout }
-  >();
-  private readonly notificationHandlers = new Set<(method: string, params: unknown) => void>();
-  private readonly closeHandlers = new Set<() => void>();
-
-  private constructor(private readonly socket: WebSocket) {
-    socket.on("message", (data) => this.handleMessage(data.toString()));
-    socket.on("close", () => {
-      this.rejectAll(new Error("Codex app-server connection closed"));
-      for (const handler of this.closeHandlers) {
-        handler();
-      }
-      this.closeHandlers.clear();
-    });
-    socket.on("error", (error) =>
-      this.rejectAll(error instanceof Error ? error : new Error(String(error)))
-    );
-  }
+class WebSocketJsonRpcTransport implements JsonRpcTransport {
+  private constructor(private readonly socket: WebSocket) {}
 
   static connect(serverUrl: string) {
-    return new Promise<JsonRpcConnection>((resolve, reject) => {
+    return new Promise<WebSocketJsonRpcTransport>((resolve, reject) => {
       const socket = new WebSocket(serverUrl);
       const timer = setTimeout(() => {
         socket.close();
@@ -441,13 +437,251 @@ class JsonRpcConnection {
 
       socket.once("open", () => {
         clearTimeout(timer);
-        resolve(new JsonRpcConnection(socket));
+        resolve(new WebSocketJsonRpcTransport(socket));
       });
       socket.once("error", (error) => {
         clearTimeout(timer);
         reject(error instanceof Error ? error : new Error(String(error)));
       });
     });
+  }
+
+  onMessage(handler: (raw: string) => void) {
+    this.socket.on("message", (data) => handler(data.toString()));
+  }
+
+  onClose(handler: () => void) {
+    this.socket.on("close", handler);
+  }
+
+  onError(handler: (error: Error) => void) {
+    this.socket.on("error", (error) =>
+      handler(error instanceof Error ? error : new Error(String(error)))
+    );
+  }
+
+  send(payload: string, callback: (error?: Error) => void) {
+    this.socket.send(payload, callback);
+  }
+
+  close() {
+    this.socket.close();
+  }
+}
+
+class StdioJsonRpcTransport implements JsonRpcTransport {
+  private readonly closeHandlers = new Set<() => void>();
+  private readonly errorHandlers = new Set<(error: Error) => void>();
+  private readonly messageHandlers = new Set<(raw: string) => void>();
+  private closed = false;
+  private lastStderr = "";
+
+  private constructor(private readonly child: ChildProcess) {
+    if (!child.stdout || !child.stdin) {
+      throw new Error("Codex app-server stdio pipes are unavailable");
+    }
+
+    const stdout = createInterface({ input: child.stdout });
+    stdout.on("line", (line) => this.emitMessage(line));
+    child.stderr?.on("data", (chunk) => {
+      this.lastStderr = trimStderr(`${this.lastStderr}${chunk.toString()}`);
+    });
+    child.once("error", (error) =>
+      this.emitError(error instanceof Error ? error : new Error(String(error)))
+    );
+    child.once("exit", (code, signal) => {
+      this.closed = true;
+      if (code && code !== 0) {
+        this.emitError(
+          new Error(
+            `Codex app-server exited with code ${code}${this.lastStderr ? `: ${this.lastStderr}` : ""}`
+          )
+        );
+      } else if (signal) {
+        this.emitError(new Error(`Codex app-server exited with signal ${signal}`));
+      }
+      this.emitClose();
+    });
+  }
+
+  static connect(codexBinaryPath: string) {
+    return new Promise<StdioJsonRpcTransport>((resolve, reject) => {
+      const child = spawn(
+        codexBinaryPath,
+        ["app-server", "--listen", "stdio://", "--analytics-default-enabled"],
+        {
+          stdio: ["pipe", "pipe", "pipe"]
+        }
+      );
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          child.kill("SIGTERM");
+          reject(new Error("Timed out starting Codex app-server stdio transport"));
+        }
+      }, REQUEST_TIMEOUT_MS);
+
+      child.once("spawn", () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        try {
+          resolve(new StdioJsonRpcTransport(child));
+        } catch (error) {
+          child.kill("SIGTERM");
+          reject(error);
+        }
+      });
+      child.once("error", (error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.once("exit", (code, signal) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        reject(new Error(`Codex app-server exited before stdio transport opened (${code ?? signal})`));
+      });
+    });
+  }
+
+  onMessage(handler: (raw: string) => void) {
+    this.messageHandlers.add(handler);
+  }
+
+  onClose(handler: () => void) {
+    this.closeHandlers.add(handler);
+  }
+
+  onError(handler: (error: Error) => void) {
+    this.errorHandlers.add(handler);
+  }
+
+  send(payload: string, callback: (error?: Error) => void) {
+    if (this.closed || !this.child.stdin?.writable) {
+      callback(new Error("Codex app-server stdio transport is closed"));
+      return;
+    }
+
+    this.child.stdin.write(`${payload}\n`, (error) => callback(error ?? undefined));
+  }
+
+  close() {
+    if (this.closed) {
+      return;
+    }
+
+    this.closed = true;
+    this.child.stdin?.end();
+    this.child.kill("SIGTERM");
+  }
+
+  private emitMessage(raw: string) {
+    for (const handler of this.messageHandlers) {
+      handler(raw);
+    }
+  }
+
+  private emitClose() {
+    for (const handler of this.closeHandlers) {
+      handler();
+    }
+    this.closeHandlers.clear();
+  }
+
+  private emitError(error: Error) {
+    for (const handler of this.errorHandlers) {
+      handler(error);
+    }
+  }
+}
+
+class JsonRpcConnection {
+  private readonly pending = new Map<
+    number,
+    { reject(error: Error): void; resolve(value: unknown): void; timer: NodeJS.Timeout }
+  >();
+  private readonly notificationHandlers = new Set<(method: string, params: unknown) => void>();
+  private readonly closeHandlers = new Set<() => void>();
+  private initialization: Promise<void> | null = null;
+  private initialized = false;
+
+  private constructor(
+    private readonly transport: JsonRpcTransport,
+    private readonly closeTransportOnClose = true
+  ) {
+    transport.onMessage((data) => this.handleMessage(data));
+    transport.onClose(() => {
+      this.rejectAll(new Error("Codex app-server connection closed"));
+      for (const handler of this.closeHandlers) {
+        handler();
+      }
+      this.closeHandlers.clear();
+    });
+    transport.onError((error) => this.rejectAll(error));
+  }
+
+  static async connect(serverUrl: string, codexBinaryPath: string) {
+    if (isStdioServerUrl(serverUrl)) {
+      return JsonRpcConnection.sharedStdio(codexBinaryPath);
+    }
+
+    return new JsonRpcConnection(await WebSocketJsonRpcTransport.connect(serverUrl));
+  }
+
+  private static sharedStdio(codexBinaryPath: string) {
+    const key = normalize(codexBinaryPath);
+    const existing = sharedStdioConnections.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const promise = StdioJsonRpcTransport.connect(codexBinaryPath)
+      .then((transport) => {
+        const connection = new JsonRpcConnection(transport, false);
+        connection.onClose(() => {
+          if (sharedStdioConnections.get(key) === promise) {
+            sharedStdioConnections.delete(key);
+          }
+        });
+        return connection;
+      })
+      .catch((error) => {
+        if (sharedStdioConnections.get(key) === promise) {
+          sharedStdioConnections.delete(key);
+        }
+        throw error;
+      });
+
+    sharedStdioConnections.set(key, promise);
+    return promise;
+  }
+
+  initialize(initializer: () => Promise<void>) {
+    if (this.initialized) {
+      return Promise.resolve();
+    }
+
+    if (!this.initialization) {
+      this.initialization = initializer()
+        .then(() => {
+          this.initialized = true;
+        })
+        .finally(() => {
+          this.initialization = null;
+        });
+    }
+
+    return this.initialization;
   }
 
   onNotification(handler: (method: string, params: unknown) => void) {
@@ -484,7 +718,7 @@ class JsonRpcConnection {
         resolve: (value) => resolve(value as TResult),
         timer
       });
-      this.socket.send(payload, (error) => {
+      this.transport.send(payload, (error) => {
         if (!error) {
           return;
         }
@@ -497,11 +731,16 @@ class JsonRpcConnection {
   }
 
   notify(method: string, params?: unknown) {
-    this.socket.send(JSON.stringify(params === undefined ? { method } : { method, params }));
+    this.transport.send(
+      JSON.stringify(params === undefined ? { method } : { method, params }),
+      () => undefined
+    );
   }
 
   close() {
-    this.socket.close();
+    if (this.closeTransportOnClose) {
+      this.transport.close();
+    }
   }
 
   private handleMessage(raw: string) {
@@ -596,6 +835,14 @@ function canOpenWebSocket(serverUrl: string) {
   });
 }
 
+function isStdioServerUrl(serverUrl: string) {
+  try {
+    return new URL(serverUrl).protocol === "stdio:";
+  } catch {
+    return false;
+  }
+}
+
 function canStartLocalServer(serverUrl: string) {
   try {
     const url = new URL(serverUrl);
@@ -613,4 +860,8 @@ function isConnectionFailure(error: unknown) {
   return /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|closed before|connection closed|Timed out connecting|Unexpected server response/.test(
     error.message
   );
+}
+
+function trimStderr(value: string) {
+  return value.trim().slice(-2_000);
 }

@@ -11,6 +11,7 @@ import {
   createLauncherEnv,
   createRemoteTunnelEnv,
   findAvailablePort,
+  isWebSocketCodexAppServerUrl,
   isTcpPortOpen,
   parseNextDevLock,
   parseWebSocketEndpoint,
@@ -38,8 +39,10 @@ async function main() {
     });
   }
 
-  const codexEndpoint = parseWebSocketEndpoint(env.CODEX_APP_SERVER_URL);
-  await ensureCodexAppServer(env.CODEX_APP_SERVER_URL, codexEndpoint);
+  if (isWebSocketCodexAppServerUrl(env.CODEX_APP_SERVER_URL)) {
+    const codexEndpoint = parseWebSocketEndpoint(env.CODEX_APP_SERVER_URL);
+    await ensureCodexAppServer(env.CODEX_APP_SERVER_URL, codexEndpoint);
+  }
   const localWebOrigin = `http://127.0.0.1:${env.PORT}`;
   const useRemoteTunnel = shouldStartRemoteTunnel(env);
 

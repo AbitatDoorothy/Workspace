@@ -37,7 +37,7 @@ interface ResolveStartupProcessOptions {
   resolvePackageExport?: (specifier: string) => string;
 }
 
-const DEFAULT_CODEX_APP_SERVER_URL = "ws://127.0.0.1:47777";
+const DEFAULT_CODEX_APP_SERVER_URL = "stdio://";
 const HOST_DAEMON_CLI_EXPORT = "@abitat_reece/host-daemon/cli";
 
 export function parseCommand(args: string[]): AbitatCommand {
@@ -110,6 +110,7 @@ export async function runCli(args: string[], input: RunCliInput = {}) {
 function startProcess(process: StartupProcess) {
   const resolved = resolveStartupProcess(process);
   spawn(resolved.command, resolved.args, {
+    cwd: globalThis.process.env.INIT_CWD ?? globalThis.process.cwd(),
     env: { ...globalThis.process.env, ...resolved.env },
     stdio: "inherit"
   });

@@ -5,6 +5,7 @@ import {
   createIphoneLauncherBaseEnv,
   createLauncherEnv,
   createRemoteTunnelEnv,
+  isWebSocketCodexAppServerUrl,
   parseNextDevLock,
   parseWebSocketEndpoint,
   selectLanAddress,
@@ -31,7 +32,7 @@ describe("iPhone dev launcher", () => {
     expect(env).toMatchObject({
       ABITAT_MACHINE_ID: "machine_demo",
       ABITAT_PUBLIC_URL: "http://192.168.1.44:3000",
-      CODEX_APP_SERVER_URL: "ws://127.0.0.1:47777",
+      CODEX_APP_SERVER_URL: "stdio://",
       HOSTNAME: "0.0.0.0",
       PORT: "3000"
     });
@@ -154,6 +155,11 @@ describe("iPhone dev launcher", () => {
       host: "127.0.0.1",
       port: 47777
     });
+  });
+
+  it("recognizes non-WebSocket Codex app-server transports", () => {
+    expect(isWebSocketCodexAppServerUrl("stdio://")).toBe(false);
+    expect(isWebSocketCodexAppServerUrl("ws://127.0.0.1:47777")).toBe(true);
   });
 
   it("parses a Next dev lock so the launcher can replace stale localhost servers", () => {

@@ -108,9 +108,7 @@ describe("abitat cli", () => {
 
     await expect(
       runCli(["iphone"], {
-        env: {
-          CODEX_APP_SERVER_URL: "ws://127.0.0.1:17321"
-        },
+        env: {},
         homeDir,
         output: (line) => output.push(line),
         platform: "darwin",
@@ -129,7 +127,7 @@ describe("abitat cli", () => {
           "--transport",
           "relay",
           "--codex-server-url",
-          "ws://127.0.0.1:17321"
+          "stdio://"
         ]
       }
     ]);

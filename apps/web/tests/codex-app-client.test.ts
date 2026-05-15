@@ -1,4 +1,7 @@
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import WebSocket, { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -19,6 +22,24 @@ afterEach(async () => {
 });
 
 describe("Codex app client", () => {
+  it("loads threads over stdio app-server transport", async () => {
+    const codexBinaryPath = await createMockStdioCodexBinary();
+    const client = createCodexAppClient({
+      codexBinaryPath,
+      serverUrl: "stdio://"
+    });
+
+    await expect(client.listThreads()).resolves.toEqual({
+      data: [
+        expect.objectContaining({
+          cwd: "/Users/reece/Desktop/Stdio Web Project",
+          id: "thread_stdio_web"
+        })
+      ],
+      nextCursor: null
+    });
+  });
+
   it("declares the experimental API capability during initialization", async () => {
     let initializeParams: Record<string, unknown> | null = null;
     const { serverUrl } = await startMockCodexAppServer((socket, message) => {
@@ -426,6 +447,52 @@ async function startMockCodexAppServer(
 
   const address = server.address() as AddressInfo;
   return { serverUrl: `ws://127.0.0.1:${address.port}` };
+}
+
+async function createMockStdioCodexBinary() {
+  const directory = await mkdtemp(join(tmpdir(), "abitat-web-stdio-codex-"));
+  const scriptPath = join(directory, "codex-mock.js");
+  await writeFile(
+    scriptPath,
+    `#!/usr/bin/env node
+const readline = require("node:readline");
+
+const thread = {
+  createdAt: 1778000000,
+  cwd: "/Users/reece/Desktop/Stdio Web Project",
+  ephemeral: false,
+  id: "thread_stdio_web",
+  name: null,
+  preview: "Stdio web thread",
+  status: { type: "idle" },
+  turns: [],
+  updatedAt: 1778000010
+};
+
+const rl = readline.createInterface({ input: process.stdin });
+
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send(message.id, {});
+    return;
+  }
+
+  if (message.method === "thread/list") {
+    send(message.id, { data: [thread], nextCursor: null });
+    return;
+  }
+
+  send(message.id, {});
+});
+
+function send(id, result) {
+  process.stdout.write(JSON.stringify({ id, result }) + "\\n");
+}
+`
+  );
+  await chmod(scriptPath, 0o755);
+  return scriptPath;
 }
 
 function sendResult(socket: WebSocket, id: number | undefined, result: unknown) {

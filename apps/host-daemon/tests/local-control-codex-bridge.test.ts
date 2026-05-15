@@ -1,4 +1,7 @@
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import WebSocket, { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -99,6 +102,73 @@ describe("local Codex bridge diagnostics", () => {
     expect(JSON.stringify(diagnostics.events)).not.toContain("Sensitive user prompt");
     expect(JSON.stringify(diagnostics.events)).not.toContain("hidden reasoning");
     expect(JSON.stringify(diagnostics.events)).not.toContain("hidden payload");
+  });
+});
+
+describe("local Codex bridge app-server transport", () => {
+  it("loads Codex projects over stdio app-server transport", async () => {
+    const codexBinaryPath = await createMockStdioCodexBinary();
+    const bridge = createLocalCodexBridge({ codexBinaryPath, serverUrl: "stdio://" });
+
+    await expect(bridge.listProjects()).resolves.toEqual([
+      expect.objectContaining({
+        hostLocalPath: "/Users/reece/Desktop/Stdio Project",
+        name: "Stdio Project"
+      })
+    ]);
+  });
+
+  it("falls back to the live thread list when the state-db thread list is empty", async () => {
+    const liveThread = {
+      createdAt: 1_778_000_000,
+      cwd: "/Users/reece/Desktop/Live Project",
+      ephemeral: false,
+      id: "thread_live",
+      name: null,
+      preview: "Live thread",
+      status: { type: "idle" },
+      turns: [],
+      updatedAt: 1_778_000_010
+    };
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/loaded/list") {
+        sendResult(socket, message.id, { data: [], nextCursor: null });
+      }
+
+      if (message.method === "thread/list") {
+        const params = message.params as { useStateDbOnly?: boolean };
+        sendResult(socket, message.id, {
+          data: params.useStateDbOnly === false ? [liveThread] : [],
+          nextCursor: null
+        });
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+
+    await expect(bridge.listProjects()).resolves.toEqual([
+      expect.objectContaining({
+        hostLocalPath: "/Users/reece/Desktop/Live Project",
+        name: "Live Project"
+      })
+    ]);
+  });
+
+  it("keeps the stdio app-server session alive between resume and turn start", async () => {
+    const codexBinaryPath = await createStatefulTurnStartStdioCodexBinary();
+    const bridge = createLocalCodexBridge({ codexBinaryPath, serverUrl: "stdio://" });
+
+    await expect(
+      bridge.continueConversation("codex_thread_thread_stdio_continue", {
+        prompt: "hello"
+      })
+    ).resolves.toEqual({
+      conversationId: "codex_thread_thread_stdio_continue",
+      status: "running"
+    });
   });
 });
 
@@ -714,6 +784,138 @@ async function startMockCodexAppServer(
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address() as AddressInfo;
   return { serverUrl: `ws://127.0.0.1:${address.port}` };
+}
+
+async function createMockStdioCodexBinary() {
+  const directory = await mkdtemp(join(tmpdir(), "abitat-stdio-codex-"));
+  const scriptPath = join(directory, "codex-mock.js");
+  await writeFile(
+    scriptPath,
+    `#!/usr/bin/env node
+const readline = require("node:readline");
+
+const thread = {
+  createdAt: 1778000000,
+  cwd: "/Users/reece/Desktop/Stdio Project",
+  ephemeral: false,
+  id: "thread_stdio",
+  name: null,
+  preview: "Stdio thread",
+  status: { type: "idle" },
+  turns: [],
+  updatedAt: 1778000010
+};
+
+const rl = readline.createInterface({ input: process.stdin });
+
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send(message.id, {});
+    return;
+  }
+
+  if (message.method === "thread/list") {
+    send(message.id, { data: [thread], nextCursor: null });
+    return;
+  }
+
+  if (message.method === "thread/loaded/list") {
+    send(message.id, { data: [], nextCursor: null });
+    return;
+  }
+
+  send(message.id, {});
+});
+
+function send(id, result) {
+  process.stdout.write(JSON.stringify({ id, result }) + "\\n");
+}
+`
+  );
+  await chmod(scriptPath, 0o755);
+  return scriptPath;
+}
+
+async function createStatefulTurnStartStdioCodexBinary() {
+  const directory = await mkdtemp(join(tmpdir(), "abitat-stdio-turn-codex-"));
+  const scriptPath = join(directory, "codex-mock.js");
+  await writeFile(
+    scriptPath,
+    `#!/usr/bin/env node
+const readline = require("node:readline");
+
+let resumed = false;
+const thread = {
+  createdAt: 1778000000,
+  cwd: "/Users/reece/Desktop/Stdio Continue Project",
+  ephemeral: false,
+  id: "thread_stdio_continue",
+  name: null,
+  preview: "Stdio continue thread",
+  status: { type: "notLoaded" },
+  turns: [],
+  updatedAt: 1778000010
+};
+
+const rl = readline.createInterface({ input: process.stdin });
+
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send(message.id, {});
+    return;
+  }
+
+  if (message.method === "thread/read") {
+    send(message.id, { thread: { ...thread, status: { type: resumed ? "idle" : "notLoaded" } } });
+    return;
+  }
+
+  if (message.method === "thread/loaded/list") {
+    send(message.id, { data: [], nextCursor: null });
+    return;
+  }
+
+  if (message.method === "thread/resume") {
+    resumed = true;
+    send(message.id, { thread: { ...thread, status: { type: "idle" } } });
+    return;
+  }
+
+  if (message.method === "turn/start") {
+    if (!resumed) {
+      sendError(message.id, "thread not found: thread_stdio_continue");
+      return;
+    }
+
+    send(message.id, {
+      turn: {
+        completedAt: null,
+        error: null,
+        id: "turn_stdio",
+        items: [],
+        startedAt: 1778000011,
+        status: { type: "inProgress" }
+      }
+    });
+    return;
+  }
+
+  send(message.id, {});
+});
+
+function send(id, result) {
+  process.stdout.write(JSON.stringify({ id, result }) + "\\n");
+}
+
+function sendError(id, message) {
+  process.stdout.write(JSON.stringify({ id, error: { message } }) + "\\n");
+}
+`
+  );
+  await chmod(scriptPath, 0o755);
+  return scriptPath;
 }
 
 function sendResult(socket: WebSocket, id: number | undefined, result: unknown) {

@@ -106,7 +106,7 @@ async function startIphoneControl(args: string[]) {
   const codexServerUrl =
     readOption(args, "--codex-server-url") ??
     process.env.CODEX_APP_SERVER_URL ??
-    "ws://127.0.0.1:47777";
+    "stdio://";
   const diagnosticsLogPath = mobileControlDiagnosticsLogPath();
   const diagnostics = createMobileControlDiagnosticsLogger({ logPath: diagnosticsLogPath });
   const transport = await resolveLocalControlTransport({
