@@ -115,6 +115,20 @@ export interface MobileDiagnosticsLogDownload {
   truncated: boolean;
 }
 
+export type CodexTokenUsageTimeframe = "1d" | "7d" | "all";
+
+export interface CodexTokenUsageBucket {
+  cachedInputTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+export interface CodexTokenUsageSummary {
+  generatedAt: string;
+  timeframes: Record<CodexTokenUsageTimeframe, CodexTokenUsageBucket>;
+}
+
 export type CodexReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface CodexMobileModelSettings {

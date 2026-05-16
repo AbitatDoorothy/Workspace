@@ -13,6 +13,7 @@ import type {
   CodexCompletionSummary,
   CodexModelOption,
   CodexReasoningEffort,
+  CodexTokenUsageSummary,
   ConversationAttachment,
   ConversationMessage,
   ConversationSummary,
@@ -68,6 +69,7 @@ export interface ApiClient {
   listConversations(projectId: string): Promise<ConversationSummary[]>;
   listCompletionStates(): Promise<CodexCompletionSummary[]>;
   listCodexModels(): Promise<CodexModelOption[]>;
+  getCodexTokenUsage(): Promise<CodexTokenUsageSummary>;
   listGeneratedFiles(conversationId: string): Promise<GeneratedFileSummary[]>;
   listMessages(
     conversationId: string,
@@ -164,6 +166,10 @@ export function createApiClient(pairing: PairingState): ApiClient {
       ),
     listCodexModels: () =>
       get(pairing, "/api/mobile/codex/models").then((body) => body.models as CodexModelOption[]),
+    getCodexTokenUsage: () =>
+      get(pairing, "/api/mobile/codex/token-usage").then(
+        (body) => body as CodexTokenUsageSummary
+      ),
     listGeneratedFiles: (conversationId) =>
       get(pairing, `/api/mobile/conversations/${conversationId}/files`).then(
         (body) => body.files as GeneratedFileSummary[]

@@ -358,6 +358,62 @@ describe("local control server", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("serves Codex token usage totals to paired phones by timeframe", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "abitat-local-control-token-usage-"));
+    const store = createLocalControlStore({
+      idGenerator: (prefix) => `${prefix}_test`,
+      randomSecret: (() => {
+        let index = 0;
+        return () => `secret_${++index}`;
+      })(),
+      statePath: join(directory, "state.json")
+    });
+    const server = await startLocalControlServer({
+      bindHost: "127.0.0.1",
+      codex: createFakeCodexBridge(),
+      endpoint: "http://127.0.0.1:0",
+      port: 0,
+      store,
+      tokenUsageProvider: async () => ({
+        allTime: tokenUsageBucket(1_000, 700, 140, 220),
+        generatedAt: "2026-05-15T12:00:00.000Z",
+        oneDay: tokenUsageBucket(100, 70, 14, 22),
+        sevenDays: tokenUsageBucket(500, 350, 70, 110)
+      }),
+      transport: "local"
+    });
+    servers.push(server);
+
+    try {
+      const endpoint = server.endpoint;
+      const pairing = await store.createPairing({ endpoint, transport: "local" });
+      const paired = await fetchJson(`${endpoint}/pairing/consume`, {
+        body: JSON.stringify({
+          deviceName: "Reece iPhone",
+          pairingSecret: pairing.pairingSecret,
+          platform: "ios"
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      });
+      const auth = { authorization: `Bearer ${paired.clientToken}` };
+
+      await expect(fetchJson(`${endpoint}/api/mobile/codex/token-usage`)).rejects.toThrow("401");
+      await expect(
+        fetchJson(`${endpoint}/api/mobile/codex/token-usage`, { headers: auth })
+      ).resolves.toEqual({
+        generatedAt: "2026-05-15T12:00:00.000Z",
+        timeframes: {
+          all: tokenUsageBucket(1_000, 700, 140, 220),
+          "1d": tokenUsageBucket(100, 70, 14, 22),
+          "7d": tokenUsageBucket(500, 350, 70, 110)
+        }
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 function createFakeCodexBridge(options: { continueError?: Error } = {}): LocalCodexBridge & {
@@ -504,4 +560,18 @@ function createMemoryDiagnostics() {
   };
 
   return logger;
+}
+
+function tokenUsageBucket(
+  totalTokens: number,
+  inputTokens: number,
+  outputTokens: number,
+  cachedInputTokens: number
+) {
+  return {
+    cachedInputTokens,
+    inputTokens,
+    outputTokens,
+    totalTokens
+  };
 }

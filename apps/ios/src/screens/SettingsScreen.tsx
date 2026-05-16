@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { ActivityIndicator, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { ApiClient } from "../api/client";
+import type {
+  CodexTokenUsageBucket,
+  CodexTokenUsageSummary,
+  CodexTokenUsageTimeframe
+} from "../types";
 
 interface SettingsScreenProps {
   api: ApiClient;
@@ -12,10 +17,58 @@ interface SettingsScreenProps {
   onSignOut(): void;
 }
 
+const TOKEN_USAGE_TIMEFRAMES: Array<{ key: CodexTokenUsageTimeframe; label: string }> = [
+  { key: "1d", label: "1D" },
+  { key: "7d", label: "7D" },
+  { key: "all", label: "ALL" }
+];
+
+const TOKEN_USAGE_METRICS: Array<{ field: keyof CodexTokenUsageBucket; label: string }> = [
+  { field: "totalTokens", label: "TOTAL" },
+  { field: "inputTokens", label: "INPUT" },
+  { field: "outputTokens", label: "OUTPUT" },
+  { field: "cachedInputTokens", label: "CACHE" }
+];
+
 export function SettingsScreen({ api, onSignOut }: SettingsScreenProps) {
   const [requestLogProgress, setRequestLogProgress] = useState<number | null>(null);
   const [requestLogStatus, setRequestLogStatus] = useState<string | null>(null);
+  const [selectedTokenTimeframe, setSelectedTokenTimeframe] =
+    useState<CodexTokenUsageTimeframe>("1d");
+  const [tokenUsage, setTokenUsage] = useState<CodexTokenUsageSummary | null>(null);
+  const [tokenUsageStatus, setTokenUsageStatus] = useState<string | null>(null);
+  const [isLoadingTokenUsage, setIsLoadingTokenUsage] = useState(true);
   const isRequestingLog = requestLogProgress !== null;
+  const selectedTokenUsage = tokenUsage?.timeframes[selectedTokenTimeframe] ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setIsLoadingTokenUsage(true);
+    setTokenUsageStatus(null);
+    setTokenUsage(null);
+    api
+      .getCodexTokenUsage()
+      .then((summary) => {
+        if (!cancelled) {
+          setTokenUsage(summary);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setTokenUsageStatus(error instanceof Error ? error.message : "Unable to load tokens");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingTokenUsage(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   async function requestMobileControlLog() {
     if (isRequestingLog) {
@@ -66,6 +119,73 @@ export function SettingsScreen({ api, onSignOut }: SettingsScreenProps) {
         <Text accessibilityRole="header" style={styles.brand}>
           ABITAT
         </Text>
+        <View style={styles.tokenUsagePanel}>
+          <View style={styles.tokenUsageTopRow}>
+            <Text style={styles.tokenUsageTitle}>TOKENS</Text>
+            {isLoadingTokenUsage ? (
+              <ActivityIndicator color="rgba(255,255,255,0.68)" size="small" />
+            ) : (
+              <Text style={styles.tokenUsageState}>
+                {tokenUsageStatus ? "UNAVAILABLE" : "UPDATED"}
+              </Text>
+            )}
+          </View>
+          <View style={styles.tokenTimeframeControl}>
+            {TOKEN_USAGE_TIMEFRAMES.map((timeframe) => {
+              const selected = timeframe.key === selectedTokenTimeframe;
+              return (
+                <Pressable
+                  accessibilityLabel={`Show ${timeframe.label} token usage`}
+                  accessibilityRole="button"
+                  key={timeframe.key}
+                  onPress={() => setSelectedTokenTimeframe(timeframe.key)}
+                  style={({ pressed }) => [
+                    styles.tokenTimeframeButton,
+                    selected ? styles.tokenTimeframeButtonSelected : null,
+                    pressed ? styles.buttonPressed : null
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.tokenTimeframeText,
+                      selected ? styles.tokenTimeframeTextSelected : null
+                    ]}
+                  >
+                    {timeframe.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {selectedTokenUsage ? (
+            <View style={styles.tokenUsageGrid}>
+              {TOKEN_USAGE_METRICS.map((metric) => (
+                <View key={metric.field} style={styles.tokenUsageMetric}>
+                  <Text style={styles.tokenUsageMetricLabel}>{metric.label}</Text>
+                  <Text
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.78}
+                    numberOfLines={1}
+                    style={styles.tokenUsageMetricValue}
+                  >
+                    {formatTokenCount(selectedTokenUsage[metric.field])}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.tokenUsageEmptyState}>
+              <Text style={styles.tokenUsageEmptyText}>
+                {isLoadingTokenUsage ? "LOADING" : "NO TOKEN DATA"}
+              </Text>
+              {tokenUsageStatus ? (
+                <Text numberOfLines={2} style={styles.tokenUsageErrorText}>
+                  {tokenUsageStatus}
+                </Text>
+              ) : null}
+            </View>
+          )}
+        </View>
         <View style={styles.actions}>
           <Pressable
             accessibilityLabel="Request Mac diagnostics log"
@@ -187,7 +307,7 @@ const styles = StyleSheet.create({
   },
   settingsPanel: {
     alignItems: "center",
-    gap: 22,
+    gap: 20,
     justifyContent: "center",
     transform: [{ translateY: -18 }]
   },
@@ -196,6 +316,119 @@ const styles = StyleSheet.create({
     backgroundColor: "#000000",
     flex: 1,
     justifyContent: "center"
+  },
+  tokenTimeframeButton: {
+    alignItems: "center",
+    borderRadius: 4,
+    flex: 1,
+    height: 30,
+    justifyContent: "center"
+  },
+  tokenTimeframeButtonSelected: {
+    backgroundColor: "#f3f3f3"
+  },
+  tokenTimeframeControl: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 5,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 4,
+    padding: 3,
+    width: "100%"
+  },
+  tokenTimeframeText: {
+    color: "rgba(255,255,255,0.66)",
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0,
+    lineHeight: 14
+  },
+  tokenTimeframeTextSelected: {
+    color: "#050505"
+  },
+  tokenUsageEmptyState: {
+    alignItems: "center",
+    gap: 4,
+    minHeight: 70,
+    justifyContent: "center"
+  },
+  tokenUsageEmptyText: {
+    color: "rgba(255,255,255,0.58)",
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 0,
+    lineHeight: 16
+  },
+  tokenUsageErrorText: {
+    color: "rgba(255,255,255,0.42)",
+    fontSize: 10,
+    fontWeight: "400",
+    letterSpacing: 0,
+    lineHeight: 14,
+    maxWidth: 236,
+    textAlign: "center"
+  },
+  tokenUsageGrid: {
+    alignSelf: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    minHeight: 148,
+    width: 236
+  },
+  tokenUsageTopRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 20,
+    width: "100%"
+  },
+  tokenUsageMetric: {
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 4,
+    borderWidth: 1,
+    gap: 4,
+    height: 70,
+    justifyContent: "center",
+    paddingHorizontal: 8,
+    width: 112
+  },
+  tokenUsageMetricLabel: {
+    color: "rgba(255,255,255,0.46)",
+    fontSize: 9,
+    fontWeight: "600",
+    letterSpacing: 1.1,
+    lineHeight: 12
+  },
+  tokenUsageMetricValue: {
+    color: "#f3f3f3",
+    fontSize: 22,
+    fontWeight: "300",
+    letterSpacing: 0,
+    lineHeight: 27
+  },
+  tokenUsagePanel: {
+    borderColor: "rgba(255,255,255,0.16)",
+    borderRadius: 6,
+    borderWidth: 1,
+    gap: 12,
+    padding: 12,
+    width: 292
+  },
+  tokenUsageState: {
+    color: "rgba(255,255,255,0.46)",
+    fontSize: 9,
+    fontWeight: "600",
+    letterSpacing: 1.1,
+    lineHeight: 12
+  },
+  tokenUsageTitle: {
+    color: "#f3f3f3",
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 2,
+    lineHeight: 16
   }
 });
 
@@ -209,4 +442,24 @@ function formatBytes(size: number) {
   }
 
   return `${(size / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function formatTokenCount(value: number) {
+  if (value >= 1_000_000_000) {
+    return `${formatCompactToken(value / 1_000_000_000)}B`;
+  }
+
+  if (value >= 1_000_000) {
+    return `${formatCompactToken(value / 1_000_000)}M`;
+  }
+
+  if (value >= 10_000) {
+    return `${formatCompactToken(value / 1_000)}K`;
+  }
+
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function formatCompactToken(value: number) {
+  return (value >= 10 ? Math.round(value).toString() : value.toFixed(1)).replace(/\.0$/u, "");
 }

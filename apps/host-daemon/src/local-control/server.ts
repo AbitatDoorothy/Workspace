@@ -23,6 +23,10 @@ import {
   promptDiagnostics,
   type MobileControlDiagnosticsLogger
 } from "./diagnostics-log.js";
+import {
+  readCodexTokenUsageSummary,
+  type CodexTokenUsageSummary
+} from "./token-usage.js";
 
 export interface LocalCodexProjectSummary {
   id: string;
@@ -155,6 +159,7 @@ interface StartLocalControlServerInput {
   endpoint: string;
   port: number;
   store: LocalControlStore;
+  tokenUsageProvider?: () => Promise<CodexTokenUsageSummary>;
   transport: LocalControlTransport;
 }
 
@@ -308,6 +313,19 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
 
       if (method === "GET" && path === "/api/mobile/codex/models") {
         writeJson(response, 200, { models: await input.codex.listModelOptions() });
+        return;
+      }
+
+      if (method === "GET" && path === "/api/mobile/codex/token-usage") {
+        const tokenUsage = await (input.tokenUsageProvider ?? readCodexTokenUsageSummary)();
+        writeJson(response, 200, {
+          generatedAt: tokenUsage.generatedAt,
+          timeframes: {
+            "1d": tokenUsage.oneDay,
+            "7d": tokenUsage.sevenDays,
+            all: tokenUsage.allTime
+          }
+        });
         return;
       }
 
