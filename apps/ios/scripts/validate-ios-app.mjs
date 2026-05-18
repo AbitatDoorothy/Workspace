@@ -3,7 +3,9 @@ import { join } from "node:path";
 
 const requiredFiles = [
   "app.json",
+  "assets/icon.png",
   "index.ts",
+  "ios/Abitat/Images.xcassets/AppIcon.appiconset/App-Icon-1024x1024@1x.png",
   "src/App.tsx",
   "src/api/client.ts",
   "src/components/CodexModelControls.tsx",
@@ -16,7 +18,6 @@ const requiredFiles = [
   "src/screens/SplashScreen.tsx",
   "src/screens/WorkspaceScreen.tsx",
   "src/screens/ProjectsScreen.tsx",
-  "src/screens/ProjectDetailScreen.tsx",
   "src/screens/ConversationScreen.tsx",
   "src/screens/RemoteControlScreen.tsx",
   "src/screens/SettingsScreen.tsx"
@@ -71,6 +72,9 @@ if (!indexFile.includes("registerRootComponent(App)")) {
 }
 
 const appJson = JSON.parse(await readFile(join(process.cwd(), "app.json"), "utf8"));
+if (appJson.expo?.icon !== "./assets/icon.png") {
+  throw new Error("Expected app.json to use the bundled Abitat app icon");
+}
 const expoNotificationsPlugin = appJson.expo?.plugins?.find((plugin) =>
   Array.isArray(plugin) ? plugin[0] === "expo-notifications" : plugin === "expo-notifications"
 );
@@ -353,9 +357,11 @@ for (const expected of [
   "moveCachedConversationMessages",
   "messageCacheScope",
   "setMessages(cachedMessages)",
-  "latestSequenceRef.current = highestCachedMessageSequence(cachedMessages)",
+  "const latestSequence = highestCachedMessageSequence(cachedMessages)",
+  "latestSequenceRef.current = latestSequence",
+  "markCachedConversationRead(messageCacheScope, activeConversation.id, latestSequence)",
   "cachedAfterSequence > 0 ? cachedAfterSequence : undefined",
-  "void saveCachedConversationMessages(messageCacheScope, conversationId, nextMessages);"
+  "saveCachedConversationMessages(messageCacheScope, conversationId, nextMessages).then"
 ]) {
   if (!conversationScreen.includes(expected)) {
     throw new Error(
@@ -513,10 +519,6 @@ for (const expected of [
     throw new Error(`Expected ConversationScreen to start draft threads from chat: ${expected}`);
   }
 }
-const projectDetailScreen = await readFile(
-  join(process.cwd(), "src/screens/ProjectDetailScreen.tsx"),
-  "utf8"
-);
 const projectsScreen = await readFile(
   join(process.cwd(), "src/screens/ProjectsScreen.tsx"),
   "utf8"
@@ -544,12 +546,69 @@ for (const expected of [
   "BIG_DIPPER_STARS",
   "ABITAT",
   "PROJECTS",
-  "projects.map((project)",
+  "visibleProjects.map((project)",
+  "archivedProjects.map((project)",
   "project.name",
   'name="folder"',
   "styles.voidScreen",
   "styles.starField",
   "styles.projectRow",
+  "ARCHIVE_PROJECT_ID",
+  "ARCHIVE",
+  "archivedProjectIds",
+  "onArchiveProject(project.id)",
+  "onArchiveProject",
+  "recoverArchivedProject(project.id)",
+  "onRecoverProject(projectId)",
+  "ProjectSwipeRow",
+  "PanResponder.create",
+  "Animated.timing",
+  "shouldHandleArchiveSwipe",
+  "onSwipeActiveChange",
+  "scrollEnabled={!isProjectSwipeActive}",
+  "directionalLockEnabled",
+  "onMoveShouldSetPanResponderCapture",
+  "onPanResponderTerminationRequest: () => false",
+  "onShouldBlockNativeResponder: () => true",
+  "PROJECT_ARCHIVE_SWIPE_DISTANCE",
+  "PROJECT_ARCHIVE_EXIT_DISTANCE",
+  "styles.archivedProjectRow",
+  "initialConversationsByProject",
+  "onProjectConversationsLoaded",
+  "onProjectThread",
+  "onNewThread(project)",
+  'accessibilityLabel={`Create thread in ${project.name}`}',
+  'name="plus"',
+  "ThreadAttentionTone",
+  "projectConversations.map((conversation)",
+  "onPress={() => onProjectThread(project, conversation)}",
+  "styles.projectNewThreadButton",
+  "styles.projectThreadList",
+  "styles.projectThreadRow",
+  "styles.projectThreadRowPressed",
+  "styles.projectThreadStatusLight",
+  "threadTone !== \"idle\" ? (",
+  "styles.threadStatusRunning",
+  "styles.threadStatusUnread",
+  "collapsedProjectIds",
+  "toggleProjectFold(project.id)",
+  "projectThreadsCollapsed",
+  "accessibilityState={{ expanded: !projectThreadsCollapsed }}",
+  "expandedArchivedProjectIds",
+  "toggleArchivedProjectFold(project.id)",
+  "archivedProjectThreadsExpanded",
+  "accessibilityState={{ expanded: archivedProjectThreadsExpanded }}",
+  'accessibilityLabel={`Recover ${project.name} from archive`}',
+  'name="rotate-ccw"',
+  "styles.projectRecoverButton",
+  "isArchiveExpanded",
+  "setIsArchiveExpanded((current) => !current)",
+  "accessibilityState={{ expanded: isArchiveExpanded }}",
+  "isArchiveExpanded ? (",
+  "loadVisibleProjectConversations",
+  "projectThreadRefreshIdsKey",
+  "conversationRefreshInFlightProjectIdsRef",
+  "threadStatusTone",
   "onSettings(): void;",
   "paddingTop: 28",
   "fontSize: 24",
@@ -561,9 +620,32 @@ for (const expected of [
     throw new Error(`Expected ProjectsScreen to match the celestial project UI: ${expected}`);
   }
 }
-for (const removed of ["PanResponder", "SWIPE_BACK_DISTANCE", "onPanResponderRelease"]) {
+for (const removed of ["SWIPE_BACK_DISTANCE"]) {
   if (projectsScreen.includes(removed)) {
     throw new Error(`Expected ProjectsScreen to leave swipe navigation to App: ${removed}`);
+  }
+}
+for (const removed of [
+  "projectStatusTone",
+  "projectStatusAccessibilityLabel",
+  "projectStatusLight",
+  "projectStatusIdle",
+  "archiveStatusLight"
+]) {
+  if (projectsScreen.includes(removed)) {
+    throw new Error(`Expected ProjectsScreen to remove project LEDs and idle thread LEDs: ${removed}`);
+  }
+}
+for (const removed of [
+  "expandedProjectIds",
+  "toggleProjectExpansion",
+  "projectDisclosureButton",
+  "chevron-down",
+  "chevron-up",
+  "attentionThreadsForProject"
+]) {
+  if (projectsScreen.includes(removed)) {
+    throw new Error(`Expected ProjectsScreen to show project threads inline without dropdowns: ${removed}`);
   }
 }
 for (const removed of [
@@ -579,119 +661,6 @@ for (const removed of [
 ]) {
   if (projectsScreen.includes(removed)) {
     throw new Error(`Expected ProjectsScreen to remove old folder-grid UI: ${removed}`);
-  }
-}
-for (const expected of [
-  "initialConversations",
-  "onConversationsLoaded",
-  "setConversations(initialConversations)",
-  "conversationRefreshRequestIdRef",
-  "requestId === conversationRefreshRequestIdRef.current",
-  "conversationRefreshInFlightRef",
-  "if (conversationRefreshInFlightRef.current) {",
-  "isTransientConversationListError",
-  "console.warn(`[conversation-list] transient refresh failure:",
-  "return;"
-]) {
-  if (!projectDetailScreen.includes(expected)) {
-    throw new Error(
-      `Expected ProjectDetailScreen to keep warm conversation data while refreshing: ${expected}`
-    );
-  }
-}
-for (const expected of [
-  "refreshEnabled?: boolean;",
-  "refreshEnabled = true",
-  "if (!refreshEnabled) {",
-  "refreshEnabled]"
-]) {
-  if (!projectDetailScreen.includes(expected)) {
-    throw new Error(`Expected ProjectDetailScreen to suppress refresh in previews: ${expected}`);
-  }
-}
-if (!projectDetailScreen.includes("const timer = setInterval(loadConversations, 1800);")) {
-  throw new Error("Expected ProjectDetailScreen to refresh conversation statuses");
-}
-if (!projectDetailScreen.includes("onBack(): void")) {
-  throw new Error("Expected ProjectDetailScreen to accept a projects back callback");
-}
-if (!projectDetailScreen.includes('accessibilityLabel="Back to all projects"')) {
-  throw new Error("Expected ProjectDetailScreen to expose an accessible back-to-projects button");
-}
-if (!projectDetailScreen.includes("onPress={onBack}")) {
-  throw new Error("Expected ProjectDetailScreen back button to call onBack");
-}
-if (!projectDetailScreen.includes('accessibilityLabel="New Thread"')) {
-  throw new Error("Expected ProjectDetailScreen to expose a New Thread button");
-}
-if (!projectDetailScreen.includes("function startNewThread()")) {
-  throw new Error("Expected ProjectDetailScreen to enter a draft chat before starting Codex");
-}
-for (const expected of [
-  'import { Feather } from "@expo/vector-icons";',
-  "PROJECT_DETAIL_STARS",
-  "SafeAreaView",
-  "StatusBar",
-  "styles.projectScreen",
-  "styles.starField",
-  "styles.projectHeader",
-  "project.name",
-  "Threads",
-  "styles.threadRow",
-  "styles.threadStatusLight",
-  "isThreadRunningStatus(conversation.status)",
-  "styles.threadStatusRunning",
-  "styles.threadStatusIdle",
-  'conversation.prompt || "Untitled thread"',
-  "styles.newThreadDock",
-  "styles.newThreadButton"
-]) {
-  if (!projectDetailScreen.includes(expected)) {
-    throw new Error(`Expected ProjectDetailScreen to match the celestial thread UI: ${expected}`);
-  }
-}
-for (const expected of [
-  'projectName: {\n    color: "#ffffff",\n    flexShrink: 1,\n    fontSize: 22,',
-  'sectionTitle: {\n    color: "#ffffff",\n    fontSize: 18,',
-  "threadList: {\n    paddingBottom: 18,\n    paddingTop: 22",
-  'threadName: {\n    color: "#f7f7f7",\n    flex: 1,\n    fontSize: 18,',
-  'newThreadButtonText: {\n    color: "#f5f5f5",\n    fontSize: 18,'
-]) {
-  if (!projectDetailScreen.includes(expected)) {
-    throw new Error(
-      `Expected ProjectDetailScreen to use compact project-detail typography: ${expected}`
-    );
-  }
-}
-for (const removed of [
-  "import { Button, Header, StatusPill }",
-  "<Header",
-  "<StatusPill",
-  "sharedStyles.card",
-  "styles.backButton",
-  "styles.conversationStatusRow",
-  ">Conversations<"
-]) {
-  if (projectDetailScreen.includes(removed)) {
-    throw new Error(`Expected ProjectDetailScreen to remove old project detail UI: ${removed}`);
-  }
-}
-for (const removed of [
-  "CodexModelControls",
-  "TextInput",
-  "modelSettings: CodexMobileModelSettings",
-  "onModelSettingsChange(next: CodexMobileModelSettings): void",
-  "model: modelSettings.model",
-  "effort: modelSettings.effort",
-  "Start Codex"
-]) {
-  if (projectDetailScreen.includes(removed)) {
-    throw new Error(`Expected ProjectDetailScreen to remove pre-chat start controls: ${removed}`);
-  }
-}
-for (const expected of ['status: "draft"', 'prompt: ""', 'mobileOpenState: "phone_active"']) {
-  if (!projectDetailScreen.includes(expected)) {
-    throw new Error(`Expected ProjectDetailScreen draft conversation to include ${expected}`);
   }
 }
 if (
@@ -875,7 +844,6 @@ if (!appScreen.includes("SafeAreaProvider")) {
 for (const [fileName, fileContent] of [
   ["Screen.tsx", screenComponent],
   ["ProjectsScreen.tsx", projectsScreen],
-  ["ProjectDetailScreen.tsx", projectDetailScreen],
   ["ConversationScreen.tsx", conversationScreen]
 ]) {
   if (!fileContent.includes('from "react-native-safe-area-context"')) {
@@ -950,11 +918,16 @@ for (const expected of [
   "loadCachedNavigationData",
   "saveCachedProjects",
   "saveCachedProjectConversations",
+  "saveCachedArchivedProjectIds",
+  "recoverProject",
   "cachedProjects",
   "cachedConversationsByProject",
   "cachedConversationsByProjectRef",
+  "archivedProjectIdsRef",
+  "setArchivedProjectIds(new Set(data.archivedProjectIds))",
   "setCachedConversationsByProject(data.conversationsByProject)",
   "updateCachedConversations",
+  "next.delete(projectId)",
   'setRoute("conversation")'
 ]) {
   if (!appScreen.includes(expected)) {
@@ -983,6 +956,9 @@ for (const expected of [
   "saveCachedProjectConversations",
   "clearCachedNavigationData",
   "conversationsByProject",
+  "archivedProjectIds",
+  "saveCachedArchivedProjectIds",
+  "prepareCachedArchivedProjectIds",
   "prepareCachedConversations"
 ]) {
   if (!navigationCache.includes(expected)) {
@@ -991,6 +967,19 @@ for (const expected of [
 }
 if (!appScreen.includes("onBack={goBackOneLevel}")) {
   throw new Error("Expected App back actions to use the shared one-level route helper");
+}
+if (!appScreen.includes("onNewThread={(nextProject) => {")) {
+  throw new Error("Expected App to start new project threads from ProjectsScreen");
+}
+for (const removed of [
+  "ProjectDetailScreen",
+  'navigateToRoute("project")',
+  'routeName === "project"',
+  'return project ? "project" : "projects";'
+]) {
+  if (appScreen.includes(removed)) {
+    throw new Error(`Expected App to remove the intermediate project thread page: ${removed}`);
+  }
 }
 for (const expected of [
   'const [route, setRoute] = useState<RouteName>("projects");',
@@ -1272,6 +1261,8 @@ for (const expected of [
   "MESSAGE_CACHE_MAX_BYTES",
   "MessageCacheIndexEntry",
   "loadMessageCacheIndex",
+  "lastReadSequence",
+  "markCachedConversationRead",
   "upsertMessageCacheIndexEntry",
   "highestCachedMessageSequence",
   "messageCacheScopeFromPairing",

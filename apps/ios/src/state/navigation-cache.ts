@@ -4,10 +4,12 @@ import type { ConversationSummary, ProjectSummary } from "../types";
 
 export const NAVIGATION_CACHE_DIRECTORY = "navigation-cache";
 const NAVIGATION_CACHE_VERSION = 1;
+const ARCHIVED_PROJECTS_CACHE_VERSION = 1;
 const MAX_CACHED_PROJECTS = 500;
 const MAX_CACHED_CONVERSATIONS_PER_PROJECT = 500;
 
 export interface CachedNavigationData {
+  archivedProjectIds: string[];
   conversationsByProject: Record<string, ConversationSummary[]>;
   projects: ProjectSummary[];
 }
@@ -16,10 +18,19 @@ interface CachedNavigationDataFile extends CachedNavigationData {
   version: typeof NAVIGATION_CACHE_VERSION;
 }
 
+interface CachedArchivedProjectsFile {
+  projectIds: string[];
+  version: typeof ARCHIVED_PROJECTS_CACHE_VERSION;
+}
+
 export async function loadCachedNavigationData(scope: string): Promise<CachedNavigationData> {
   const path = await navigationCachePath(scope);
+  const archivedProjectIds = await loadCachedArchivedProjectIds(scope);
   if (!path) {
-    return emptyNavigationData();
+    return {
+      ...emptyNavigationData(),
+      archivedProjectIds
+    };
   }
 
   try {
@@ -30,15 +41,22 @@ export async function loadCachedNavigationData(scope: string): Promise<CachedNav
       !Array.isArray(parsed.projects) ||
       !isConversationMap(parsed.conversationsByProject)
     ) {
-      return emptyNavigationData();
+      return {
+        ...emptyNavigationData(),
+        archivedProjectIds
+      };
     }
 
     return {
+      archivedProjectIds,
       conversationsByProject: prepareCachedConversationsByProject(parsed.conversationsByProject),
       projects: prepareCachedProjects(parsed.projects)
     };
   } catch {
-    return emptyNavigationData();
+    return {
+      ...emptyNavigationData(),
+      archivedProjectIds
+    };
   }
 }
 
@@ -63,6 +81,23 @@ export async function saveCachedProjectConversations(
       [projectId]: prepareCachedConversations(conversations)
     }
   });
+}
+
+export async function saveCachedArchivedProjectIds(
+  scope: string,
+  projectIds: ReadonlySet<string> | string[]
+) {
+  const path = await archivedProjectsCachePath(scope);
+  if (!path) {
+    return;
+  }
+
+  await ensureNavigationCacheDirectory();
+  const body: CachedArchivedProjectsFile = {
+    projectIds: prepareCachedArchivedProjectIds(projectIds),
+    version: ARCHIVED_PROJECTS_CACHE_VERSION
+  };
+  await FileSystem.writeAsStringAsync(path, JSON.stringify(body));
 }
 
 export async function clearCachedNavigationData() {
@@ -102,6 +137,21 @@ export function prepareCachedConversations(conversations: ConversationSummary[])
     .slice(0, MAX_CACHED_CONVERSATIONS_PER_PROJECT);
 }
 
+export function prepareCachedArchivedProjectIds(projectIds: unknown) {
+  if (!Array.isArray(projectIds) && !(projectIds instanceof Set)) {
+    return [];
+  }
+
+  return [
+    ...new Set(
+      [...projectIds].filter(
+        (projectId): projectId is string =>
+          typeof projectId === "string" && projectId.trim().length > 0
+      )
+    )
+  ];
+}
+
 async function saveCachedNavigationData(scope: string, data: CachedNavigationData) {
   const path = await navigationCachePath(scope);
   if (!path) {
@@ -110,6 +160,7 @@ async function saveCachedNavigationData(scope: string, data: CachedNavigationDat
 
   await ensureNavigationCacheDirectory();
   const body: CachedNavigationDataFile = {
+    archivedProjectIds: prepareCachedArchivedProjectIds(data.archivedProjectIds),
     conversationsByProject: prepareCachedConversationsByProject(data.conversationsByProject),
     projects: prepareCachedProjects(data.projects),
     version: NAVIGATION_CACHE_VERSION
@@ -138,6 +189,34 @@ async function navigationCachePath(scope: string) {
   return `${directory}${safeCachePathPart(scope)}.json`;
 }
 
+async function archivedProjectsCachePath(scope: string) {
+  const directory = navigationCacheDirectory();
+  if (!directory) {
+    return null;
+  }
+
+  return `${directory}${safeCachePathPart(scope)}--archived-projects.json`;
+}
+
+async function loadCachedArchivedProjectIds(scope: string) {
+  const path = await archivedProjectsCachePath(scope);
+  if (!path) {
+    return [];
+  }
+
+  try {
+    const raw = await FileSystem.readAsStringAsync(path);
+    const parsed = JSON.parse(raw) as Partial<CachedArchivedProjectsFile>;
+    if (parsed.version !== ARCHIVED_PROJECTS_CACHE_VERSION) {
+      return [];
+    }
+
+    return prepareCachedArchivedProjectIds(parsed.projectIds);
+  } catch {
+    return [];
+  }
+}
+
 function navigationCacheDirectory() {
   return FileSystem.documentDirectory
     ? `${FileSystem.documentDirectory}${NAVIGATION_CACHE_DIRECTORY}/`
@@ -155,6 +234,7 @@ async function ensureNavigationCacheDirectory() {
 
 function emptyNavigationData(): CachedNavigationData {
   return {
+    archivedProjectIds: [],
     conversationsByProject: {},
     projects: []
   };

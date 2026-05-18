@@ -21,6 +21,8 @@ interface CachedConversationMessageIndex {
 
 export interface MessageCacheIndexEntry {
   conversationId: string;
+  lastReadAt?: string;
+  lastReadSequence?: number;
   latestSequence: number;
   lastSyncedAt: string;
   projectId?: string;
@@ -176,6 +178,33 @@ export async function upsertMessageCacheIndexEntry(scope: string, entry: Message
   await saveMessageCacheIndex(scope, nextEntries);
 }
 
+export async function markCachedConversationRead(
+  scope: string,
+  conversationId: string,
+  latestSequence: number
+) {
+  const entries = await loadMessageCacheIndex(scope);
+  const existing = entries.find((candidate) => candidate.conversationId === conversationId);
+  const nextReadSequence = Math.max(
+    0,
+    Math.floor(latestSequence),
+    existing?.lastReadSequence ?? 0
+  );
+
+  await upsertMessageCacheIndexEntry(scope, {
+    conversationId,
+    lastReadAt: new Date().toISOString(),
+    lastReadSequence: nextReadSequence,
+    lastSyncedAt: existing?.lastSyncedAt ?? new Date().toISOString(),
+    latestSequence: Math.max(existing?.latestSequence ?? 0, nextReadSequence),
+    ...(existing?.projectId ? { projectId: existing.projectId } : {}),
+    ...(existing?.prompt ? { prompt: existing.prompt } : {}),
+    ...(existing?.status ? { status: existing.status } : {}),
+    ...(existing?.updatedAt ? { updatedAt: existing.updatedAt } : {}),
+    ...(existing?.workspaceId ? { workspaceId: existing.workspaceId } : {})
+  });
+}
+
 async function saveMessageCacheIndex(scope: string, entries: MessageCacheIndexEntry[]) {
   const path = await messageCacheIndexPath(scope);
   if (!path) {
@@ -259,6 +288,10 @@ function prepareMessageCacheIndexEntries(entries: MessageCacheIndexEntry[]) {
 
     byConversationId.set(entry.conversationId, {
       conversationId: entry.conversationId,
+      ...(entry.lastReadAt ? { lastReadAt: entry.lastReadAt } : {}),
+      ...(Number.isFinite(entry.lastReadSequence)
+        ? { lastReadSequence: Math.max(0, Math.floor(entry.lastReadSequence ?? 0)) }
+        : {}),
       latestSequence: Math.max(0, Math.floor(entry.latestSequence)),
       lastSyncedAt: entry.lastSyncedAt,
       ...(entry.projectId ? { projectId: entry.projectId } : {}),

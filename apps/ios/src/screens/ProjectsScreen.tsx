@@ -1,21 +1,48 @@
 import { Feather } from "@expo/vector-icons";
-import { useEffect, useState } from "react";
-import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import {
+  Animated,
+  Easing,
+  PanResponder,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  type PanResponderGestureState,
+  View
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { ApiClient } from "../api/client";
+import { loadMessageCacheIndex, type MessageCacheIndexEntry } from "../state/message-cache";
 import { colors } from "../theme";
-import type { ProjectSummary } from "../types";
+import type { ConversationSummary, ProjectSummary } from "../types";
 
 interface ProjectsScreenProps {
   api: ApiClient;
+  archivedProjectIds: ReadonlySet<string>;
+  initialConversationsByProject?: Record<string, ConversationSummary[]>;
   initialProjects?: ProjectSummary[];
   isConnected: boolean;
-  onProject(project: ProjectSummary): void;
+  messageCacheScope: string;
+  onArchiveProject(projectId: string): void;
+  onNewThread(project: ProjectSummary): void;
+  onProjectThread(project: ProjectSummary, conversation: ConversationSummary): void;
+  onRecoverProject(projectId: string): void;
+  onProjectConversationsLoaded?(projectId: string, conversations: ConversationSummary[]): void;
   onProjectsLoaded?(projects: ProjectSummary[]): void;
   onSettings(): void;
   refreshEnabled?: boolean;
 }
+
+type ThreadAttentionTone = "idle" | "running" | "unread";
+
+const ARCHIVE_PROJECT_ID = "archive";
+const PROJECT_ARCHIVE_SWIPE_DISTANCE = 64;
+const PROJECT_ARCHIVE_EXIT_DISTANCE = 420;
+const PROJECT_ARCHIVE_SWIPE_VERTICAL_TOLERANCE = 56;
 
 const CELESTIAL_STARS = [
   { left: "4%", opacity: 0.22, size: 1, top: "8%" },
@@ -60,19 +87,101 @@ const BIG_DIPPER_STARS = [
 
 export function ProjectsScreen({
   api,
+  archivedProjectIds,
+  initialConversationsByProject = {},
   initialProjects = [],
   isConnected,
-  onProject,
+  messageCacheScope,
+  onArchiveProject,
+  onNewThread,
+  onProjectThread,
+  onRecoverProject,
+  onProjectConversationsLoaded,
   onProjectsLoaded,
   onSettings,
   refreshEnabled = true
 }: ProjectsScreenProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>(initialProjects);
+  const [conversationsByProject, setConversationsByProject] = useState<
+    Record<string, ConversationSummary[]>
+  >(initialConversationsByProject);
+  const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(() => new Set());
+  const [expandedArchivedProjectIds, setExpandedArchivedProjectIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
+  const [isProjectSwipeActive, setIsProjectSwipeActive] = useState(false);
+  const [loadingProjectIds, setLoadingProjectIds] = useState<Set<string>>(() => new Set());
+  const [messageCacheIndex, setMessageCacheIndex] = useState<MessageCacheIndexEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const conversationRefreshInFlightProjectIdsRef = useRef(new Set<string>());
+  const visibleProjects = projects.filter((project) => !archivedProjectIds.has(project.id));
+  const archivedProjects = projects.filter((project) => archivedProjectIds.has(project.id));
+  const projectThreadRefreshIdsKey = projects.map((project) => project.id).join("\u0001");
 
   useEffect(() => {
     setProjects(initialProjects);
   }, [initialProjects]);
+
+  useEffect(() => {
+    setConversationsByProject(initialConversationsByProject);
+  }, [initialConversationsByProject]);
+
+  useEffect(() => {
+    if (!refreshEnabled) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadReadState() {
+      try {
+        const entries = await loadMessageCacheIndex(messageCacheScope);
+        if (!cancelled) {
+          setMessageCacheIndex(entries);
+        }
+      } catch (caught) {
+        console.warn(`[message-cache] unable to load project read state: ${errorMessage(caught)}`);
+      }
+    }
+
+    void loadReadState();
+    const timer = setInterval(loadReadState, 3500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [messageCacheScope, refreshEnabled]);
+
+  const loadProjectConversations = useCallback(
+    async (projectId: string) => {
+      if (conversationRefreshInFlightProjectIdsRef.current.has(projectId)) {
+        return;
+      }
+
+      conversationRefreshInFlightProjectIdsRef.current.add(projectId);
+      setLoadingProjectIds((current) => new Set(current).add(projectId));
+      try {
+        const conversations = await api.listConversations(projectId);
+        setConversationsByProject((current) => ({
+          ...current,
+          [projectId]: conversations
+        }));
+        onProjectConversationsLoaded?.(projectId, conversations);
+        setError(null);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Unable to load project threads");
+      } finally {
+        conversationRefreshInFlightProjectIdsRef.current.delete(projectId);
+        setLoadingProjectIds((current) => {
+          const next = new Set(current);
+          next.delete(projectId);
+          return next;
+        });
+      }
+    },
+    [api, onProjectConversationsLoaded]
+  );
 
   useEffect(() => {
     if (!refreshEnabled) {
@@ -106,6 +215,64 @@ export function ProjectsScreen({
     };
   }, [api, onProjectsLoaded, refreshEnabled]);
 
+  useEffect(() => {
+    const projectIds = projectThreadRefreshIdsKey
+      ? projectThreadRefreshIdsKey.split("\u0001")
+      : [];
+    if (!refreshEnabled || projectIds.length === 0) {
+      return;
+    }
+
+    function loadVisibleProjectConversations() {
+      for (const projectId of projectIds) {
+        void loadProjectConversations(projectId);
+      }
+    }
+
+    loadVisibleProjectConversations();
+    const timer = setInterval(loadVisibleProjectConversations, 5000);
+
+    return () => clearInterval(timer);
+  }, [loadProjectConversations, projectThreadRefreshIdsKey, refreshEnabled]);
+
+  function toggleProjectFold(projectId: string) {
+    setCollapsedProjectIds((current) => {
+      const next = new Set(current);
+      if (next.has(projectId)) {
+        next.delete(projectId);
+      } else {
+        next.add(projectId);
+      }
+      return next;
+    });
+  }
+
+  function toggleArchivedProjectFold(projectId: string) {
+    setExpandedArchivedProjectIds((current) => {
+      const next = new Set(current);
+      if (next.has(projectId)) {
+        next.delete(projectId);
+      } else {
+        next.add(projectId);
+      }
+      return next;
+    });
+  }
+
+  function recoverArchivedProject(projectId: string) {
+    setExpandedArchivedProjectIds((current) => {
+      const next = new Set(current);
+      next.delete(projectId);
+      return next;
+    });
+    setCollapsedProjectIds((current) => {
+      const next = new Set(current);
+      next.delete(projectId);
+      return next;
+    });
+    onRecoverProject(projectId);
+  }
+
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.voidScreen}>
       <StatusBar barStyle="light-content" />
@@ -135,6 +302,8 @@ export function ProjectsScreen({
 
       <ScrollView
         contentContainerStyle={styles.content}
+        directionalLockEnabled
+        scrollEnabled={!isProjectSwipeActive}
         showsVerticalScrollIndicator={false}
         style={styles.scroll}
       >
@@ -163,23 +332,140 @@ export function ProjectsScreen({
         <View style={styles.projectsSection}>
           <Text style={styles.sectionTitle}>PROJECTS</Text>
           <View style={styles.projectList}>
-            {projects.map((project) => (
+            {visibleProjects.map((project) => {
+              const projectConversations = conversationsForProject(
+                project,
+                conversationsByProject,
+                messageCacheIndex
+              );
+              const isLoadingProject = loadingProjectIds.has(project.id);
+              const projectThreadsCollapsed = collapsedProjectIds.has(project.id);
+
+              return (
+                <View key={project.id} style={styles.projectGroup}>
+                  <ProjectSwipeRow
+                    accessibilityLabel={`${projectThreadsCollapsed ? "Expand" : "Fold"} ${project.name} threads`}
+                    accessibilityState={{ expanded: !projectThreadsCollapsed }}
+                    onArchive={() => onArchiveProject(project.id)}
+                    onPress={() => toggleProjectFold(project.id)}
+                    onSwipeActiveChange={setIsProjectSwipeActive}
+                  >
+                    <Feather name="folder" size={24} color="#f2f2f2" />
+                    <Text numberOfLines={1} style={styles.projectName}>
+                      {project.name}
+                    </Text>
+                    <Pressable
+                      accessibilityLabel={`Create thread in ${project.name}`}
+                      accessibilityRole="button"
+                      hitSlop={10}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        onNewThread(project);
+                      }}
+                      style={({ pressed }) => [
+                        styles.projectNewThreadButton,
+                        pressed ? styles.projectNewThreadButtonPressed : null
+                      ]}
+                    >
+                      <Feather color="rgba(255,255,255,0.84)" name="plus" size={19} />
+                    </Pressable>
+                  </ProjectSwipeRow>
+
+                  {!projectThreadsCollapsed ? (
+                    <ProjectThreadList
+                      isLoadingProject={isLoadingProject}
+                      messageCacheIndex={messageCacheIndex}
+                      onProjectThread={onProjectThread}
+                      project={project}
+                      projectConversations={projectConversations}
+                    />
+                  ) : null}
+                </View>
+              );
+            })}
+            <View key={ARCHIVE_PROJECT_ID} style={styles.projectGroup}>
               <Pressable
-                accessibilityLabel={`Open ${project.name}`}
+                accessibilityLabel="Toggle archive projects"
                 accessibilityRole="button"
-                key={project.id}
-                onPress={() => onProject(project)}
+                accessibilityState={{ expanded: isArchiveExpanded }}
+                onPress={() => setIsArchiveExpanded((current) => !current)}
                 style={({ pressed }) => [
                   styles.projectRow,
                   pressed ? styles.projectRowPressed : null
                 ]}
               >
-                <Feather name="folder" size={24} color="#f2f2f2" />
+                <Feather name="archive" size={24} color="#d1d5db" />
                 <Text numberOfLines={1} style={styles.projectName}>
-                  {project.name}
+                  ARCHIVE
                 </Text>
               </Pressable>
-            ))}
+
+              {isArchiveExpanded ? (
+                <View style={styles.archivedProjectList}>
+                  {archivedProjects.length > 0 ? (
+                    archivedProjects.map((project) => {
+                    const projectConversations = conversationsForProject(
+                      project,
+                      conversationsByProject,
+                      messageCacheIndex
+                    );
+                    const isLoadingProject = loadingProjectIds.has(project.id);
+                    const archivedProjectThreadsExpanded = expandedArchivedProjectIds.has(
+                      project.id
+                    );
+
+                    return (
+                      <View key={project.id} style={styles.archivedProjectGroup}>
+                        <Pressable
+                          accessibilityLabel={`${
+                            archivedProjectThreadsExpanded ? "Fold" : "Expand"
+                          } archived ${project.name} threads`}
+                          accessibilityRole="button"
+                          accessibilityState={{ expanded: archivedProjectThreadsExpanded }}
+                          onPress={() => toggleArchivedProjectFold(project.id)}
+                          style={({ pressed }) => [
+                            styles.archivedProjectRow,
+                            pressed ? styles.projectThreadRowPressed : null
+                          ]}
+                        >
+                          <Feather color="rgba(255,255,255,0.66)" name="folder" size={15} />
+                          <Text numberOfLines={1} style={styles.projectThreadName}>
+                            {project.name}
+                          </Text>
+                          <Pressable
+                            accessibilityLabel={`Recover ${project.name} from archive`}
+                            accessibilityRole="button"
+                            hitSlop={10}
+                            onPress={(event) => {
+                              event.stopPropagation();
+                              recoverArchivedProject(project.id);
+                            }}
+                            style={({ pressed }) => [
+                              styles.projectRecoverButton,
+                              pressed ? styles.projectRecoverButtonPressed : null
+                            ]}
+                          >
+                            <Feather color="rgba(255,255,255,0.76)" name="rotate-ccw" size={15} />
+                          </Pressable>
+                        </Pressable>
+                        {archivedProjectThreadsExpanded ? (
+                          <ProjectThreadList
+                            isLoadingProject={isLoadingProject}
+                            messageCacheIndex={messageCacheIndex}
+                            onProjectThread={onProjectThread}
+                            project={project}
+                            projectConversations={projectConversations}
+                          />
+                        ) : null}
+                      </View>
+                    );
+                  })
+                  ) : (
+                    <Text style={styles.projectThreadEmptyText}>NO ARCHIVED PROJECTS</Text>
+                  )}
+                </View>
+              ) : null}
+            </View>
           </View>
         </View>
 
@@ -244,7 +530,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between"
   },
   projectList: {
-    gap: 22
+    gap: 18
   },
   projectName: {
     color: "#f7f7f7",
@@ -254,15 +540,64 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
     lineHeight: 27
   },
+  projectNewThreadButton: {
+    alignItems: "center",
+    borderColor: "rgba(255,255,255,0.18)",
+    borderRadius: 999,
+    borderWidth: 1,
+    height: 32,
+    justifyContent: "center",
+    width: 32
+  },
+  projectNewThreadButtonPressed: {
+    opacity: 0.62,
+    transform: [{ scale: 0.94 }]
+  },
+  projectRecoverButton: {
+    alignItems: "center",
+    height: 28,
+    justifyContent: "center",
+    width: 28
+  },
+  projectRecoverButtonPressed: {
+    opacity: 0.62,
+    transform: [{ scale: 0.94 }]
+  },
+  projectGroup: {
+    gap: 10
+  },
   projectRow: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 20,
+    gap: 14,
     minHeight: 32
   },
   projectRowPressed: {
     opacity: 0.62,
     transform: [{ scale: 0.99 }]
+  },
+  projectSwipeArchiveHint: {
+    alignItems: "center",
+    bottom: 0,
+    justifyContent: "center",
+    position: "absolute",
+    right: 0,
+    top: 0,
+    width: 74
+  },
+  projectSwipeBand: {
+    backgroundColor: "#000000"
+  },
+  projectSwipeShell: {
+    overflow: "hidden"
+  },
+  threadStatusRunning: {
+    backgroundColor: "#ff4d4d",
+    shadowColor: "#ff4d4d"
+  },
+  threadStatusUnread: {
+    backgroundColor: "#38bdf8",
+    shadowColor: "#38bdf8"
   },
   projectsSection: {
     gap: 24,
@@ -291,6 +626,61 @@ const styles = StyleSheet.create({
     opacity: 0.62,
     transform: [{ scale: 0.98 }]
   },
+  archivedProjectGroup: {
+    gap: 8
+  },
+  archivedProjectList: {
+    gap: 16,
+    marginLeft: 33,
+    paddingLeft: 20,
+    paddingVertical: 2
+  },
+  projectThreadEmptyText: {
+    color: "rgba(255,255,255,0.42)",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    lineHeight: 14
+  },
+  projectThreadList: {
+    borderLeftColor: "rgba(255,255,255,0.1)",
+    borderLeftWidth: 1,
+    gap: 8,
+    marginLeft: 33,
+    paddingLeft: 20,
+    paddingVertical: 2
+  },
+  projectThreadName: {
+    color: "rgba(255,255,255,0.78)",
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "400",
+    letterSpacing: 0,
+    lineHeight: 17
+  },
+  projectThreadRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 24
+  },
+  archivedProjectRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 28
+  },
+  projectThreadRowPressed: {
+    opacity: 0.64,
+    transform: [{ scale: 0.99 }]
+  },
+  projectThreadStatusLight: {
+    borderRadius: 999,
+    height: 8,
+    shadowOpacity: 0.72,
+    shadowRadius: 8,
+    width: 8
+  },
   star: {
     backgroundColor: "#ffffff",
     borderRadius: 999,
@@ -305,3 +695,256 @@ const styles = StyleSheet.create({
     flex: 1
   }
 });
+
+function ProjectSwipeRow({
+  accessibilityLabel,
+  accessibilityState,
+  children,
+  onArchive,
+  onPress,
+  onSwipeActiveChange
+}: {
+  accessibilityLabel: string;
+  accessibilityState: { expanded: boolean };
+  children: ReactNode;
+  onArchive(): void;
+  onPress(): void;
+  onSwipeActiveChange(active: boolean): void;
+}) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const isSwipeResponderRef = useRef(false);
+  const opacity = translateX.interpolate({
+    extrapolate: "clamp",
+    inputRange: [-PROJECT_ARCHIVE_EXIT_DISTANCE, -PROJECT_ARCHIVE_SWIPE_DISTANCE, 0],
+    outputRange: [0, 0.9, 1]
+  });
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_event, gesture) => shouldHandleArchiveSwipe(gesture),
+      onMoveShouldSetPanResponderCapture: (_event, gesture) => shouldHandleArchiveSwipe(gesture),
+      onPanResponderGrant: () => {
+        isSwipeResponderRef.current = true;
+        onSwipeActiveChange(true);
+        translateX.stopAnimation();
+      },
+      onPanResponderMove: (_event, gesture) => {
+        translateX.setValue(Math.min(0, Math.max(-PROJECT_ARCHIVE_EXIT_DISTANCE, gesture.dx)));
+      },
+      onPanResponderRelease: (_event, gesture) => {
+        if (
+          gesture.dx <= -PROJECT_ARCHIVE_SWIPE_DISTANCE &&
+          Math.abs(gesture.dy) <= PROJECT_ARCHIVE_SWIPE_VERTICAL_TOLERANCE
+        ) {
+          Animated.timing(translateX, {
+            duration: 220,
+            easing: Easing.in(Easing.cubic),
+            toValue: -PROJECT_ARCHIVE_EXIT_DISTANCE,
+            useNativeDriver: true
+          }).start(({ finished }) => {
+            if (finished) {
+              isSwipeResponderRef.current = false;
+              onSwipeActiveChange(false);
+              onArchive();
+            } else {
+              resetProjectSwipe(translateX, isSwipeResponderRef, onSwipeActiveChange);
+            }
+          });
+          return;
+        }
+
+        resetProjectSwipe(translateX, isSwipeResponderRef, onSwipeActiveChange);
+      },
+      onPanResponderTerminate: () => {
+        resetProjectSwipe(translateX, isSwipeResponderRef, onSwipeActiveChange);
+      },
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true
+    })
+  ).current;
+
+  return (
+    <View style={styles.projectSwipeShell}>
+      <View pointerEvents="none" style={styles.projectSwipeArchiveHint}>
+        <Feather color="rgba(255,255,255,0.46)" name="archive" size={17} />
+      </View>
+      <Animated.View
+        {...panResponder.panHandlers}
+        style={[
+          styles.projectSwipeBand,
+          {
+            opacity,
+            transform: [{ translateX }]
+          }
+        ]}
+      >
+        <Pressable
+          accessibilityLabel={accessibilityLabel}
+          accessibilityRole="button"
+          accessibilityState={accessibilityState}
+          onPress={() => {
+            if (isSwipeResponderRef.current) {
+              return;
+            }
+
+            onPress();
+          }}
+          style={({ pressed }) => [
+            styles.projectRow,
+            pressed ? styles.projectRowPressed : null
+          ]}
+        >
+          {children}
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
+}
+
+function ProjectThreadList({
+  isLoadingProject,
+  messageCacheIndex,
+  onProjectThread,
+  project,
+  projectConversations
+}: {
+  isLoadingProject: boolean;
+  messageCacheIndex: MessageCacheIndexEntry[];
+  onProjectThread(project: ProjectSummary, conversation: ConversationSummary): void;
+  project: ProjectSummary;
+  projectConversations: ConversationSummary[];
+}) {
+  return (
+    <View style={styles.projectThreadList}>
+      {isLoadingProject && projectConversations.length === 0 ? (
+        <Text style={styles.projectThreadEmptyText}>SYNCING THREADS</Text>
+      ) : projectConversations.length > 0 ? (
+        projectConversations.map((conversation) => {
+          const threadTone = threadStatusTone(conversation, messageCacheIndex);
+          return (
+            <Pressable
+              accessibilityLabel={`Open ${conversation.prompt || "Untitled thread"}`}
+              accessibilityRole="button"
+              key={conversation.id}
+              onPress={() => onProjectThread(project, conversation)}
+              style={({ pressed }) => [
+                styles.projectThreadRow,
+                pressed ? styles.projectThreadRowPressed : null
+              ]}
+            >
+              {threadTone !== "idle" ? (
+                <View
+                  accessibilityLabel={threadStatusAccessibilityLabel(threadTone)}
+                  style={[
+                    styles.projectThreadStatusLight,
+                    threadTone === "running"
+                      ? styles.threadStatusRunning
+                      : styles.threadStatusUnread
+                  ]}
+                />
+              ) : null}
+              <Text numberOfLines={1} style={styles.projectThreadName}>
+                {conversation.prompt || "Untitled thread"}
+              </Text>
+            </Pressable>
+          );
+        })
+      ) : (
+        <Text style={styles.projectThreadEmptyText}>NO THREADS</Text>
+      )}
+    </View>
+  );
+}
+
+function shouldHandleArchiveSwipe(gesture: PanResponderGestureState) {
+  return (
+    gesture.dx < -4 &&
+    Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.05 &&
+    Math.abs(gesture.dy) <= PROJECT_ARCHIVE_SWIPE_VERTICAL_TOLERANCE
+  );
+}
+
+function resetProjectSwipe(
+  translateX: Animated.Value,
+  isSwipeResponderRef: { current: boolean },
+  onSwipeActiveChange: (active: boolean) => void
+) {
+  Animated.spring(translateX, {
+    friction: 18,
+    tension: 170,
+    toValue: 0,
+    useNativeDriver: true
+  }).start(() => {
+    isSwipeResponderRef.current = false;
+    onSwipeActiveChange(false);
+  });
+}
+
+function conversationsForProject(
+  project: ProjectSummary,
+  conversationsByProject: Record<string, ConversationSummary[]>,
+  messageCacheIndex: MessageCacheIndexEntry[]
+) {
+  const byId = new Map<string, ConversationSummary>();
+
+  for (const entry of messageCacheIndex) {
+    if (entry.projectId !== project.id) {
+      continue;
+    }
+
+    byId.set(entry.conversationId, {
+      id: entry.conversationId,
+      projectId: project.id,
+      prompt: entry.prompt ?? "Codex thread",
+      source: project.source,
+      status: entry.status ?? "approved",
+      type: "codex_app",
+      updatedAt: entry.updatedAt,
+      workspaceId: entry.workspaceId ?? project.workspaceId,
+      worktreePath: project.hostLocalPath ?? null
+    });
+  }
+
+  for (const conversation of conversationsByProject[project.id] ?? []) {
+    byId.set(conversation.id, conversation);
+  }
+
+  return [...byId.values()].sort((left, right) =>
+    (right.updatedAt ?? right.createdAt ?? "").localeCompare(left.updatedAt ?? left.createdAt ?? "")
+  );
+}
+
+function threadStatusTone(
+  conversation: ConversationSummary,
+  messageCacheIndex: MessageCacheIndexEntry[]
+): ThreadAttentionTone {
+  if (isThreadRunningStatus(conversation.status)) {
+    return "running";
+  }
+
+  return isConversationUnread(conversation.id, messageCacheIndex) ? "unread" : "idle";
+}
+
+function isThreadRunningStatus(status: string) {
+  return ["awaiting_approval", "committing", "preparing", "queued", "running"].includes(status);
+}
+
+function isConversationUnread(
+  conversationId: string,
+  messageCacheIndex: MessageCacheIndexEntry[]
+) {
+  const entry = messageCacheIndex.find((candidate) => candidate.conversationId === conversationId);
+  return Boolean(entry && entry.latestSequence > (entry.lastReadSequence ?? 0));
+}
+
+function threadStatusAccessibilityLabel(tone: Exclude<ThreadAttentionTone, "idle">) {
+  if (tone === "running") {
+    return "Thread is running";
+  }
+
+  return "Thread has unread messages";
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}

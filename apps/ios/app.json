@@ -5,7 +5,10 @@
     "scheme": "abitat",
     "version": "0.1.0",
     "orientation": "portrait",
-    "platforms": ["ios"],
+    "platforms": [
+      "ios"
+    ],
+    "icon": "./assets/icon.png",
     "ios": {
       "bundleIdentifier": "io.abitat.workspace",
       "supportsTablet": false,
@@ -15,9 +18,12 @@
           "NSAllowsLocalNetworking": true
         },
         "NSCameraUsageDescription": "Abitat scans the pairing QR code shown on your Mac.",
-        "UIBackgroundModes": ["fetch", "remote-notification"]
+        "UIBackgroundModes": [
+          "fetch",
+          "remote-notification"
+        ]
       },
-      "buildNumber": "16"
+      "buildNumber": "17"
     },
     "plugins": [
       "expo-secure-store",

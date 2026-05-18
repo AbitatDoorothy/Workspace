@@ -2,7 +2,6 @@ export type RouteName =
   | "pairing"
   | "workspace"
   | "projects"
-  | "project"
   | "conversation"
   | "settings";
 

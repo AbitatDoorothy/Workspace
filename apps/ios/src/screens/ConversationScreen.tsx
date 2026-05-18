@@ -33,6 +33,7 @@ import { CodexModelControls } from "../components/CodexModelControls";
 import { rememberRunningConversation } from "../notifications/thread-completion-notifications";
 import {
   loadCachedConversationMessages,
+  markCachedConversationRead,
   moveCachedConversationMessages,
   saveCachedConversationMessages
 } from "../state/message-cache";
@@ -267,7 +268,9 @@ export function ConversationScreen({
 
       loadedCachedConversationIdRef.current = activeConversation.id;
       setMessages(cachedMessages);
-      latestSequenceRef.current = highestCachedMessageSequence(cachedMessages);
+      const latestSequence = highestCachedMessageSequence(cachedMessages);
+      latestSequenceRef.current = latestSequence;
+      void markCachedConversationRead(messageCacheScope, activeConversation.id, latestSequence);
       pendingAutoScrollRef.current = true;
       setMessageCacheLoadKey((current) => current + 1);
     }
@@ -2548,7 +2551,10 @@ function persistMergedConversationMessages(
   conversationId: string,
   nextMessages: ConversationMessage[]
 ) {
-  void saveCachedConversationMessages(messageCacheScope, conversationId, nextMessages);
+  const latestSequence = highestCachedMessageSequence(nextMessages);
+  void saveCachedConversationMessages(messageCacheScope, conversationId, nextMessages).then(() =>
+    markCachedConversationRead(messageCacheScope, conversationId, latestSequence)
+  );
   return nextMessages;
 }
 

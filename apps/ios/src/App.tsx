@@ -13,7 +13,6 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { PairingScreen } from "./screens/PairingScreen";
 import { SplashScreen } from "./screens/SplashScreen";
 import { ProjectsScreen } from "./screens/ProjectsScreen";
-import { ProjectDetailScreen } from "./screens/ProjectDetailScreen";
 import { ConversationScreen } from "./screens/ConversationScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import {
@@ -24,6 +23,7 @@ import { useMessagePreloader } from "./state/message-preloader";
 import { useMobileStore } from "./state/mobile-store";
 import {
   loadCachedNavigationData,
+  saveCachedArchivedProjectIds,
   saveCachedProjectConversations,
   saveCachedProjects
 } from "./state/navigation-cache";
@@ -60,7 +60,6 @@ function AppContent() {
   const [hasStarted, setHasStarted] = useState(false);
   const [route, setRoute] = useState<RouteName>("projects");
   const [activeRouteLayerKey, setActiveRouteLayerKey] = useState("route-projects-0");
-  const [project, setProject] = useState<ProjectSummary | null>(null);
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
   const [forwardRoute, setForwardRoute] = useState<NavigationRouteLayer | null>(null);
   const [swipeBackPreviewRoute, setSwipeBackPreviewRoute] = useState<NavigationRouteLayer | null>(
@@ -73,8 +72,10 @@ function AppContent() {
   const [cachedConversationsByProject, setCachedConversationsByProject] = useState<
     Record<string, ConversationSummary[]>
   >({});
+  const [archivedProjectIds, setArchivedProjectIds] = useState<Set<string>>(() => new Set());
   const cachedProjectsRef = useRef<ProjectSummary[]>([]);
   const cachedConversationsByProjectRef = useRef<Record<string, ConversationSummary[]>>({});
+  const archivedProjectIdsRef = useRef<Set<string>>(new Set());
   const navigationCacheNetworkRevisionRef = useRef(0);
   const updateCachedProjects = useCallback(
     (nextProjects: ProjectSummary[]) => {
@@ -107,20 +108,56 @@ function AppContent() {
     },
     [store.messageCacheScope]
   );
+  const archiveProject = useCallback(
+    async (projectId: string) => {
+      const next = new Set(archivedProjectIdsRef.current).add(projectId);
+
+      try {
+        await saveCachedArchivedProjectIds(store.messageCacheScope, next);
+      } catch (caught) {
+        console.warn(`[archive-projects] ${errorMessage(caught)}`);
+      }
+
+      archivedProjectIdsRef.current = next;
+      setArchivedProjectIds(next);
+    },
+    [store.messageCacheScope]
+  );
+  const recoverProject = useCallback(
+    async (projectId: string) => {
+      const next = new Set(archivedProjectIdsRef.current);
+      next.delete(projectId);
+
+      try {
+        await saveCachedArchivedProjectIds(store.messageCacheScope, next);
+      } catch (caught) {
+        console.warn(`[archive-projects] ${errorMessage(caught)}`);
+      }
+
+      archivedProjectIdsRef.current = next;
+      setArchivedProjectIds(next);
+    },
+    [store.messageCacheScope]
+  );
+
   useEffect(() => {
     if (!store.isPaired) {
       cachedProjectsRef.current = [];
       cachedConversationsByProjectRef.current = {};
+      archivedProjectIdsRef.current = new Set();
       setCachedProjects([]);
       setCachedConversationsByProject({});
+      setArchivedProjectIds(new Set());
       return;
     }
 
     let cancelled = false;
     cachedProjectsRef.current = [];
     cachedConversationsByProjectRef.current = {};
+    archivedProjectIdsRef.current = new Set();
     setCachedProjects([]);
     setCachedConversationsByProject({});
+    setArchivedProjectIds(new Set());
     const cacheLoadRevision = navigationCacheNetworkRevisionRef.current;
 
     loadCachedNavigationData(store.messageCacheScope)
@@ -131,8 +168,10 @@ function AppContent() {
 
         cachedProjectsRef.current = data.projects;
         cachedConversationsByProjectRef.current = data.conversationsByProject;
+        archivedProjectIdsRef.current = new Set(data.archivedProjectIds);
         setCachedProjects(data.projects);
         setCachedConversationsByProject(data.conversationsByProject);
+        setArchivedProjectIds(new Set(data.archivedProjectIds));
       })
       .catch((caught) => {
         console.warn(`[navigation-cache] ${errorMessage(caught)}`);
@@ -176,15 +215,14 @@ function AppContent() {
         conversations.find((candidate) => candidate.id === target.conversationId) ??
         fallbackConversationFromNotification(target, nextProject);
 
-      setProject(nextProject);
       setConversation(nextConversation);
       setRoute("conversation");
     },
     [store.api, store.pairing?.workspaceId]
   );
   const goBackOneLevel = useCallback(() => {
-    setRoute((currentRoute) => routeBackOneLevel(currentRoute, project));
-  }, [project]);
+    setRoute((currentRoute) => routeBackOneLevel(currentRoute));
+  }, []);
   const navigateToRoute = useCallback(
     (nextRoute: RouteName) => {
       if (nextRoute === route) {
@@ -221,7 +259,7 @@ function AppContent() {
     [backSwipeX, createRouteLayerKey, forwardSlideX, route, windowWidth]
   );
   const beginBackSwipe = useCallback(() => {
-    const targetRoute = routeBackOneLevel(route, project);
+    const targetRoute = routeBackOneLevel(route);
     if (targetRoute === route) {
       return false;
     }
@@ -237,7 +275,7 @@ function AppContent() {
     swipeBackTargetRef.current = nextBackRoute;
     setSwipeBackPreviewRoute(nextBackRoute);
     return true;
-  }, [backSwipeX, createRouteLayerKey, forwardSlideX, project, route]);
+  }, [backSwipeX, createRouteLayerKey, forwardSlideX, route]);
   const moveBackSwipe = useCallback(
     (distance: number) => {
       if (!swipeBackTargetRef.current) {
@@ -288,13 +326,13 @@ function AppContent() {
   const globalBackSwipeResponder = useMemo(
     () =>
       createGlobalBackSwipeResponder({
-        canStart: () => routeBackOneLevel(route, project) !== route,
+        canStart: () => routeBackOneLevel(route) !== route,
         onCancel: cancelBackSwipe,
         onCommit: commitBackSwipe,
         onGrant: beginBackSwipe,
         onMove: moveBackSwipe
       }),
-    [beginBackSwipe, cancelBackSwipe, commitBackSwipe, moveBackSwipe, project, route]
+    [beginBackSwipe, cancelBackSwipe, commitBackSwipe, moveBackSwipe, route]
   );
   const backSwipeUnderlayOpacity = backSwipeX.interpolate({
     extrapolate: "clamp",
@@ -351,31 +389,24 @@ function AppContent() {
       return (
         <ProjectsScreen
           api={store.api}
+          archivedProjectIds={archivedProjectIds}
+          initialConversationsByProject={cachedConversationsByProject}
           initialProjects={cachedProjects}
           isConnected={store.bootstrap?.host?.status === "online"}
+          messageCacheScope={store.messageCacheScope}
+          onArchiveProject={archiveProject}
+          onProjectConversationsLoaded={updateCachedConversations}
           onProjectsLoaded={updateCachedProjects}
-          onProject={(nextProject) => {
-            setProject(nextProject);
-            navigateToRoute("project");
+          onNewThread={(nextProject) => {
+            setConversation(draftConversationFromProject(nextProject));
+            navigateToRoute("conversation");
           }}
-          onSettings={() => navigateToRoute("settings")}
-          refreshEnabled={!options?.isPreview}
-        />
-      );
-    }
-
-    if (routeName === "project" && project) {
-      return (
-        <ProjectDetailScreen
-          api={store.api}
-          initialConversations={cachedConversationsByProject[project.id] ?? []}
-          onBack={goBackOneLevel}
-          onConversation={(nextConversation) => {
+          onProjectThread={(_nextProject, nextConversation) => {
             setConversation(nextConversation);
             navigateToRoute("conversation");
           }}
-          onConversationsLoaded={updateCachedConversations}
-          project={project}
+          onRecoverProject={(projectId) => void recoverProject(projectId)}
+          onSettings={() => navigateToRoute("settings")}
           refreshEnabled={!options?.isPreview}
         />
       );
@@ -562,12 +593,26 @@ function conversationCacheKey(conversation: ConversationSummary) {
   ].join("\u0001");
 }
 
-function routeBackOneLevel(route: RouteName, project: ProjectSummary | null): RouteName {
+function draftConversationFromProject(project: ProjectSummary): ConversationSummary {
+  return {
+    id: `draft:${project.id}:${Date.now()}`,
+    mobileOpenState: "phone_active",
+    projectId: project.id,
+    prompt: "",
+    source: project.source,
+    status: "draft",
+    type: "feature",
+    workspaceId: project.workspaceId,
+    worktreePath: project.hostLocalPath ?? null
+  };
+}
+
+function routeBackOneLevel(route: RouteName): RouteName {
   if (route === "conversation") {
-    return project ? "project" : "projects";
+    return "projects";
   }
 
-  if (route === "project" || route === "settings" || route === "workspace") {
+  if (route === "settings" || route === "workspace") {
     return "projects";
   }
 
