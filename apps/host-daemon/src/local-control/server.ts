@@ -12,8 +12,7 @@ import type {
 import {
   defaultLocalAttachmentDirectory,
   type LocalControlStore,
-  type LocalControlTransport,
-  type LocalPairedDevice
+  type LocalControlTransport
 } from "./state.js";
 import {
   attachmentDiagnostics,
@@ -27,6 +26,12 @@ import {
   readCodexTokenUsageSummary,
   type CodexTokenUsageSummary
 } from "./token-usage.js";
+import { createMacOsRemoteControlDriver } from "./remote-control/macos-driver.js";
+import { handleLocalRemoteControlRoute } from "./remote-control/routes.js";
+import {
+  createLocalRemoteControlManager,
+  type LocalRemoteControlManager
+} from "./remote-control/session-manager.js";
 
 export interface LocalCodexProjectSummary {
   id: string;
@@ -158,31 +163,10 @@ interface StartLocalControlServerInput {
   diagnostics?: MobileControlDiagnosticsLogger;
   endpoint: string;
   port: number;
+  remoteControl?: LocalRemoteControlManager;
   store: LocalControlStore;
   tokenUsageProvider?: () => Promise<CodexTokenUsageSummary>;
   transport: LocalControlTransport;
-}
-
-interface RemoteSession {
-  id: string;
-  status: "requested" | "connecting" | "active" | "ended" | "failed";
-  hostMachineId: string;
-  clientMachineId: string;
-  screenEnabled: boolean;
-  inputEnabled: boolean;
-  errorMessage?: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface RemoteSignal {
-  id: string;
-  sessionId: string;
-  senderMachineId: string;
-  recipientMachineId?: string | null;
-  type: string;
-  payload: Record<string, unknown>;
-  createdAt: string;
 }
 
 const LOCAL_WORKSPACE_ID = "local";
@@ -191,8 +175,11 @@ const MOBILE_DIAGNOSTICS_LOG_LIMIT_BYTES = 3 * 1024 * 1024;
 export async function startLocalControlServer(input: StartLocalControlServerInput) {
   const identity = await input.store.getMacIdentity();
   const diagnostics = input.diagnostics;
-  const sessions = new Map<string, RemoteSession>();
-  const signals: RemoteSignal[] = [];
+  const remoteControl =
+    input.remoteControl ??
+    createLocalRemoteControlManager({
+      driver: createMacOsRemoteControlDriver()
+    });
   let endpoint = input.endpoint;
 
   const server = createServer(async (request, response) => {
@@ -607,95 +594,21 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
         return;
       }
 
-      if (method === "GET" && path === "/remote-control/status") {
-        writeJson(response, 200, {
-          sessions: Array.from(sessions.values()).filter(
-            (session) => session.clientMachineId === actor.id
-          )
-        });
-        return;
-      }
-
       if (
-        method === "GET" &&
-        (path === "/api/remote-control/sessions" || path === "/remote-control/sessions")
+        await handleLocalRemoteControlRoute({
+          actor,
+          diagnostics,
+          hostMachineId: identity.macId,
+          manager: remoteControl,
+          method,
+          path,
+          readJson,
+          request,
+          response,
+          searchParams: url.searchParams,
+          writeJson
+        })
       ) {
-        writeJson(response, 200, {
-          sessions: Array.from(sessions.values()).filter(
-            (session) => session.clientMachineId === actor.id
-          )
-        });
-        return;
-      }
-
-      if (
-        method === "POST" &&
-        (path === "/api/remote-control/sessions" || path === "/remote-control/start")
-      ) {
-        const body = await readJson(request);
-        const hostMachineId = stringValue(body.hostMachineId) || identity.macId;
-        if (hostMachineId !== identity.macId) {
-          throw Object.assign(new Error("Phone is not paired to this Mac host"), {
-            statusCode: 403
-          });
-        }
-        const timestamp = new Date().toISOString();
-        const session: RemoteSession = {
-          id: `remote_${randomBytes(8).toString("hex")}`,
-          status: "requested",
-          hostMachineId,
-          clientMachineId: actor.id,
-          screenEnabled: body.screenEnabled !== false,
-          inputEnabled: body.inputEnabled !== false,
-          errorMessage: null,
-          createdAt: timestamp,
-          updatedAt: timestamp
-        };
-        sessions.set(session.id, session);
-        writeJson(response, 201, { session });
-        return;
-      }
-
-      const remoteSessionMatch = matchPath(path, "/api/remote-control/sessions/:sessionId");
-      if (remoteSessionMatch && method === "DELETE") {
-        const session = requireRemoteSession(sessions, remoteSessionMatch.sessionId, actor.id);
-        const ended = { ...session, status: "ended" as const, updatedAt: new Date().toISOString() };
-        sessions.set(session.id, ended);
-        writeJson(response, 200, { session: ended });
-        return;
-      }
-
-      const signalMatch = matchPath(path, "/api/remote-control/sessions/:sessionId/signals");
-      if (signalMatch && method === "GET") {
-        requireRemoteSession(sessions, signalMatch.sessionId, actor.id);
-        writeJson(response, 200, {
-          signals: signals.filter(
-            (signal) =>
-              signal.sessionId === signalMatch.sessionId &&
-              (!signal.recipientMachineId || signal.recipientMachineId === actor.id)
-          )
-        });
-        return;
-      }
-
-      if (
-        (signalMatch && method === "POST") ||
-        (path === "/remote-control/input" && method === "POST")
-      ) {
-        const body = await readJson(request);
-        const sessionId = signalMatch?.sessionId ?? stringValue(body.sessionId);
-        const session = requireRemoteSession(sessions, sessionId, actor.id);
-        const signal: RemoteSignal = {
-          id: `signal_${randomBytes(8).toString("hex")}`,
-          sessionId: session.id,
-          senderMachineId: actor.id,
-          recipientMachineId: stringValue(body.recipientMachineId) || identity.macId,
-          type: stringValue(body.type) || "input",
-          payload: recordValue(body.payload) ?? { event: body.event },
-          createdAt: new Date().toISOString()
-        };
-        signals.push(signal);
-        writeJson(response, 201, { signal });
         return;
       }
 
@@ -737,7 +650,10 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
       return endpoint;
     },
     server,
-    close: () => closeServer(server)
+    async close() {
+      await remoteControl.stopAll();
+      await closeServer(server);
+    }
   };
 }
 
@@ -838,20 +754,6 @@ async function requireMobileDevice(request: IncomingMessage, store: LocalControl
 
 function hasAuthorizationHeader(request: IncomingMessage) {
   return typeof request.headers.authorization === "string" && request.headers.authorization !== "";
-}
-
-function requireRemoteSession(
-  sessions: Map<string, RemoteSession>,
-  sessionId: string,
-  clientMachineId: string
-) {
-  const session = sessions.get(sessionId);
-
-  if (!session || session.clientMachineId !== clientMachineId) {
-    throw Object.assign(new Error("Remote-control session not found"), { statusCode: 404 });
-  }
-
-  return session;
 }
 
 async function readJson(request: IncomingMessage) {
@@ -978,12 +880,6 @@ function requiredString(value: unknown, message: string) {
     throw Object.assign(new Error(message), { statusCode: 400 });
   }
   return parsed;
-}
-
-function recordValue(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 function numberQuery(value: string | null) {

@@ -15,8 +15,18 @@ type ExecFile = (
 interface QuickTunnelProcess {
   kill(signal?: NodeJS.Signals | number): boolean;
   killed: boolean;
-  off(event: string, listener: (...args: any[]) => void): QuickTunnelProcess;
-  once(event: string, listener: (...args: any[]) => void): QuickTunnelProcess;
+  off(event: "error", listener: (error: unknown) => void): QuickTunnelProcess;
+  off(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void
+  ): QuickTunnelProcess;
+  off(event: string, listener: (...args: unknown[]) => void): QuickTunnelProcess;
+  once(event: "error", listener: (error: unknown) => void): QuickTunnelProcess;
+  once(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void
+  ): QuickTunnelProcess;
+  once(event: string, listener: (...args: unknown[]) => void): QuickTunnelProcess;
   stderr: Readable;
   stdout: Readable;
 }

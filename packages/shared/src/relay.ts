@@ -94,7 +94,7 @@ export async function decryptRelayEnvelope<T extends RelayPlainRequest | RelayPl
     if (error instanceof Error && error.message === "Relay envelope request id mismatch") {
       throw error;
     }
-    throw new Error("Unable to decrypt relay envelope");
+    throw new Error("Unable to decrypt relay envelope", { cause: error });
   }
 }
 

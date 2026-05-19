@@ -19,6 +19,8 @@ import {
   phonePairingCompleteResponseSchema,
   phonePairingStartRequestSchema,
   phonePairingStartResponseSchema,
+  remoteControlFrameResponseSchema,
+  remoteControlInputRequestSchema,
   remoteControlSessionCreateRequestSchema,
   remoteControlSessionResponseSchema,
   remoteControlSignalSchema,
@@ -506,6 +508,84 @@ describe("shared schema validation", () => {
     ).toMatchObject({
       type: "key",
       modifiers: ["cmd"]
+    });
+  });
+
+  it("accepts local remote-control frame and input endpoint payloads", () => {
+    expect(
+      remoteControlSessionResponseSchema.parse({
+        id: "remote_demo",
+        status: "active",
+        hostMachineId: "mac_demo",
+        clientMachineId: "phone_demo",
+        screenEnabled: true,
+        inputEnabled: true,
+        permissionState: {
+          accessibility: "unknown",
+          screenRecording: "granted"
+        },
+        cursorPosition: {
+          x: 0.4,
+          y: 0.6
+        },
+        createdAt: "2026-05-18T09:00:00.000Z",
+        updatedAt: "2026-05-18T09:00:01.000Z"
+      })
+    ).toMatchObject({
+      createdAt: "2026-05-18T09:00:00.000Z",
+      id: "remote_demo",
+      permissionState: {
+        screenRecording: "granted"
+      },
+      cursorPosition: {
+        x: 0.4,
+        y: 0.6
+      },
+      updatedAt: "2026-05-18T09:00:01.000Z"
+    });
+
+    expect(
+      remoteControlFrameResponseSchema.parse({
+        frame: {
+          capturedAt: "2026-05-18T09:00:02.000Z",
+          dataBase64: "aGVsbG8=",
+          height: 720,
+          mimeType: "image/jpeg",
+          sequence: 2,
+          width: 1170
+        },
+        session: {
+          id: "remote_demo",
+          status: "active",
+          hostMachineId: "mac_demo",
+          clientMachineId: "phone_demo",
+          screenEnabled: true,
+          inputEnabled: true,
+          createdAt: "2026-05-18T09:00:00.000Z",
+          updatedAt: "2026-05-18T09:00:02.000Z"
+        }
+      }).frame
+    ).toMatchObject({
+      sequence: 2,
+      mimeType: "image/jpeg"
+    });
+
+    expect(
+      remoteControlInputRequestSchema.parse({
+        event: {
+          phase: "up",
+          type: "pointer",
+          x: 0.25,
+          y: 0.75
+        }
+      })
+    ).toEqual({
+      event: {
+        phase: "up",
+        type: "pointer",
+        x: 0.25,
+        y: 0.75
+      }
     });
   });
 });

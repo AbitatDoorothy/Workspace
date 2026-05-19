@@ -32,3 +32,9 @@ Run `gh auth status` in the daemon shell. Push success is still recorded; the co
 ## Daemon Restarts Mid-Run
 
 On reconnect, stale `preparing` or `running` jobs older than five minutes are marked failed so the UI does not stay stuck forever.
+
+## Remote Control Shows Permission Needed
+
+Screen Recording is required for the host daemon to capture the Mac screen. Accessibility is required for the host daemon to send keyboard and click input through System Events.
+
+After changing either permission in macOS System Settings, stop and restart `abitat iphone`, then return to the iPhone dashboard and tap START REMOTE CONTROL again.

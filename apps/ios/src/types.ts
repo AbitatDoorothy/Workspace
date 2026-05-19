@@ -2,6 +2,7 @@ export type RouteName =
   | "pairing"
   | "workspace"
   | "projects"
+  | "remoteControl"
   | "conversation"
   | "settings";
 
@@ -166,8 +167,52 @@ export interface RemoteControlSession {
   clientMachineId: string;
   screenEnabled: boolean;
   inputEnabled: boolean;
+  permissionState?: {
+    accessibility: RemoteControlPermissionState;
+    screenRecording: RemoteControlPermissionState;
+  };
+  cursorPosition?: RemoteControlCursorPosition | null;
   errorMessage?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
+
+export type RemoteControlPermissionState = "unknown" | "granted" | "needed";
+
+export interface RemoteControlCursorPosition {
+  x: number;
+  y: number;
+}
+
+export interface RemoteControlFrame {
+  sequence: number;
+  capturedAt: string;
+  width: number;
+  height: number;
+  mimeType: "image/jpeg";
+  dataBase64: string;
+}
+
+export type RemoteControlInputEvent =
+  | {
+      type: "pointer";
+      phase: "down" | "move" | "up" | "scroll";
+      x: number;
+      y: number;
+      buttons?: number;
+      dx?: number;
+      dy?: number;
+    }
+  | {
+      type: "text";
+      value: string;
+    }
+  | {
+      type: "key";
+      key: string;
+      code?: string;
+      modifiers: Array<"cmd" | "ctrl" | "alt" | "shift">;
+    };
 
 export interface RemoteControlSignal {
   id: string;

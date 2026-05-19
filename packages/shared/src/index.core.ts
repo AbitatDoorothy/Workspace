@@ -339,6 +339,15 @@ export const remoteControlSessionCreateRequestSchema = z.object({
   inputEnabled: z.boolean().default(true)
 });
 
+export const remoteControlPermissionStateSchema = z.enum(["unknown", "granted", "needed"]);
+
+export const remoteControlCursorPositionSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1)
+  })
+  .strict();
+
 export const remoteControlSessionResponseSchema = z.object({
   id: idSchema,
   status: remoteControlStatusSchema,
@@ -346,7 +355,30 @@ export const remoteControlSessionResponseSchema = z.object({
   clientMachineId: idSchema,
   screenEnabled: z.boolean(),
   inputEnabled: z.boolean(),
-  errorMessage: z.string().nullable().optional()
+  permissionState: z
+    .object({
+      accessibility: remoteControlPermissionStateSchema.default("unknown"),
+      screenRecording: remoteControlPermissionStateSchema.default("unknown")
+    })
+    .default({ accessibility: "unknown", screenRecording: "unknown" }),
+  cursorPosition: remoteControlCursorPositionSchema.nullable().optional(),
+  errorMessage: z.string().nullable().optional(),
+  createdAt: z.string().datetime().optional(),
+  updatedAt: z.string().datetime().optional()
+});
+
+export const remoteControlFrameSchema = z.object({
+  sequence: z.number().int().nonnegative(),
+  capturedAt: z.string().datetime(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  mimeType: z.literal("image/jpeg"),
+  dataBase64: z.string().min(1)
+});
+
+export const remoteControlFrameResponseSchema = z.object({
+  frame: remoteControlFrameSchema.nullable(),
+  session: remoteControlSessionResponseSchema
 });
 
 export const remoteControlSignalTypeSchema = z.enum([
@@ -396,6 +428,15 @@ export const remoteInputEventSchema = z.discriminatedUnion("type", [
   remoteKeyInputEventSchema
 ]);
 
+export const remoteControlInputRequestSchema = z.object({
+  event: remoteInputEventSchema
+});
+
+export const remoteControlInputResponseSchema = z.object({
+  ok: z.literal(true),
+  session: remoteControlSessionResponseSchema
+});
+
 export type MachineType = z.infer<typeof machineTypeSchema>;
 export type MachineStatus = z.infer<typeof machineStatusSchema>;
 export type DeviceKind = z.infer<typeof deviceKindSchema>;
@@ -424,8 +465,14 @@ export type RemoteControlSessionCreateRequest = z.infer<
   typeof remoteControlSessionCreateRequestSchema
 >;
 export type RemoteControlSessionResponse = z.infer<typeof remoteControlSessionResponseSchema>;
+export type RemoteControlPermissionState = z.infer<typeof remoteControlPermissionStateSchema>;
+export type RemoteControlCursorPosition = z.infer<typeof remoteControlCursorPositionSchema>;
+export type RemoteControlFrame = z.infer<typeof remoteControlFrameSchema>;
+export type RemoteControlFrameResponse = z.infer<typeof remoteControlFrameResponseSchema>;
 export type RemoteControlSignal = z.infer<typeof remoteControlSignalSchema>;
 export type RemoteInputEvent = z.infer<typeof remoteInputEventSchema>;
+export type RemoteControlInputRequest = z.infer<typeof remoteControlInputRequestSchema>;
+export type RemoteControlInputResponse = z.infer<typeof remoteControlInputResponseSchema>;
 export type HostPairingRequest = z.infer<typeof hostPairingRequestSchema>;
 export type HostPairingResponse = z.infer<typeof hostPairingResponseSchema>;
 export type HostHeartbeatRequest = z.infer<typeof hostHeartbeatRequestSchema>;
