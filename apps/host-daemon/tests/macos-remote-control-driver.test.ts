@@ -95,6 +95,38 @@ describe("macOS remote-control driver", () => {
     ]);
   });
 
+  it("moves between Mission Control desktops without selecting one", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const driver = createMacOsRemoteControlDriver({
+      execFile: async (command, args) => {
+        calls.push({ command, args });
+        return { stderr: "", stdout: "" };
+      }
+    });
+
+    await driver.applyInput(session(), {
+      key: "mission-control-left",
+      modifiers: [],
+      type: "key"
+    });
+    await driver.applyInput(session(), {
+      key: "mission-control-right",
+      modifiers: [],
+      type: "key"
+    });
+
+    expect(calls).toEqual([
+      {
+        command: "/usr/bin/osascript",
+        args: ["-e", expect.stringContaining("key code 123 using {control down}")]
+      },
+      {
+        command: "/usr/bin/osascript",
+        args: ["-e", expect.stringContaining("key code 124 using {control down}")]
+      }
+    ]);
+  });
+
   it("moves the cursor to absolute screen coordinates and reports that position", async () => {
     const calls: Array<{ command: string; args: string[] }> = [];
     const driver = createMacOsRemoteControlDriver({

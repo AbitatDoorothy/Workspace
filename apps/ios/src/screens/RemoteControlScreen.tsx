@@ -46,6 +46,7 @@ export function RemoteControlScreen({
   const [keyboardText, setKeyboardText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [isMissionControlMode, setIsMissionControlMode] = useState(false);
   const [visualCursorPosition, setVisualCursorPositionState] =
     useState<RemoteControlCursorPosition | null>(null);
   const [visualCursorSyncState, setVisualCursorSyncStateState] =
@@ -137,6 +138,7 @@ export function RemoteControlScreen({
     lastFrameSequenceRef.current = -1;
     setFrameUri(null);
     setFrameAspectRatio(16 / 10);
+    setIsMissionControlMode(false);
     setVisualCursorPosition(null, "synced");
 
     try {
@@ -155,6 +157,7 @@ export function RemoteControlScreen({
 
     try {
       setSession(await api.endRemoteSession(session.id));
+      setIsMissionControlMode(false);
       setVisualCursorPosition(null, "synced");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to end remote control");
@@ -167,6 +170,7 @@ export function RemoteControlScreen({
 
   function closeFullScreen() {
     setIsFullScreen(false);
+    setIsMissionControlMode(false);
   }
 
   function setVisualCursorPosition(
@@ -243,6 +247,9 @@ export function RemoteControlScreen({
       });
       setSession(nextSession);
       syncVisualCursorFromHost(nextSession.cursorPosition ?? null);
+      if (buttons === 1 && isMissionControlMode) {
+        setIsMissionControlMode(false);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to send click");
     }
@@ -261,8 +268,28 @@ export function RemoteControlScreen({
           type: "key"
         })
       );
+      setIsMissionControlMode(true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to show all desktops");
+    }
+  }
+
+  async function moveMissionControlDesktop(direction: "left" | "right") {
+    if (!session || session.status === "ended" || session.status === "failed") {
+      return;
+    }
+
+    try {
+      setSession(
+        await api.sendRemoteInput(session.id, {
+          key: `mission-control-${direction}`,
+          modifiers: [],
+          type: "key"
+        })
+      );
+      setIsMissionControlMode(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to move between desktops");
     }
   }
 
@@ -378,42 +405,85 @@ export function RemoteControlScreen({
             <Feather color="#f3f3f3" name="x" size={22} />
           </Pressable>
           <View pointerEvents="box-none" style={styles.remoteClickRail}>
-            <Pressable
-              accessibilityLabel="Left click"
-              accessibilityRole="button"
-              onPress={() => void sendRemoteClick(1)}
-              style={({ pressed }) => [
-                styles.remoteClickButton,
-                pressed ? styles.remoteClickButtonPressed : null
-              ]}
-            >
-              <Feather color="#f8fafc" name="mouse-pointer" size={18} />
-              <Text style={styles.remoteClickLabel}>Left click</Text>
-            </Pressable>
-            <Pressable
-              accessibilityLabel="Right click"
-              accessibilityRole="button"
-              onPress={() => void sendRemoteClick(2)}
-              style={({ pressed }) => [
-                styles.remoteClickButton,
-                pressed ? styles.remoteClickButtonPressed : null
-              ]}
-            >
-              <Feather color="#f8fafc" name="corner-down-left" size={18} />
-              <Text style={styles.remoteClickLabel}>Right click</Text>
-            </Pressable>
-            <Pressable
-              accessibilityLabel="Show all desktops"
-              accessibilityRole="button"
-              onPress={() => void showMissionControl()}
-              style={({ pressed }) => [
-                styles.remoteClickButton,
-                pressed ? styles.remoteClickButtonPressed : null
-              ]}
-            >
-              <Feather color="#f8fafc" name="grid" size={18} />
-              <Text style={styles.remoteClickLabel}>Desktops</Text>
-            </Pressable>
+            {isMissionControlMode ? (
+              <>
+                <Pressable
+                  accessibilityLabel="Move to left desktop"
+                  accessibilityRole="button"
+                  onPress={() => void moveMissionControlDesktop("left")}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="arrow-left" size={18} />
+                  <Text style={styles.remoteClickLabel}>Left</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Move to right desktop"
+                  accessibilityRole="button"
+                  onPress={() => void moveMissionControlDesktop("right")}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="arrow-right" size={18} />
+                  <Text style={styles.remoteClickLabel}>Right</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Left click"
+                  accessibilityRole="button"
+                  onPress={() => void sendRemoteClick(1)}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="mouse-pointer" size={18} />
+                  <Text style={styles.remoteClickLabel}>Left click</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Pressable
+                  accessibilityLabel="Left click"
+                  accessibilityRole="button"
+                  onPress={() => void sendRemoteClick(1)}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="mouse-pointer" size={18} />
+                  <Text style={styles.remoteClickLabel}>Left click</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Right click"
+                  accessibilityRole="button"
+                  onPress={() => void sendRemoteClick(2)}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="corner-down-left" size={18} />
+                  <Text style={styles.remoteClickLabel}>Right click</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Show all desktops"
+                  accessibilityRole="button"
+                  onPress={() => void showMissionControl()}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="grid" size={18} />
+                  <Text style={styles.remoteClickLabel}>Desktops</Text>
+                </Pressable>
+              </>
+            )}
           </View>
         </View>
       </Modal>
