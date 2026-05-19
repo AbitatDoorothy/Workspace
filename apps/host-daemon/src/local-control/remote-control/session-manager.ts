@@ -18,11 +18,12 @@ interface ManagerOptions {
 
 interface SessionState {
   frameTimer: NodeJS.Timeout | null;
+  isFrameCaptureInFlight: boolean;
   latestFrame: RemoteControlFrame | null;
   session: LocalRemoteControlSession;
 }
 
-const DEFAULT_FRAME_INTERVAL_MS = 300;
+const DEFAULT_FRAME_INTERVAL_MS = 120;
 const stoppedStatuses = new Set(["ended", "failed"]);
 
 export type { LocalRemoteControlDriver, LocalRemoteControlManager } from "./types.js";
@@ -42,9 +43,16 @@ export function createLocalRemoteControlManager(
     if (!state || stoppedStatuses.has(state.session.status)) {
       return;
     }
+    if (state.isFrameCaptureInFlight) {
+      return;
+    }
 
+    state.isFrameCaptureInFlight = true;
     try {
       const nextFrame = await options.driver.captureFrame(state.session);
+      if (stoppedStatuses.has(state.session.status)) {
+        return;
+      }
       state.latestFrame = nextFrame;
       state.session = {
         ...state.session,
@@ -57,6 +65,9 @@ export function createLocalRemoteControlManager(
         updatedAt: now().toISOString()
       };
     } catch (error) {
+      if (stoppedStatuses.has(state.session.status)) {
+        return;
+      }
       const permission = permissionKind(error);
       state.session = {
         ...state.session,
@@ -69,6 +80,8 @@ export function createLocalRemoteControlManager(
         status: permission === "screenRecording" ? "failed" : state.session.status,
         updatedAt: now().toISOString()
       };
+    } finally {
+      state.isFrameCaptureInFlight = false;
     }
   }
 
@@ -81,6 +94,7 @@ export function createLocalRemoteControlManager(
       void captureNextFrame(state.session.id);
     }, frameIntervalMs);
     state.frameTimer.unref?.();
+    void captureNextFrame(state.session.id);
   }
 
   function requireSession(sessionId: string, clientMachineId: string) {
@@ -218,6 +232,7 @@ export function createLocalRemoteControlManager(
       };
       const state: SessionState = {
         frameTimer: null,
+        isFrameCaptureInFlight: false,
         latestFrame: null,
         session
       };

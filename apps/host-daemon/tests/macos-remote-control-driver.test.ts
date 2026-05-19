@@ -21,9 +21,9 @@ describe("macOS remote-control driver", () => {
 
     await expect(driver.captureFrame(session())).resolves.toMatchObject({
       dataBase64: Buffer.from("jpeg-bytes").toString("base64"),
-      height: 731,
+      height: 600,
       mimeType: "image/jpeg",
-      width: 1170
+      width: 960
     });
     expect(calls.map((call) => call.command)).toEqual([
       "/usr/sbin/screencapture",
@@ -31,6 +31,33 @@ describe("macOS remote-control driver", () => {
       "/usr/bin/sips"
     ]);
     expect(calls[0]?.args).toEqual(expect.arrayContaining(["-C"]));
+  });
+
+  it("reuses cached screen dimensions so steady-state captures avoid an extra sips pass", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const driver = createMacOsRemoteControlDriver({
+      execFile: async (command, args) => {
+        calls.push({ command, args });
+        if (command === "/usr/bin/sips" && args.includes("-g")) {
+          return { stderr: "", stdout: "  pixelWidth: 1920\n  pixelHeight: 1200\n" };
+        }
+        return { stderr: "", stdout: "" };
+      },
+      readFile: async () => Buffer.from("jpeg-bytes"),
+      unlink: async () => undefined,
+      now: () => new Date("2026-05-18T09:00:00.000Z")
+    });
+
+    await driver.captureFrame(session());
+    await expect(driver.captureFrame(session())).resolves.toMatchObject({
+      height: 600,
+      width: 960
+    });
+
+    const dimensionProbeCount = calls.filter(
+      (call) => call.command === "/usr/bin/sips" && call.args.includes("-g")
+    ).length;
+    expect(dimensionProbeCount).toBe(1);
   });
 
   it("marks screen recording permission as needed when screencapture is blocked", async () => {
@@ -123,6 +150,29 @@ describe("macOS remote-control driver", () => {
       {
         command: "/usr/bin/osascript",
         args: ["-e", expect.stringContaining("key code 124 using {control down}")]
+      }
+    ]);
+  });
+
+  it("toggles the Dock for the phone Dock control", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const driver = createMacOsRemoteControlDriver({
+      execFile: async (command, args) => {
+        calls.push({ command, args });
+        return { stderr: "", stdout: "" };
+      }
+    });
+
+    await driver.applyInput(session(), {
+      key: "dock",
+      modifiers: [],
+      type: "key"
+    });
+
+    expect(calls).toEqual([
+      {
+        command: "/usr/bin/osascript",
+        args: ["-e", expect.stringContaining("key code 2 using {command down, option down}")]
       }
     ]);
   });

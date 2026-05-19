@@ -24,8 +24,9 @@ interface DriverOptions {
 }
 
 const runExecFile = promisify(execFileCallback) as ExecFile;
-const CAPTURE_WIDTH = 1170;
-const FRAME_JPEG_QUALITY = 35;
+const CAPTURE_WIDTH = 960;
+const FRAME_JPEG_QUALITY = 28;
+const SCREEN_DIMENSION_PROBE_INTERVAL_FRAMES = 30;
 const DEFAULT_DISPLAY_WIDTH = 1440;
 const DEFAULT_DISPLAY_HEIGHT = 900;
 
@@ -49,17 +50,19 @@ export function createMacOsRemoteControlDriver(
 
       try {
         await execFile("/usr/sbin/screencapture", ["-x", "-C", "-t", "jpg", rawPath]);
-        const rawDimensions = await execFile("/usr/bin/sips", [
-          "-g",
-          "pixelWidth",
-          "-g",
-          "pixelHeight",
-          rawPath
-        ]);
-        screenSize = {
-          height: numberFromSips(rawDimensions.stdout, "pixelHeight") ?? screenSize.height,
-          width: numberFromSips(rawDimensions.stdout, "pixelWidth") ?? screenSize.width
-        };
+        if (shouldProbeScreenDimensions(sequence)) {
+          const rawDimensions = await execFile("/usr/bin/sips", [
+            "-g",
+            "pixelWidth",
+            "-g",
+            "pixelHeight",
+            rawPath
+          ]);
+          screenSize = {
+            height: numberFromSips(rawDimensions.stdout, "pixelHeight") ?? screenSize.height,
+            width: numberFromSips(rawDimensions.stdout, "pixelWidth") ?? screenSize.width
+          };
+        }
         await execFile("/usr/bin/sips", [
           "-Z",
           String(CAPTURE_WIDTH),
@@ -152,6 +155,9 @@ function appleScriptForInput(
   }
 
   if (event.type === "key") {
+    if (event.key === "dock") {
+      return "tell application \"System Events\" to key code 2 using {command down, option down}";
+    }
     if (event.key === "mission-control") {
       return "tell application \"System Events\" to key code 126 using {control down}";
     }
@@ -410,6 +416,10 @@ function capturePath(sessionId: string, name: string) {
 function numberFromSips(output: string, key: string) {
   const match = output.match(new RegExp(`${key}:\\s*(\\d+)`, "u"));
   return match ? Number(match[1]) : null;
+}
+
+function shouldProbeScreenDimensions(sequence: number) {
+  return sequence % SCREEN_DIMENSION_PROBE_INTERVAL_FRAMES === 0;
 }
 
 function normalizeCaptureError(error: unknown) {

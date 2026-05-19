@@ -147,11 +147,13 @@ describe("local remote-control manager", () => {
         inputEnabled: true,
         screenEnabled: true
       });
+      await Promise.resolve();
+      const captureCountBeforeEnd = driver.captureCount;
 
       await manager.endSession(session.id, "phone_demo");
       await vi.advanceTimersByTimeAsync(150);
 
-      expect(driver.captureCount).toBe(0);
+      expect(driver.captureCount).toBe(captureCountBeforeEnd);
       expect(manager.getSession(session.id, "phone_demo")).toMatchObject({
         status: "ended"
       });
@@ -176,13 +178,80 @@ describe("local remote-control manager", () => {
         inputEnabled: true,
         screenEnabled: true
       });
-      await vi.advanceTimersByTimeAsync(650);
+      await Promise.resolve();
 
-      expect(driver.captureCount).toBeGreaterThanOrEqual(2);
+      expect(driver.captureCount).toBe(1);
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(driver.captureCount).toBeGreaterThanOrEqual(3);
       await manager.stopAll();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("does not overlap frame captures when the Mac is still producing a frame", async () => {
+    vi.useFakeTimers();
+    try {
+      const driver = createFakeDriver();
+      driver.holdCaptures = true;
+      const manager = createLocalRemoteControlManager({
+        driver,
+        frameIntervalMs: 25,
+        idGenerator: (prefix) => `${prefix}_demo`,
+        now: () => new Date("2026-05-18T09:00:00.000Z")
+      });
+
+      await manager.startSession({
+        clientMachineId: "phone_demo",
+        hostMachineId: "mac_demo",
+        inputEnabled: true,
+        screenEnabled: true
+      });
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(driver.captureCount).toBe(1);
+
+      driver.releaseCaptures();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(25);
+
+      expect(driver.captureCount).toBe(2);
+      await manager.stopAll();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores a frame that finishes after the session has ended", async () => {
+    const driver = createFakeDriver();
+    driver.holdCaptures = true;
+    const manager = createLocalRemoteControlManager({
+      driver,
+      idGenerator: (prefix) => `${prefix}_demo`,
+      now: () => new Date("2026-05-18T09:00:00.000Z")
+    });
+
+    const session = await manager.startSession({
+      clientMachineId: "phone_demo",
+      hostMachineId: "mac_demo",
+      inputEnabled: true,
+      screenEnabled: true
+    });
+    await Promise.resolve();
+    const endPromise = manager.endSession(session.id, "phone_demo");
+
+    driver.releaseCaptures();
+    await endPromise;
+    await Promise.resolve();
+
+    expect(manager.getLatestFrame(session.id, "phone_demo", -1)).toMatchObject({
+      frame: null,
+      session: {
+        status: "ended"
+      }
+    });
   });
 
   it("clears the latest frame and rejects input after a session ends", async () => {
@@ -222,16 +291,31 @@ function createFakeDriver() {
     captureCount: number;
     currentCursorPosition: { x: number; y: number } | null;
     inputError: Error | null;
+    holdCaptures: boolean;
     nextInputCursorPosition: { x: number; y: number } | null;
     nextFrameSequence: number;
+    releaseCaptures: () => void;
+    releaseHeldCapture: (() => void) | null;
   } = {
     captureCount: 0,
     currentCursorPosition: null,
+    holdCaptures: false,
     inputError: null,
     nextInputCursorPosition: null,
     nextFrameSequence: 1,
+    releaseCaptures() {
+      driver.releaseHeldCapture?.();
+      driver.releaseHeldCapture = null;
+    },
+    releaseHeldCapture: null,
     async captureFrame() {
       driver.captureCount += 1;
+      if (driver.holdCaptures) {
+        await new Promise<void>((resolve) => {
+          driver.releaseHeldCapture = resolve;
+        });
+        driver.holdCaptures = false;
+      }
       return {
         capturedAt: "2026-05-18T09:00:01.000Z",
         dataBase64: Buffer.from(`frame-${driver.nextFrameSequence}`).toString("base64"),

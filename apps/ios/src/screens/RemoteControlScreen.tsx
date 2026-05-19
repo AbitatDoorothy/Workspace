@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Feather } from "@expo/vector-icons";
 import { lockAsync, OrientationLock } from "expo-screen-orientation";
 import {
+  type GestureResponderEvent,
   Image,
   Modal,
-  type NativeSyntheticEvent,
   type NativeTouchEvent,
   Pressable,
   StyleSheet,
@@ -20,12 +20,37 @@ import { Screen } from "../components/Screen";
 import { colors, sharedStyles } from "../theme";
 import type { RemoteControlCursorPosition, RemoteControlSession } from "../types";
 
-const REMOTE_FRAME_REFRESH_INTERVAL_MS = 300;
+const REMOTE_FRAME_REFRESH_INTERVAL_MS = 120;
 const CURSOR_SYNC_TOLERANCE = 0.012;
 const CURRENT_CURSOR_CLICK_ORIGIN = { x: 0, y: 0 };
+const DEFAULT_REMOTE_VIEWPORT: RemoteViewportState = { offsetX: 0, offsetY: 0, scale: 1 };
+const MAX_REMOTE_VIEWPORT_SCALE = 4;
+const MIN_REMOTE_VIEWPORT_SCALE = 1;
+const REMOTE_TAP_MOVEMENT_TOLERANCE = 8;
 const VISUAL_CURSOR_SIZE = 30;
 
 type VisualCursorSyncState = "pending" | "synced";
+
+interface RemoteViewportState {
+  offsetX: number;
+  offsetY: number;
+  scale: number;
+}
+
+interface RemoteSurfaceSize {
+  height: number;
+  width: number;
+}
+
+interface SurfacePoint {
+  x: number;
+  y: number;
+}
+
+interface PinchGestureState {
+  anchor: SurfacePoint;
+  initialDistance: number;
+}
 
 interface RemoteControlScreenProps {
   api: ApiClient;
@@ -52,15 +77,25 @@ export function RemoteControlScreen({
   const [visualCursorSyncState, setVisualCursorSyncStateState] =
     useState<VisualCursorSyncState>("synced");
   const [fullScreenSurfaceSize, setFullScreenSurfaceSize] = useState({ height: 1, width: 1 });
+  const [remoteViewport, setRemoteViewportState] =
+    useState<RemoteViewportState>(DEFAULT_REMOTE_VIEWPORT);
   const windowDimensions = useWindowDimensions();
   const lastFrameSequenceRef = useRef(-1);
+  const pinchGestureRef = useRef<PinchGestureState | null>(null);
+  const remoteViewportRef = useRef<RemoteViewportState>(DEFAULT_REMOTE_VIEWPORT);
   const startedAutoStartKeyRef = useRef(0);
+  const touchStartRef = useRef<SurfacePoint | null>(null);
   const visualCursorPositionRef = useRef<RemoteControlCursorPosition | null>(null);
   const visualCursorSyncStateRef = useRef<VisualCursorSyncState>("synced");
   const fullScreenFrameStyle = remoteFrameLayout({
     aspectRatio: frameAspectRatio,
     height: windowDimensions.height,
     width: windowDimensions.width
+  });
+  const fullScreenContentStyle = remoteViewportContentStyle({
+    height: fullScreenFrameStyle.height,
+    viewport: remoteViewport,
+    width: fullScreenFrameStyle.width
   });
 
   useEffect(() => {
@@ -139,6 +174,7 @@ export function RemoteControlScreen({
     setFrameUri(null);
     setFrameAspectRatio(16 / 10);
     setIsMissionControlMode(false);
+    setRemoteViewport(DEFAULT_REMOTE_VIEWPORT);
     setVisualCursorPosition(null, "synced");
 
     try {
@@ -158,6 +194,7 @@ export function RemoteControlScreen({
     try {
       setSession(await api.endRemoteSession(session.id));
       setIsMissionControlMode(false);
+      setRemoteViewport(DEFAULT_REMOTE_VIEWPORT);
       setVisualCursorPosition(null, "synced");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to end remote control");
@@ -171,6 +208,12 @@ export function RemoteControlScreen({
   function closeFullScreen() {
     setIsFullScreen(false);
     setIsMissionControlMode(false);
+    setRemoteViewport(DEFAULT_REMOTE_VIEWPORT);
+  }
+
+  function setRemoteViewport(nextViewport: RemoteViewportState) {
+    remoteViewportRef.current = nextViewport;
+    setRemoteViewportState(nextViewport);
   }
 
   function setVisualCursorPosition(
@@ -198,15 +241,104 @@ export function RemoteControlScreen({
     }
   }
 
-  function positionFromSurfaceEvent(event: NativeSyntheticEvent<NativeTouchEvent>) {
-    return clampCursorPosition({
-      x: event.nativeEvent.locationX / fullScreenSurfaceSize.width,
-      y: event.nativeEvent.locationY / fullScreenSurfaceSize.height
-    });
+  function positionFromSurfacePoint(point: SurfacePoint) {
+    return cursorPositionFromSurfacePoint(point, remoteViewportRef.current, fullScreenSurfaceSize);
   }
 
-  function handleRemoteSurfacePress(event: NativeSyntheticEvent<NativeTouchEvent>) {
-    void sendRemoteCursorMove(positionFromSurfaceEvent(event));
+  function remoteSurfaceShouldSetResponder() {
+    return true;
+  }
+
+  function handleRemoteSurfaceResponderGrant(event: GestureResponderEvent) {
+    const touches = event.nativeEvent.touches;
+    if (touches.length >= 2) {
+      startRemoteViewportPinch(touches);
+      return;
+    }
+
+    touchStartRef.current = surfacePointFromTouchEvent(event);
+  }
+
+  function handleRemoteSurfaceResponderMove(event: GestureResponderEvent) {
+    const touches = event.nativeEvent.touches;
+    if (touches.length < 2) {
+      return;
+    }
+
+    if (!pinchGestureRef.current) {
+      startRemoteViewportPinch(touches);
+      return;
+    }
+
+    updateRemoteViewportPinch(touches);
+  }
+
+  function handleRemoteSurfaceResponderRelease(event: GestureResponderEvent) {
+    if (pinchGestureRef.current) {
+      pinchGestureRef.current = null;
+      touchStartRef.current = null;
+      return;
+    }
+
+    const releasePoint = surfacePointFromTouchEvent(event);
+    const startPoint = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!startPoint || distanceBetweenPoints(startPoint, releasePoint) > REMOTE_TAP_MOVEMENT_TOLERANCE) {
+      return;
+    }
+
+    void sendRemoteCursorMove(positionFromSurfacePoint(releasePoint));
+  }
+
+  function handleRemoteSurfaceResponderTerminate() {
+    pinchGestureRef.current = null;
+    touchStartRef.current = null;
+  }
+
+  function startRemoteViewportPinch(touches: readonly NativeTouchEvent[]) {
+    const metrics = pinchMetricsFromTouches(touches);
+    if (!metrics) {
+      return;
+    }
+
+    const viewport = remoteViewportRef.current;
+    pinchGestureRef.current = {
+      anchor: {
+        x: (metrics.center.x - viewport.offsetX) / viewport.scale,
+        y: (metrics.center.y - viewport.offsetY) / viewport.scale
+      },
+      initialDistance: metrics.distance
+    };
+  }
+
+  function updateRemoteViewportPinch(touches: readonly NativeTouchEvent[]) {
+    const gesture = pinchGestureRef.current;
+    const metrics = pinchMetricsFromTouches(touches);
+    if (!gesture || !metrics) {
+      return;
+    }
+
+    const nextScale = clamp(
+      remoteViewportRef.current.scale * (metrics.distance / Math.max(1, gesture.initialDistance)),
+      MIN_REMOTE_VIEWPORT_SCALE,
+      MAX_REMOTE_VIEWPORT_SCALE
+    );
+    const nextViewport = clampRemoteViewport(
+      {
+        offsetX: metrics.center.x - gesture.anchor.x * nextScale,
+        offsetY: metrics.center.y - gesture.anchor.y * nextScale,
+        scale: nextScale
+      },
+      fullScreenSurfaceSize
+    );
+    setRemoteViewport(nextViewport);
+    pinchGestureRef.current = {
+      anchor: {
+        x: (metrics.center.x - nextViewport.offsetX) / nextViewport.scale,
+        y: (metrics.center.y - nextViewport.offsetY) / nextViewport.scale
+      },
+      initialDistance: metrics.distance
+    };
   }
 
   async function sendRemoteCursorMove(position: RemoteControlCursorPosition) {
@@ -271,6 +403,24 @@ export function RemoteControlScreen({
       setIsMissionControlMode(true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to show all desktops");
+    }
+  }
+
+  async function showDock() {
+    if (!session || session.status === "ended" || session.status === "failed") {
+      return;
+    }
+
+    try {
+      setSession(
+        await api.sendRemoteInput(session.id, {
+          key: "dock",
+          modifiers: [],
+          type: "key"
+        })
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to show Dock");
     }
   }
 
@@ -356,43 +506,52 @@ export function RemoteControlScreen({
         visible={isFullScreen}
       >
         <View style={styles.fullScreenBackdrop}>
-          <Pressable
-            onLayout={(event) =>
-              setFullScreenSurfaceSize({
+          <View
+            onLayout={(event) => {
+              const nextSize = {
                 height: Math.max(1, event.nativeEvent.layout.height),
                 width: Math.max(1, event.nativeEvent.layout.width)
-              })
-            }
-            onPressIn={handleRemoteSurfacePress}
+              };
+              setFullScreenSurfaceSize(nextSize);
+              setRemoteViewport(clampRemoteViewport(remoteViewportRef.current, nextSize));
+            }}
+            onMoveShouldSetResponder={remoteSurfaceShouldSetResponder}
+            onResponderGrant={handleRemoteSurfaceResponderGrant}
+            onResponderMove={handleRemoteSurfaceResponderMove}
+            onResponderRelease={handleRemoteSurfaceResponderRelease}
+            onResponderTerminate={handleRemoteSurfaceResponderTerminate}
+            onStartShouldSetResponder={remoteSurfaceShouldSetResponder}
             style={[styles.fullScreenSurface, fullScreenFrameStyle]}
           >
-            {frameUri ? (
-              <Image resizeMode="contain" source={{ uri: frameUri }} style={styles.remoteFrame} />
-            ) : (
-              <Text style={styles.remotePlaceholder}>Waiting for Mac screen</Text>
-            )}
-            {visualCursorPosition ? (
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.visualCursor,
-                  {
-                    left: `${visualCursorPosition.x * 100}%`,
-                    top: `${visualCursorPosition.y * 100}%`
-                  },
-                  visualCursorSyncState === "synced"
-                    ? styles.visualCursorSynced
-                    : styles.visualCursorPending
-                ]}
-              >
-                <Feather
-                  color={visualCursorSyncState === "synced" ? "#22c55e" : "#f8fafc"}
-                  name="mouse-pointer"
-                  size={VISUAL_CURSOR_SIZE}
-                />
-              </View>
-            ) : null}
-          </Pressable>
+            <View pointerEvents="none" style={[styles.fullScreenContent, fullScreenContentStyle]}>
+              {frameUri ? (
+                <Image resizeMode="contain" source={{ uri: frameUri }} style={styles.remoteFrame} />
+              ) : (
+                <Text style={styles.remotePlaceholder}>Waiting for Mac screen</Text>
+              )}
+              {visualCursorPosition ? (
+                <View
+                  pointerEvents="none"
+                  style={[
+                    styles.visualCursor,
+                    {
+                      left: `${visualCursorPosition.x * 100}%`,
+                      top: `${visualCursorPosition.y * 100}%`
+                    },
+                    visualCursorSyncState === "synced"
+                      ? styles.visualCursorSynced
+                      : styles.visualCursorPending
+                  ]}
+                >
+                  <Feather
+                    color={visualCursorSyncState === "synced" ? "#22c55e" : "#f8fafc"}
+                    name="mouse-pointer"
+                    size={VISUAL_CURSOR_SIZE}
+                  />
+                </View>
+              ) : null}
+            </View>
+          </View>
           <Pressable
             accessibilityLabel="Exit full screen remote control"
             accessibilityRole="button"
@@ -404,7 +563,13 @@ export function RemoteControlScreen({
           >
             <Feather color="#f3f3f3" name="x" size={22} />
           </Pressable>
-          <View pointerEvents="box-none" style={styles.remoteClickRail}>
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.remoteClickRail,
+              isMissionControlMode ? styles.remoteClickRailThree : styles.remoteClickRailFour
+            ]}
+          >
             {isMissionControlMode ? (
               <>
                 <Pressable
@@ -469,6 +634,18 @@ export function RemoteControlScreen({
                 >
                   <Feather color="#f8fafc" name="corner-down-left" size={18} />
                   <Text style={styles.remoteClickLabel}>Right click</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Show Dock"
+                  accessibilityRole="button"
+                  onPress={() => void showDock()}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="monitor" size={18} />
+                  <Text style={styles.remoteClickLabel}>Dock</Text>
                 </Pressable>
                 <Pressable
                   accessibilityLabel="Show all desktops"
@@ -546,7 +723,11 @@ function clampCursorPosition(position: RemoteControlCursorPosition): RemoteContr
 }
 
 function clamp01(value: number) {
-  return Math.max(0, Math.min(1, value));
+  return clamp(value, 0, 1);
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, value));
 }
 
 function remoteFrameLayout(input: { aspectRatio: number; height: number; width: number }) {
@@ -566,6 +747,80 @@ function remoteFrameLayout(input: { aspectRatio: number; height: number; width: 
   return {
     height: availableWidth / aspectRatio,
     width: availableWidth
+  };
+}
+
+function surfacePointFromTouchEvent(event: GestureResponderEvent): SurfacePoint {
+  return {
+    x: event.nativeEvent.locationX,
+    y: event.nativeEvent.locationY
+  };
+}
+
+function cursorPositionFromSurfacePoint(
+  point: SurfacePoint,
+  viewport: RemoteViewportState,
+  surfaceSize: RemoteSurfaceSize
+): RemoteControlCursorPosition {
+  const scaledWidth = Math.max(1, surfaceSize.width * viewport.scale);
+  const scaledHeight = Math.max(1, surfaceSize.height * viewport.scale);
+  return clampCursorPosition({
+    x: (point.x - viewport.offsetX) / scaledWidth,
+    y: (point.y - viewport.offsetY) / scaledHeight
+  });
+}
+
+function pinchMetricsFromTouches(touches: readonly NativeTouchEvent[]) {
+  const first = touches[0];
+  const second = touches[1];
+  if (!first || !second) {
+    return null;
+  }
+
+  return {
+    center: {
+      x: (first.locationX + second.locationX) / 2,
+      y: (first.locationY + second.locationY) / 2
+    },
+    distance: distanceBetweenPoints(
+      { x: first.locationX, y: first.locationY },
+      { x: second.locationX, y: second.locationY }
+    )
+  };
+}
+
+function distanceBetweenPoints(first: SurfacePoint, second: SurfacePoint) {
+  return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function clampRemoteViewport(
+  viewport: RemoteViewportState,
+  surfaceSize: RemoteSurfaceSize
+): RemoteViewportState {
+  const scale = clamp(viewport.scale, MIN_REMOTE_VIEWPORT_SCALE, MAX_REMOTE_VIEWPORT_SCALE);
+  if (scale <= MIN_REMOTE_VIEWPORT_SCALE) {
+    return DEFAULT_REMOTE_VIEWPORT;
+  }
+
+  const scaledWidth = surfaceSize.width * scale;
+  const scaledHeight = surfaceSize.height * scale;
+  return {
+    offsetX: clamp(viewport.offsetX, surfaceSize.width - scaledWidth, 0),
+    offsetY: clamp(viewport.offsetY, surfaceSize.height - scaledHeight, 0),
+    scale
+  };
+}
+
+function remoteViewportContentStyle(input: {
+  height: number;
+  viewport: RemoteViewportState;
+  width: number;
+}) {
+  return {
+    height: input.height * input.viewport.scale,
+    left: input.viewport.offsetX,
+    top: input.viewport.offsetY,
+    width: input.width * input.viewport.scale
   };
 }
 
@@ -593,11 +848,18 @@ const styles = StyleSheet.create({
     opacity: 0.68,
     transform: [{ scale: 0.96 }]
   },
+  fullScreenContent: {
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    position: "absolute"
+  },
   fullScreenSurface: {
     alignItems: "center",
     backgroundColor: "#05070b",
     justifyContent: "center",
-    overflow: "hidden"
+    overflow: "hidden",
+    position: "relative"
   },
   remoteFrame: {
     height: "100%",
@@ -629,7 +891,12 @@ const styles = StyleSheet.create({
     gap: 10,
     left: 14,
     position: "absolute",
-    top: "50%",
+    top: "50%"
+  },
+  remoteClickRailFour: {
+    transform: [{ translateY: -143 }]
+  },
+  remoteClickRailThree: {
     transform: [{ translateY: -106 }]
   },
   remotePlaceholder: {
