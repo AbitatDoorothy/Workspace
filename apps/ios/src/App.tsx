@@ -64,6 +64,7 @@ function AppContent() {
   const [activeRouteLayerKey, setActiveRouteLayerKey] = useState("route-projects-0");
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
   const [remoteControlStartKey, setRemoteControlStartKey] = useState(0);
+  const [isRemoteControlFullScreen, setIsRemoteControlFullScreen] = useState(false);
   const [forwardRoute, setForwardRoute] = useState<NavigationRouteLayer | null>(null);
   const [swipeBackPreviewRoute, setSwipeBackPreviewRoute] = useState<NavigationRouteLayer | null>(
     null
@@ -339,13 +340,20 @@ function AppContent() {
   const globalBackSwipeResponder = useMemo(
     () =>
       createGlobalBackSwipeResponder({
-        canStart: () => routeBackOneLevel(route) !== route,
+        canStart: () => !isRemoteControlFullScreen && routeBackOneLevel(route) !== route,
         onCancel: cancelBackSwipe,
         onCommit: commitBackSwipe,
         onGrant: beginBackSwipe,
         onMove: moveBackSwipe
       }),
-    [beginBackSwipe, cancelBackSwipe, commitBackSwipe, moveBackSwipe, route]
+    [
+      beginBackSwipe,
+      cancelBackSwipe,
+      commitBackSwipe,
+      isRemoteControlFullScreen,
+      moveBackSwipe,
+      route
+    ]
   );
   const backSwipeUnderlayOpacity = backSwipeX.interpolate({
     extrapolate: "clamp",
@@ -432,6 +440,7 @@ function AppContent() {
           autoStartKey={remoteControlStartKey}
           hostMachineId={store.pairing?.hostMachineId ?? store.pairing?.macId ?? ""}
           onBack={goBackOneLevel}
+          onFullScreenChange={setIsRemoteControlFullScreen}
         />
       );
     }

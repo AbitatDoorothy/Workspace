@@ -1012,6 +1012,7 @@ for (const expected of [
   "forwardRoute",
   "swipeBackPreviewRoute",
   "activeRouteLayerKey",
+  "isRemoteControlFullScreen",
   "createRouteLayerKey",
   "goBackOneLevel",
   "navigateToRoute",
@@ -1019,6 +1020,7 @@ for (const expected of [
   "isPreview: true",
   "refreshEnabled={!options?.isPreview}",
   "createGlobalBackSwipeResponder",
+  "canStart: () => !isRemoteControlFullScreen && routeBackOneLevel(route) !== route",
   "gesture.dx >= GLOBAL_BACK_SWIPE_DISTANCE",
   "Animated.timing",
   "Animated.spring",
@@ -1043,6 +1045,9 @@ for (const expected of [
   if (!appScreen.includes(expected)) {
     throw new Error(`Expected App to route Start/pairing/settings through Projects: ${expected}`);
   }
+}
+if (!appScreen.includes("onFullScreenChange={setIsRemoteControlFullScreen}")) {
+  throw new Error("Expected App to disable the global back swipe while remote control is fullscreen");
 }
 if (appScreen.includes("requestAnimationFrame(() => {\n        backSwipeX.setValue(0);")) {
   throw new Error(
@@ -1216,6 +1221,7 @@ for (const expected of [
   "getRemoteFrame",
   "sendRemoteInput",
   "autoStartKey",
+  "onFullScreenChange?(isFullScreen: boolean): void;",
   "startSessionFromDashboard",
   "lastFrameSequenceRef",
   "Image",
@@ -1235,14 +1241,23 @@ for (const expected of [
   "onResponderMove={handleRemoteSurfaceResponderMove}",
   "onResponderRelease={handleRemoteSurfaceResponderRelease}",
   "onStartShouldSetResponder={remoteSurfaceShouldSetResponder}",
+  "onStartShouldSetResponderCapture={remoteSurfaceShouldSetResponderCapture}",
+  "onMoveShouldSetResponderCapture={remoteSurfaceShouldSetResponderCapture}",
   "sendRemoteCursorMove",
   "positionFromSurfacePoint",
   "remoteViewport",
   "remoteViewportRef",
   "pinchGestureRef",
+  "didPinchDuringGestureRef",
   "touchStartRef",
   "startRemoteViewportPinch",
   "updateRemoteViewportPinch",
+  "remoteSurfaceShouldSetResponderCapture",
+  "event.nativeEvent.touches.length >= 2",
+  "didPinchDuringGestureRef.current = true",
+  "didPinchDuringGestureRef.current = false",
+  "onFullScreenChange?.(true)",
+  "onFullScreenChange?.(false)",
   "remoteViewportContentStyle",
   "surfacePointFromTouchEvent",
   "cursorPositionFromSurfacePoint",

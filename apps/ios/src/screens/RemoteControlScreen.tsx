@@ -57,13 +57,15 @@ interface RemoteControlScreenProps {
   autoStartKey: number;
   hostMachineId: string;
   onBack(): void;
+  onFullScreenChange?(isFullScreen: boolean): void;
 }
 
 export function RemoteControlScreen({
   api,
   autoStartKey,
   hostMachineId,
-  onBack
+  onBack,
+  onFullScreenChange
 }: RemoteControlScreenProps) {
   const [session, setSession] = useState<RemoteControlSession | null>(null);
   const [frameUri, setFrameUri] = useState<string | null>(null);
@@ -81,6 +83,7 @@ export function RemoteControlScreen({
     useState<RemoteViewportState>(DEFAULT_REMOTE_VIEWPORT);
   const windowDimensions = useWindowDimensions();
   const lastFrameSequenceRef = useRef(-1);
+  const didPinchDuringGestureRef = useRef(false);
   const pinchGestureRef = useRef<PinchGestureState | null>(null);
   const remoteViewportRef = useRef<RemoteViewportState>(DEFAULT_REMOTE_VIEWPORT);
   const startedAutoStartKeyRef = useRef(0);
@@ -111,6 +114,12 @@ export function RemoteControlScreen({
       }
     };
   }, [isFullScreen]);
+
+  useEffect(() => {
+    return () => {
+      onFullScreenChange?.(false);
+    };
+  }, [onFullScreenChange]);
 
   useEffect(() => {
     if (!hostMachineId || autoStartKey <= 0 || startedAutoStartKeyRef.current === autoStartKey) {
@@ -202,10 +211,12 @@ export function RemoteControlScreen({
   }
 
   function openFullScreen() {
+    onFullScreenChange?.(true);
     setIsFullScreen(true);
   }
 
   function closeFullScreen() {
+    onFullScreenChange?.(false);
     setIsFullScreen(false);
     setIsMissionControlMode(false);
     setRemoteViewport(DEFAULT_REMOTE_VIEWPORT);
@@ -249,13 +260,29 @@ export function RemoteControlScreen({
     return true;
   }
 
+  function remoteSurfaceShouldSetResponderCapture(event: GestureResponderEvent) {
+    if (event.nativeEvent.touches.length >= 2) {
+      claimRemoteViewportPinch(event.nativeEvent.touches);
+      return true;
+    }
+
+    return false;
+  }
+
   function handleRemoteSurfaceResponderGrant(event: GestureResponderEvent) {
     const touches = event.nativeEvent.touches;
     if (touches.length >= 2) {
-      startRemoteViewportPinch(touches);
+      claimRemoteViewportPinch(touches);
       return;
     }
 
+    if (didPinchDuringGestureRef.current) {
+      touchStartRef.current = null;
+      return;
+    }
+
+    didPinchDuringGestureRef.current = false;
+    pinchGestureRef.current = null;
     touchStartRef.current = surfacePointFromTouchEvent(event);
   }
 
@@ -265,18 +292,16 @@ export function RemoteControlScreen({
       return;
     }
 
-    if (!pinchGestureRef.current) {
-      startRemoteViewportPinch(touches);
-      return;
-    }
-
-    updateRemoteViewportPinch(touches);
+    claimRemoteViewportPinch(touches);
   }
 
   function handleRemoteSurfaceResponderRelease(event: GestureResponderEvent) {
-    if (pinchGestureRef.current) {
+    if (pinchGestureRef.current || didPinchDuringGestureRef.current) {
       pinchGestureRef.current = null;
       touchStartRef.current = null;
+      if (event.nativeEvent.touches.length === 0) {
+        didPinchDuringGestureRef.current = false;
+      }
       return;
     }
 
@@ -293,6 +318,18 @@ export function RemoteControlScreen({
   function handleRemoteSurfaceResponderTerminate() {
     pinchGestureRef.current = null;
     touchStartRef.current = null;
+    didPinchDuringGestureRef.current = false;
+  }
+
+  function claimRemoteViewportPinch(touches: readonly NativeTouchEvent[]) {
+    didPinchDuringGestureRef.current = true;
+    touchStartRef.current = null;
+    if (pinchGestureRef.current) {
+      updateRemoteViewportPinch(touches);
+      return;
+    }
+
+    startRemoteViewportPinch(touches);
   }
 
   function startRemoteViewportPinch(touches: readonly NativeTouchEvent[]) {
@@ -515,11 +552,13 @@ export function RemoteControlScreen({
               setFullScreenSurfaceSize(nextSize);
               setRemoteViewport(clampRemoteViewport(remoteViewportRef.current, nextSize));
             }}
+            onMoveShouldSetResponderCapture={remoteSurfaceShouldSetResponderCapture}
             onMoveShouldSetResponder={remoteSurfaceShouldSetResponder}
             onResponderGrant={handleRemoteSurfaceResponderGrant}
             onResponderMove={handleRemoteSurfaceResponderMove}
             onResponderRelease={handleRemoteSurfaceResponderRelease}
             onResponderTerminate={handleRemoteSurfaceResponderTerminate}
+            onStartShouldSetResponderCapture={remoteSurfaceShouldSetResponderCapture}
             onStartShouldSetResponder={remoteSurfaceShouldSetResponder}
             style={[styles.fullScreenSurface, fullScreenFrameStyle]}
           >

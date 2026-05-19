@@ -10,7 +10,7 @@ describe("macOS remote-control driver", () => {
       execFile: async (command, args) => {
         calls.push({ command, args });
         if (command === "/usr/bin/sips" && args.includes("-g")) {
-          return { stderr: "", stdout: "  pixelWidth: 1170\n  pixelHeight: 731\n" };
+          return { stderr: "", stdout: "  pixelWidth: 1920\n  pixelHeight: 1200\n" };
         }
         return { stderr: "", stdout: "" };
       },
@@ -21,9 +21,9 @@ describe("macOS remote-control driver", () => {
 
     await expect(driver.captureFrame(session())).resolves.toMatchObject({
       dataBase64: Buffer.from("jpeg-bytes").toString("base64"),
-      height: 600,
+      height: 800,
       mimeType: "image/jpeg",
-      width: 960
+      width: 1280
     });
     expect(calls.map((call) => call.command)).toEqual([
       "/usr/sbin/screencapture",
@@ -31,6 +31,8 @@ describe("macOS remote-control driver", () => {
       "/usr/bin/sips"
     ]);
     expect(calls[0]?.args).toEqual(expect.arrayContaining(["-C"]));
+    expect(calls[2]?.args).toEqual(expect.arrayContaining(["-Z", "1280"]));
+    expect(calls[2]?.args).toEqual(expect.arrayContaining(["formatOptions", "22"]));
   });
 
   it("reuses cached screen dimensions so steady-state captures avoid an extra sips pass", async () => {
@@ -50,8 +52,8 @@ describe("macOS remote-control driver", () => {
 
     await driver.captureFrame(session());
     await expect(driver.captureFrame(session())).resolves.toMatchObject({
-      height: 600,
-      width: 960
+      height: 800,
+      width: 1280
     });
 
     const dimensionProbeCount = calls.filter(

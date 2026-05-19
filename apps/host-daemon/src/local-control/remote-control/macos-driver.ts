@@ -24,8 +24,8 @@ interface DriverOptions {
 }
 
 const runExecFile = promisify(execFileCallback) as ExecFile;
-const CAPTURE_WIDTH = 960;
-const FRAME_JPEG_QUALITY = 28;
+const CAPTURE_WIDTH = 1280;
+const FRAME_JPEG_QUALITY = 22;
 const SCREEN_DIMENSION_PROBE_INTERVAL_FRAMES = 30;
 const DEFAULT_DISPLAY_WIDTH = 1440;
 const DEFAULT_DISPLAY_HEIGHT = 900;
