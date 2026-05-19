@@ -115,6 +115,9 @@ importers:
       expo-notifications:
         specifier: ~55.0.22
         version: 55.0.22(expo@55.0.19)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.5))(react@19.2.5)(typescript@6.0.3)
+      expo-screen-orientation:
+        specifier: ~55.0.15
+        version: 55.0.15(expo@55.0.19)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.5))
       expo-secure-store:
         specifier: ^55.0.13
         version: 55.0.13(expo@55.0.19)
@@ -3559,6 +3562,12 @@ packages:
     peerDependencies:
       expo: '*'
       react: '*'
+      react-native: '*'
+
+  expo-screen-orientation@55.0.15:
+    resolution: {integrity: sha512-13dJZkRiVVN958H20dVCWOF5dxrwO97keMgG6gJw0TvOWI+8QAkbQVerD91LTAddu2WUx9VwUrghKoxSG4ehtw==}
+    peerDependencies:
+      expo: '*'
       react-native: '*'
 
   expo-secure-store@55.0.13:
@@ -9555,6 +9564,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
       - typescript
+
+  expo-screen-orientation@55.0.15(expo@55.0.19)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.5)):
+    dependencies:
+      expo: 55.0.19(@babel/core@7.29.0)(@expo/dom-webview@55.0.5)(react-dom@19.2.5(react@19.2.5))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.5))(react@19.2.5)(typescript@6.0.3)
+      react-native: 0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.5)
 
   expo-secure-store@55.0.13(expo@55.0.19):
     dependencies:

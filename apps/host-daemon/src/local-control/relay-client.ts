@@ -61,6 +61,16 @@ interface RelayHostErrorMessage {
   type: "error";
 }
 
+interface RelayWritableSocketLike {
+  readyState: number;
+  send(message: string): void;
+}
+
+interface RelaySocketLike extends RelayWritableSocketLike {
+  close(code?: number, reason?: string): void;
+  terminate?(): void;
+}
+
 interface RelayHeartbeatControllerInput {
   clearIntervalFn?: (timer: ReturnType<typeof setInterval>) => void;
   diagnostics?: MobileControlDiagnosticsLogger;
@@ -69,7 +79,7 @@ interface RelayHeartbeatControllerInput {
   now?: () => number;
   onStale?: () => void;
   setIntervalFn?: (callback: () => void, intervalMs: number) => ReturnType<typeof setInterval>;
-  socket: Pick<WebSocket, "close" | "readyState" | "send"> & Partial<Pick<WebSocket, "terminate">>;
+  socket: RelaySocketLike;
   staleAfterMs?: number;
 }
 
@@ -289,7 +299,7 @@ export function createRelayHeartbeatController(input: RelayHeartbeatControllerIn
 
 export async function handleRelaySocketMessage(
   raw: string,
-  input: Omit<HandleRelayRequestInput, "envelope"> & { socket: WebSocket | null }
+  input: Omit<HandleRelayRequestInput, "envelope"> & { socket: RelayWritableSocketLike | null }
 ) {
   const message = parseRelayHostRequest(raw);
   if (!message) {

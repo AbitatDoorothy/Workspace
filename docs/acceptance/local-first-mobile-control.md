@@ -16,3 +16,16 @@
 - [ ] An expired or already-consumed pairing payload is rejected.
 - [ ] Phone on cellular can control the Mac while the Mac remains online and `abitat iphone` is running.
 - [ ] Core mobile control succeeds without a hosted account or hosted database; `workspace.abitat.io` is only an encrypted relay.
+
+## Whole Mac Remote Control Acceptance
+
+- [ ] Start the Mac host with `abitat iphone`.
+- [ ] Pair the iPhone with the QR/manual payload from that Mac.
+- [ ] Open the dashboard page that shows token usage, Request Log, and Disconnect.
+- [ ] Tap START REMOTE CONTROL on that dashboard page.
+- [ ] If macOS permission is missing, the iPhone shows Screen Recording or Accessibility as needed and existing project/thread functions still work.
+- [ ] After granting permission, return to the dashboard and tap START REMOTE CONTROL again; the phone shows a whole-Mac frame.
+- [ ] Tapping the frame sends a click to the Mac.
+- [ ] Typing text and pressing Send Text enters that text on the Mac.
+- [ ] Tap End Session.
+- [ ] Return to Projects and confirm projects, expanded threads, archive, unread LEDs, chat, queue/steer, logs, token dashboard, generated files, and notifications still behave as before.

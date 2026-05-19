@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Feather } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { ActivityIndicator, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
@@ -14,6 +15,7 @@ import type {
 interface SettingsScreenProps {
   api: ApiClient;
   onBack(): void;
+  onStartRemoteControl(): void;
   onSignOut(): void;
 }
 
@@ -30,7 +32,7 @@ const TOKEN_USAGE_METRICS: Array<{ field: keyof CodexTokenUsageBucket; label: st
   { field: "cachedInputTokens", label: "CACHE" }
 ];
 
-export function SettingsScreen({ api, onSignOut }: SettingsScreenProps) {
+export function SettingsScreen({ api, onStartRemoteControl, onSignOut }: SettingsScreenProps) {
   const [requestLogProgress, setRequestLogProgress] = useState<number | null>(null);
   const [requestLogStatus, setRequestLogStatus] = useState<string | null>(null);
   const [selectedTokenTimeframe, setSelectedTokenTimeframe] =
@@ -219,6 +221,19 @@ export function SettingsScreen({ api, onSignOut }: SettingsScreenProps) {
           ) : null}
         </View>
         <Pressable
+          accessibilityLabel="Start remote control"
+          accessibilityRole="button"
+          onPress={onStartRemoteControl}
+          style={({ pressed }) => [
+            styles.remoteControlButton,
+            pressed ? styles.buttonPressed : null
+          ]}
+        >
+          <Feather color="#f5f5f5" name="monitor" size={20} />
+          <Text style={styles.remoteControlButtonText}>START REMOTE CONTROL</Text>
+          <Feather color="#8b949e" name="chevron-right" size={18} />
+        </Pressable>
+        <Pressable
           accessibilityLabel="Disconnect iPhone from Mac"
           accessibilityRole="button"
           onPress={onSignOut}
@@ -278,6 +293,26 @@ const styles = StyleSheet.create({
     height: 4,
     overflow: "hidden",
     width: 272
+  },
+  remoteControlButton: {
+    alignItems: "center",
+    borderColor: "rgba(255,255,255,0.18)",
+    borderRadius: 4,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "center",
+    minHeight: 46,
+    minWidth: 272,
+    paddingHorizontal: 18
+  },
+  remoteControlButtonText: {
+    color: "#f3f3f3",
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "400",
+    letterSpacing: 3,
+    lineHeight: 16
   },
   requestLogButton: {
     alignItems: "center",

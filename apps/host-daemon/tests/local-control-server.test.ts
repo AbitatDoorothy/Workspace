@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { MobileControlDiagnosticsLogger } from "../src/local-control/diagnostics-log";
+import type { LocalRemoteControlManager } from "../src/local-control/remote-control/types";
 import { createLocalControlStore } from "../src/local-control/state";
 import { startLocalControlServer, type LocalCodexBridge } from "../src/local-control/server";
 
@@ -414,6 +415,153 @@ describe("local control server", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("serves local remote-control sessions, frames, and input only to the paired phone", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "abitat-local-remote-control-"));
+    const store = createLocalControlStore({
+      idGenerator: (prefix) => `${prefix}_test`,
+      randomSecret: (() => {
+        let index = 0;
+        return () => `secret_${++index}`;
+      })(),
+      statePath: join(directory, "state.json")
+    });
+    const remoteControl = createFakeRemoteControlManager();
+    const server = await startLocalControlServer({
+      bindHost: "127.0.0.1",
+      codex: createFakeCodexBridge(),
+      endpoint: "http://127.0.0.1:0",
+      port: 0,
+      remoteControl,
+      store,
+      transport: "local"
+    });
+    servers.push(server);
+
+    try {
+      const endpoint = server.endpoint;
+      const pairing = await store.createPairing({ endpoint, transport: "local" });
+      const paired = await fetchJson(`${endpoint}/pairing/consume`, {
+        body: JSON.stringify({
+          deviceName: "Reece iPhone",
+          pairingSecret: pairing.pairingSecret,
+          platform: "ios"
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      });
+      const auth = { authorization: `Bearer ${paired.clientToken}` };
+
+      await expect(
+        fetchJson(`${endpoint}/api/remote-control/sessions`, {
+          body: JSON.stringify({
+            hostMachineId: "not_this_mac",
+            inputEnabled: true,
+            screenEnabled: true
+          }),
+          headers: { ...auth, "content-type": "application/json" },
+          method: "POST"
+        })
+      ).rejects.toThrow("403");
+
+      await expect(
+        fetchJson(`${endpoint}/api/remote-control/sessions`, {
+          body: JSON.stringify({
+            hostMachineId: "mac_test",
+            inputEnabled: true,
+            screenEnabled: true
+          }),
+          headers: { ...auth, "content-type": "application/json" },
+          method: "POST"
+        })
+      ).resolves.toMatchObject({
+        session: {
+          id: "remote_test",
+          hostMachineId: "mac_test",
+          clientMachineId: "phone_test"
+        }
+      });
+
+      await expect(
+        fetchJson(`${endpoint}/api/remote-control/sessions/remote_test`, {
+          headers: auth
+        })
+      ).resolves.toMatchObject({
+        session: {
+          id: "remote_test",
+          status: "active"
+        }
+      });
+
+      await expect(
+        fetchJson(`${endpoint}/api/remote-control/sessions/remote_test/frame?afterSequence=0`, {
+          headers: auth
+        })
+      ).resolves.toMatchObject({
+        frame: {
+          sequence: 1,
+          dataBase64: "ZnJhbWU="
+        }
+      });
+
+      await expect(
+        fetchJson(`${endpoint}/api/remote-control/sessions/remote_test/input`, {
+          body: JSON.stringify({
+            event: {
+              type: "text",
+              value: "hello"
+            }
+          }),
+          headers: { ...auth, "content-type": "application/json" },
+          method: "POST"
+        })
+      ).resolves.toEqual({
+        ok: true,
+        session: expect.objectContaining({
+          id: "remote_test"
+        })
+      });
+      expect(remoteControl.inputEvents).toEqual([{ type: "text", value: "hello" }]);
+
+      await expect(
+        fetchJson(`${endpoint}/api/remote-control/sessions/remote_test/signals`, {
+          headers: auth
+        })
+      ).resolves.toEqual({
+        signals: []
+      });
+
+      await expect(
+        fetchJson(`${endpoint}/api/remote-control/sessions/remote_test/signals`, {
+          body: JSON.stringify({
+            payload: {
+              ignored: true
+            },
+            type: "status"
+          }),
+          headers: { ...auth, "content-type": "application/json" },
+          method: "POST"
+        })
+      ).resolves.toMatchObject({
+        signal: {
+          type: "status"
+        }
+      });
+
+      await expect(
+        fetchJson(`${endpoint}/api/remote-control/sessions/remote_test`, {
+          headers: auth,
+          method: "DELETE"
+        })
+      ).resolves.toMatchObject({
+        session: {
+          status: "ended"
+        }
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 function createFakeCodexBridge(options: { continueError?: Error } = {}): LocalCodexBridge & {
@@ -560,6 +708,62 @@ function createMemoryDiagnostics() {
   };
 
   return logger;
+}
+
+function createFakeRemoteControlManager(): LocalRemoteControlManager & {
+  inputEvents: unknown[];
+} {
+  const session = {
+    clientMachineId: "phone_test",
+    createdAt: "2026-05-18T09:00:00.000Z",
+    errorMessage: null,
+    hostMachineId: "mac_test",
+    id: "remote_test",
+    inputEnabled: true,
+    permissionState: {
+      accessibility: "unknown" as const,
+      screenRecording: "granted" as const
+    },
+    screenEnabled: true,
+    status: "active" as const,
+    updatedAt: "2026-05-18T09:00:01.000Z"
+  };
+  const inputEvents: unknown[] = [];
+
+  return {
+    inputEvents,
+    async applyInput(_sessionId, _clientMachineId, event) {
+      inputEvents.push(event);
+      return session;
+    },
+    async captureNextFrameForTest() {},
+    async endSession() {
+      return { ...session, status: "ended" as const };
+    },
+    getLatestFrame() {
+      return {
+        frame: {
+          capturedAt: "2026-05-18T09:00:01.000Z",
+          dataBase64: "ZnJhbWU=",
+          height: 720,
+          mimeType: "image/jpeg",
+          sequence: 1,
+          width: 1170
+        },
+        session
+      };
+    },
+    getSession() {
+      return session;
+    },
+    listSessions() {
+      return [session];
+    },
+    async startSession() {
+      return session;
+    },
+    async stopAll() {}
+  };
 }
 
 function tokenUsageBucket(

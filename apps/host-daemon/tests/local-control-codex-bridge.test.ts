@@ -28,46 +28,43 @@ afterEach(async () => {
 describe("local Codex bridge diagnostics", () => {
   it("logs unknown thread item types and completed turns without visible assistant messages", () => {
     const diagnostics = createMemoryDiagnostics();
-    const messages = flattenThreadMessages(
-      {
-        createdAt: 1_778_400_000,
-        cwd: "/Users/reece/Desktop/Demo",
-        ephemeral: false,
-        id: "thread_demo",
-        name: null,
-        preview: "Demo",
-        status: { type: "idle" },
-        turns: [
-          {
-            completedAt: 1_778_400_010,
-            error: null,
-            id: "turn_1",
-            items: [
-              {
-                content: [{ text: "Sensitive user prompt", text_elements: [], type: "text" }],
-                id: "item_user",
-                type: "userMessage"
-              },
-              {
-                id: "item_reasoning",
-                summary: ["hidden reasoning"],
-                type: "reasoning"
-              },
-              {
-                id: "item_unknown",
-                value: "hidden payload",
-                type: "newCodexThing"
-              }
-            ],
-            startedAt: 1_778_400_000,
-            status: { type: "completed" }
-          }
-        ],
-        updatedAt: 1_778_400_010
-      } as any,
-      "codex_thread_thread_demo",
-      diagnostics
-    );
+    const thread = {
+      createdAt: 1_778_400_000,
+      cwd: "/Users/reece/Desktop/Demo",
+      ephemeral: false,
+      id: "thread_demo",
+      name: null,
+      preview: "Demo",
+      status: { type: "idle" },
+      turns: [
+        {
+          completedAt: 1_778_400_010,
+          error: null,
+          id: "turn_1",
+          items: [
+            {
+              content: [{ text: "Sensitive user prompt", text_elements: [], type: "text" }],
+              id: "item_user",
+              type: "userMessage"
+            },
+            {
+              id: "item_reasoning",
+              summary: ["hidden reasoning"],
+              type: "reasoning"
+            },
+            {
+              id: "item_unknown",
+              value: "hidden payload",
+              type: "newCodexThing"
+            }
+          ],
+          startedAt: 1_778_400_000,
+          status: { type: "completed" }
+        }
+      ],
+      updatedAt: 1_778_400_010
+    } as unknown as Parameters<typeof flattenThreadMessages>[0];
+    const messages = flattenThreadMessages(thread, "codex_thread_thread_demo", diagnostics);
 
     expect(messages).toEqual([
       expect.objectContaining({

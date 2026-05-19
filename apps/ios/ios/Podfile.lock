@@ -83,6 +83,29 @@ PODS:
     - ReactCommon
   - ExpoNotifications (55.0.22):
     - ExpoModulesCore
+  - ExpoScreenOrientation (55.0.15):
+    - ExpoModulesCore
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - ExpoSecureStore (55.0.13):
     - ExpoModulesCore
   - ExpoSharing (55.0.18):
@@ -1959,6 +1982,7 @@ DEPENDENCIES:
   - "ExpoModulesCore (from `../../../node_modules/.pnpm/expo-modules-core@55.0.24_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5__react@19.2.5/node_modules/expo-modules-core`)"
   - "ExpoModulesJSI (from `../../../node_modules/.pnpm/expo-modules-core@55.0.24_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5__react@19.2.5/node_modules/expo-modules-core`)"
   - "ExpoNotifications (from `../../../node_modules/.pnpm/expo-notifications@55.0.22_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+r_c7e8963d42a91885492e2b454ed077be/node_modules/expo-notifications/ios`)"
+  - "ExpoScreenOrientation (from `../../../node_modules/.pnpm/expo-screen-orientation@55.0.15_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5_/node_modules/expo-screen-orientation/ios`)"
   - "ExpoSecureStore (from `../../../node_modules/.pnpm/expo-secure-store@55.0.13_expo@55.0.19/node_modules/expo-secure-store/ios`)"
   - "ExpoSharing (from `../../../node_modules/.pnpm/expo-sharing@55.0.18_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5__react@19.2.5/node_modules/expo-sharing/ios`)"
   - "FBLazyVector (from `../../../node_modules/.pnpm/react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5/node_modules/react-native/Libraries/FBLazyVector`)"
@@ -2074,6 +2098,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.pnpm/expo-modules-core@55.0.24_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5__react@19.2.5/node_modules/expo-modules-core"
   ExpoNotifications:
     :path: "../../../node_modules/.pnpm/expo-notifications@55.0.22_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+r_c7e8963d42a91885492e2b454ed077be/node_modules/expo-notifications/ios"
+  ExpoScreenOrientation:
+    :path: "../../../node_modules/.pnpm/expo-screen-orientation@55.0.15_expo@55.0.19_react-native@0.83.6_@babel+core@7.29.0_@types+react@19.2.14_react@19.2.5_/node_modules/expo-screen-orientation/ios"
   ExpoSecureStore:
     :path: "../../../node_modules/.pnpm/expo-secure-store@55.0.13_expo@55.0.19/node_modules/expo-secure-store/ios"
   ExpoSharing:
@@ -2247,6 +2273,7 @@ SPEC CHECKSUMS:
   ExpoModulesCore: 0e5079ef327756a902e966a894b9d8982719766c
   ExpoModulesJSI: 9b60671a31c30bc8e24b25632e7cb475a84b9016
   ExpoNotifications: f5c15fdabb5cc3168c20cf49b6551a9d46304657
+  ExpoScreenOrientation: 29c31e328efca91e578eb2cb9cf4b16dc421b5d8
   ExpoSecureStore: 38954f6bcef1287aa04c06fba3b86e8af3291ccd
   ExpoSharing: 5acc9d78894386d31b862b12ed1cebe7dce74e68
   FBLazyVector: 427fa1856a481856091061293ce865a75aa4f20f

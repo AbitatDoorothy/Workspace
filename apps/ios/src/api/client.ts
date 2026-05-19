@@ -24,6 +24,8 @@ import type {
   MobileBootstrap,
   PairingState,
   ProjectSummary,
+  RemoteControlFrame,
+  RemoteControlInputEvent,
   RemoteControlSignal,
   RemoteControlSession
 } from "../types";
@@ -77,6 +79,11 @@ export interface ApiClient {
     options?: { forceRefresh?: boolean; includeRuntime?: boolean }
   ): Promise<ConversationMessage[]>;
   downloadGeneratedFile(conversationId: string, fileId: string): Promise<GeneratedFileDownload>;
+  getRemoteFrame(
+    sessionId: string,
+    afterSequence?: number
+  ): Promise<{ frame: RemoteControlFrame | null; session: RemoteControlSession }>;
+  getRemoteSession(sessionId: string): Promise<RemoteControlSession>;
   requestMobileControlLog(): Promise<MobileDiagnosticsLogDownload>;
   listProjects(): Promise<ProjectSummary[]>;
   listRemoteSignals(sessionId: string): Promise<RemoteControlSignal[]>;
@@ -86,6 +93,10 @@ export interface ApiClient {
     sessionId: string,
     input: { type: string; payload: Record<string, unknown>; recipientMachineId?: string }
   ): Promise<void>;
+  sendRemoteInput(
+    sessionId: string,
+    event: RemoteControlInputEvent
+  ): Promise<RemoteControlSession>;
   uploadAttachment(input: {
     dataBase64: string;
     fileName: string;
@@ -182,6 +193,23 @@ export function createApiClient(pairing: PairingState): ApiClient {
       get(pairing, `/api/mobile/conversations/${conversationId}/files/${fileId}/download`).then(
         (body) => body.file as GeneratedFileDownload
       ),
+    getRemoteFrame: (sessionId, afterSequence) =>
+      get(
+        pairing,
+        `/api/remote-control/sessions/${sessionId}/frame${
+          Number.isFinite(afterSequence) ? `?afterSequence=${afterSequence}` : ""
+        }`
+      ).then(
+        (body) =>
+          body as {
+            frame: RemoteControlFrame | null;
+            session: RemoteControlSession;
+          }
+      ),
+    getRemoteSession: (sessionId) =>
+      get(pairing, `/api/remote-control/sessions/${sessionId}`).then(
+        (body) => body.session as RemoteControlSession
+      ),
     requestMobileControlLog: () =>
       get(pairing, "/api/mobile/diagnostics/log").then(
         (body) => body.log as MobileDiagnosticsLogDownload
@@ -199,6 +227,10 @@ export function createApiClient(pairing: PairingState): ApiClient {
     sendRemoteSignal: (sessionId, input) =>
       post(pairing, `/api/remote-control/sessions/${sessionId}/signals`, input).then(
         () => undefined
+      ),
+    sendRemoteInput: (sessionId, event) =>
+      post(pairing, `/api/remote-control/sessions/${sessionId}/input`, { event }).then(
+        (body) => body.session as RemoteControlSession
       ),
     uploadAttachment: (input) =>
       post(pairing, "/api/mobile/attachments", input).then(

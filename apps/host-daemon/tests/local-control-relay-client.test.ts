@@ -7,8 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   decryptRelayEnvelope,
   encryptRelayEnvelope,
-  relaySessionKey,
-  type RelayEncryptedEnvelope
+  relaySessionKey
 } from "@abitat_reece/shared";
 
 import {
@@ -37,6 +36,9 @@ describe("local relay client", () => {
       send(message: string) {
         this.sent.push(message);
       }
+    } satisfies Parameters<typeof createRelayHeartbeatController>[0]["socket"] & {
+      closed: boolean;
+      sent: string[];
     };
     const controller = createRelayHeartbeatController({
       clearIntervalFn: (timer) => clearedTimers.push(timer as number),
@@ -48,7 +50,7 @@ describe("local relay client", () => {
         scheduled.push(callback);
         return scheduled.length;
       },
-      socket: socket as any,
+      socket,
       staleAfterMs: 30_000
     });
 
@@ -90,6 +92,10 @@ describe("local relay client", () => {
         this.terminated = true;
         this.readyState = 3;
       }
+    } satisfies Parameters<typeof createRelayHeartbeatController>[0]["socket"] & {
+      closed: boolean;
+      sent: string[];
+      terminated: boolean;
     };
     const controller = createRelayHeartbeatController({
       heartbeatIntervalMs: 10_000,
@@ -98,7 +104,7 @@ describe("local relay client", () => {
         scheduled.push(callback);
         return scheduled.length;
       },
-      socket: socket as any,
+      socket,
       staleAfterMs: 30_000
     });
 
@@ -217,6 +223,8 @@ describe("local relay client", () => {
       send(message: string) {
         this.sent.push(message);
       }
+    } satisfies NonNullable<Parameters<typeof handleRelaySocketMessage>[1]["socket"]> & {
+      sent: string[];
     };
 
     try {
@@ -231,7 +239,7 @@ describe("local relay client", () => {
           localEndpoint: "http://127.0.0.1:3901",
           relayId: "relay_test",
           replayCache: createRelayReplayCache(),
-          socket: socket as any,
+          socket,
           store
         }
       );

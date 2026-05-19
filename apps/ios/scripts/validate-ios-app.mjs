@@ -32,6 +32,9 @@ if (packageJson.main !== "index.ts") {
 if (!packageJson.dependencies?.["expo-notifications"]) {
   throw new Error("Expected abitat-ios to depend on expo-notifications");
 }
+if (!packageJson.dependencies?.["expo-screen-orientation"]) {
+  throw new Error("Expected abitat-ios to depend on expo-screen-orientation");
+}
 if (!packageJson.dependencies?.["expo-constants"]) {
   throw new Error("Expected abitat-ios to depend on expo-constants for push registration");
 }
@@ -74,6 +77,9 @@ if (!indexFile.includes("registerRootComponent(App)")) {
 const appJson = JSON.parse(await readFile(join(process.cwd(), "app.json"), "utf8"));
 if (appJson.expo?.icon !== "./assets/icon.png") {
   throw new Error("Expected app.json to use the bundled Abitat app icon");
+}
+if (appJson.expo?.orientation !== "default") {
+  throw new Error("Expected app.json to allow landscape orientation for full-screen remote control");
 }
 const expoNotificationsPlugin = appJson.expo?.plugins?.find((plugin) =>
   Array.isArray(plugin) ? plugin[0] === "expo-notifications" : plugin === "expo-notifications"
@@ -120,6 +126,14 @@ const infoPlist = await readFile(join(process.cwd(), "ios/Abitat/Info.plist"), "
 if (!infoPlist.includes("<key>NSCameraUsageDescription</key>")) {
   throw new Error("Expected native Info.plist to explain QR scanner camera usage");
 }
+for (const orientation of [
+  "UIInterfaceOrientationLandscapeLeft",
+  "UIInterfaceOrientationLandscapeRight"
+]) {
+  if (!infoPlist.includes(`<string>${orientation}</string>`)) {
+    throw new Error(`Expected native Info.plist to allow ${orientation}`);
+  }
+}
 for (const mode of ["fetch", "remote-notification"]) {
   if (!infoPlist.includes(`<string>${mode}</string>`)) {
     throw new Error(`Expected native Info.plist to enable the ${mode} background mode`);
@@ -141,6 +155,9 @@ if (!podfileLock.includes("ExpoClipboard (55.0.13)")) {
 if (!podfileLock.includes("ExpoCamera (55.0.16)")) {
   throw new Error("Expected native iOS Pods to include ExpoCamera for QR pairing scans");
 }
+if (!podfileLock.includes("ExpoScreenOrientation")) {
+  throw new Error("Expected native iOS Pods to include ExpoScreenOrientation for landscape remote control");
+}
 if (!podfileLock.includes("react-native-safe-area-context (5.6.2)")) {
   throw new Error("Expected native iOS Pods to include react-native-safe-area-context");
 }
@@ -154,6 +171,7 @@ const codexModelControls = await readFile(
   "utf8"
 );
 const apiClient = await readFile(join(process.cwd(), "src/api/client.ts"), "utf8");
+const typesFile = await readFile(join(process.cwd(), "src/types.ts"), "utf8");
 const mobileStore = await readFile(join(process.cwd(), "src/state/mobile-store.ts"), "utf8");
 const messageCache = await readFile(join(process.cwd(), "src/state/message-cache.ts"), "utf8");
 const messagePreloader = await readFile(
@@ -1061,7 +1079,21 @@ const settingsScreen = await readFile(
   "utf8"
 );
 for (const expected of [
+  "| \"remoteControl\"",
+  "RemoteControlScreen",
+  "remoteControlStartKey",
+  "startRemoteControlFromDashboard",
+  'navigateToRoute("remoteControl")',
+  "onStartRemoteControl={startRemoteControlFromDashboard}",
+  'routeName === "remoteControl"'
+]) {
+  if (!appScreen.includes(expected) && !settingsScreen.includes(expected) && !typesFile.includes(expected)) {
+    throw new Error(`Expected isolated remote-control route wiring: ${expected}`);
+  }
+}
+for (const expected of [
   "api: ApiClient;",
+  "onStartRemoteControl(): void;",
   "onSignOut(): void;",
   "requestMobileControlLog",
   "requestLogProgress",
@@ -1078,6 +1110,8 @@ for (const expected of [
   "1D",
   "7D",
   "ALL",
+  'accessibilityLabel="Start remote control"',
+  "START REMOTE CONTROL",
   'accessibilityLabel="Request Mac diagnostics log"',
   "REQUEST LOG",
   'accessibilityLabel="Disconnect iPhone from Mac"',
@@ -1177,6 +1211,115 @@ for (const expected of [
 }
 if (!remoteControlScreen.includes('keyboardAppearance="dark"')) {
   throw new Error("Expected RemoteControlScreen to use the dark iOS keyboard");
+}
+for (const expected of [
+  "getRemoteFrame",
+  "sendRemoteInput",
+  "autoStartKey",
+  "startSessionFromDashboard",
+  "lastFrameSequenceRef",
+  "Image",
+  "data:image/jpeg;base64,${result.frame.dataBase64}",
+  "permissionState",
+  "Screen Recording",
+  "Accessibility",
+  "isFullScreen",
+  "openFullScreen",
+  "closeFullScreen",
+  "lockAsync",
+  "OrientationLock.LANDSCAPE",
+  "OrientationLock.PORTRAIT_UP",
+  "Modal",
+  "supportedOrientations",
+  "REMOTE_FRAME_REFRESH_INTERVAL_MS = 120",
+  "onResponderMove={handleRemoteSurfaceResponderMove}",
+  "onResponderRelease={handleRemoteSurfaceResponderRelease}",
+  "onStartShouldSetResponder={remoteSurfaceShouldSetResponder}",
+  "sendRemoteCursorMove",
+  "positionFromSurfacePoint",
+  "remoteViewport",
+  "remoteViewportRef",
+  "pinchGestureRef",
+  "touchStartRef",
+  "startRemoteViewportPinch",
+  "updateRemoteViewportPinch",
+  "remoteViewportContentStyle",
+  "surfacePointFromTouchEvent",
+  "cursorPositionFromSurfacePoint",
+  "MAX_REMOTE_VIEWPORT_SCALE",
+  "REMOTE_TAP_MOVEMENT_TOLERANCE",
+  "visualCursorPosition",
+  "visualCursorSyncState",
+  "syncVisualCursorFromHost",
+  "isMissionControlMode",
+  "setIsMissionControlMode(true)",
+  "setIsMissionControlMode(false)",
+  "sendRemoteClick",
+  "showDock",
+  "showMissionControl",
+  "moveMissionControlDesktop",
+  "Left click",
+  "Right click",
+  "Show Dock",
+  "Dock",
+  "Show all desktops",
+  "Desktops",
+  "Move to left desktop",
+  "Move to right desktop",
+  'key: `mission-control-${direction}`',
+  "isMissionControlMode ? (",
+  "styles.remoteClickRail",
+  "styles.remoteClickRailFour",
+  "styles.remoteClickRailThree",
+  "styles.remoteClickButton",
+  "styles.remoteClickLabel",
+  'key: "dock"',
+  'key: "mission-control"',
+  "x: position.x",
+  "y: position.y",
+  "session.cursorPosition",
+  'name="mouse-pointer"',
+  "styles.visualCursor",
+  "styles.visualCursorSynced",
+  "styles.visualCursorPending",
+  "fullScreenSurfaceSize",
+  'accessibilityLabel="Open full screen remote control"',
+  'accessibilityLabel="Exit full screen remote control"',
+  "styles.fullScreenBackdrop",
+  "styles.fullScreenCloseButton",
+  "Back to Dashboard"
+]) {
+  if (!remoteControlScreen.includes(expected)) {
+    throw new Error(`Expected RemoteControlScreen polling MVP behavior: ${expected}`);
+  }
+}
+if (remoteControlScreen.includes("forceSynced")) {
+  throw new Error("Expected RemoteControlScreen not to force-snap the visual cursor on host ack");
+}
+for (const removed of [
+  "PanResponder",
+  "trackpadPanResponder",
+  "onPanResponderMove",
+  "styles.trackpadCursor",
+  "setTrackpadCursorPosition",
+  "DEFAULT_TRACKPAD_CURSOR_POSITION",
+  "trackpadCursorPositionRef",
+  "trackpadDragStartRef"
+]) {
+  if (remoteControlScreen.includes(removed)) {
+    throw new Error(`Expected RemoteControlScreen to avoid laggy local cursor overlay: ${removed}`);
+  }
+}
+for (const expected of [
+  "getRemoteSession",
+  "getRemoteFrame",
+  "sendRemoteInput",
+  "/api/remote-control/sessions/${sessionId}/frame",
+  "/api/remote-control/sessions/${sessionId}/input"
+]) {
+  if (!apiClient.includes(expected)) {
+    throw new Error(`Expected API client to support local remote-control frame/input APIs: ${expected}`);
+  }
 }
 for (const expected of ["forceRefresh?: boolean", 'params.push("forceRefresh=true")']) {
   if (!apiClient.includes(expected)) {

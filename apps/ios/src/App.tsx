@@ -8,11 +8,13 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
+import { lockAsync, OrientationLock } from "expo-screen-orientation";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { PairingScreen } from "./screens/PairingScreen";
 import { SplashScreen } from "./screens/SplashScreen";
 import { ProjectsScreen } from "./screens/ProjectsScreen";
+import { RemoteControlScreen } from "./screens/RemoteControlScreen";
 import { ConversationScreen } from "./screens/ConversationScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import {
@@ -61,6 +63,7 @@ function AppContent() {
   const [route, setRoute] = useState<RouteName>("projects");
   const [activeRouteLayerKey, setActiveRouteLayerKey] = useState("route-projects-0");
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
+  const [remoteControlStartKey, setRemoteControlStartKey] = useState(0);
   const [forwardRoute, setForwardRoute] = useState<NavigationRouteLayer | null>(null);
   const [swipeBackPreviewRoute, setSwipeBackPreviewRoute] = useState<NavigationRouteLayer | null>(
     null
@@ -139,6 +142,12 @@ function AppContent() {
     },
     [store.messageCacheScope]
   );
+
+  useEffect(() => {
+    void lockAsync(OrientationLock.PORTRAIT_UP).catch((caught) => {
+      console.warn(`[orientation] ${errorMessage(caught)}`);
+    });
+  }, []);
 
   useEffect(() => {
     if (!store.isPaired) {
@@ -258,6 +267,10 @@ function AppContent() {
     },
     [backSwipeX, createRouteLayerKey, forwardSlideX, route, windowWidth]
   );
+  const startRemoteControlFromDashboard = useCallback(() => {
+    setRemoteControlStartKey((current) => current + 1);
+    navigateToRoute("remoteControl");
+  }, [navigateToRoute]);
   const beginBackSwipe = useCallback(() => {
     const targetRoute = routeBackOneLevel(route);
     if (targetRoute === route) {
@@ -412,6 +425,17 @@ function AppContent() {
       );
     }
 
+    if (routeName === "remoteControl") {
+      return (
+        <RemoteControlScreen
+          api={store.api}
+          autoStartKey={remoteControlStartKey}
+          hostMachineId={store.pairing?.hostMachineId ?? store.pairing?.macId ?? ""}
+          onBack={goBackOneLevel}
+        />
+      );
+    }
+
     if (routeName === "conversation" && conversation) {
       return (
         <ConversationScreen
@@ -431,6 +455,7 @@ function AppContent() {
         <SettingsScreen
           api={store.api}
           onBack={goBackOneLevel}
+          onStartRemoteControl={startRemoteControlFromDashboard}
           onSignOut={() => {
             void store.signOut();
             setRoute("projects");
@@ -612,7 +637,7 @@ function routeBackOneLevel(route: RouteName): RouteName {
     return "projects";
   }
 
-  if (route === "settings" || route === "workspace") {
+  if (route === "remoteControl" || route === "settings" || route === "workspace") {
     return "projects";
   }
 

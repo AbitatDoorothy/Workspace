@@ -1,74 +1,186 @@
 import { useEffect, useRef, useState } from "react";
+import { Feather } from "@expo/vector-icons";
+import { lockAsync, OrientationLock } from "expo-screen-orientation";
 import {
+  type GestureResponderEvent,
   Image,
+  Modal,
+  type NativeTouchEvent,
+  Pressable,
+  StyleSheet,
   Text,
   TextInput,
-  View,
-  type NativeSyntheticEvent,
-  type NativeTouchEvent
+  useWindowDimensions,
+  View
 } from "react-native";
 
 import type { ApiClient } from "../api/client";
 import { Button, Header, StatusPill } from "../components/Controls";
 import { Screen } from "../components/Screen";
 import { colors, sharedStyles } from "../theme";
-import type { RemoteControlSession } from "../types";
+import type { RemoteControlCursorPosition, RemoteControlSession } from "../types";
+
+const REMOTE_FRAME_REFRESH_INTERVAL_MS = 120;
+const CURSOR_SYNC_TOLERANCE = 0.012;
+const CURRENT_CURSOR_CLICK_ORIGIN = { x: 0, y: 0 };
+const DEFAULT_REMOTE_VIEWPORT: RemoteViewportState = { offsetX: 0, offsetY: 0, scale: 1 };
+const MAX_REMOTE_VIEWPORT_SCALE = 4;
+const MIN_REMOTE_VIEWPORT_SCALE = 1;
+const REMOTE_TAP_MOVEMENT_TOLERANCE = 8;
+const VISUAL_CURSOR_SIZE = 30;
+
+type VisualCursorSyncState = "pending" | "synced";
+
+interface RemoteViewportState {
+  offsetX: number;
+  offsetY: number;
+  scale: number;
+}
+
+interface RemoteSurfaceSize {
+  height: number;
+  width: number;
+}
+
+interface SurfacePoint {
+  x: number;
+  y: number;
+}
+
+interface PinchGestureState {
+  anchor: SurfacePoint;
+  initialDistance: number;
+}
 
 interface RemoteControlScreenProps {
   api: ApiClient;
+  autoStartKey: number;
   hostMachineId: string;
+  onBack(): void;
 }
 
-type ControlMode = "trackpad" | "direct" | "keyboard";
-
-export function RemoteControlScreen({ api, hostMachineId }: RemoteControlScreenProps) {
+export function RemoteControlScreen({
+  api,
+  autoStartKey,
+  hostMachineId,
+  onBack
+}: RemoteControlScreenProps) {
   const [session, setSession] = useState<RemoteControlSession | null>(null);
-  const [mode, setMode] = useState<ControlMode>("trackpad");
+  const [frameUri, setFrameUri] = useState<string | null>(null);
+  const [frameAspectRatio, setFrameAspectRatio] = useState(16 / 10);
   const [keyboardText, setKeyboardText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [frameDataUrl, setFrameDataUrl] = useState<string | null>(null);
-  const [surfaceSize, setSurfaceSize] = useState({ height: 1, width: 1 });
-  const seenSignalIds = useRef(new Set<string>());
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [isMissionControlMode, setIsMissionControlMode] = useState(false);
+  const [visualCursorPosition, setVisualCursorPositionState] =
+    useState<RemoteControlCursorPosition | null>(null);
+  const [visualCursorSyncState, setVisualCursorSyncStateState] =
+    useState<VisualCursorSyncState>("synced");
+  const [fullScreenSurfaceSize, setFullScreenSurfaceSize] = useState({ height: 1, width: 1 });
+  const [remoteViewport, setRemoteViewportState] =
+    useState<RemoteViewportState>(DEFAULT_REMOTE_VIEWPORT);
+  const windowDimensions = useWindowDimensions();
+  const lastFrameSequenceRef = useRef(-1);
+  const pinchGestureRef = useRef<PinchGestureState | null>(null);
+  const remoteViewportRef = useRef<RemoteViewportState>(DEFAULT_REMOTE_VIEWPORT);
+  const startedAutoStartKeyRef = useRef(0);
+  const touchStartRef = useRef<SurfacePoint | null>(null);
+  const visualCursorPositionRef = useRef<RemoteControlCursorPosition | null>(null);
+  const visualCursorSyncStateRef = useRef<VisualCursorSyncState>("synced");
+  const fullScreenFrameStyle = remoteFrameLayout({
+    aspectRatio: frameAspectRatio,
+    height: windowDimensions.height,
+    width: windowDimensions.width
+  });
+  const fullScreenContentStyle = remoteViewportContentStyle({
+    height: fullScreenFrameStyle.height,
+    viewport: remoteViewport,
+    width: fullScreenFrameStyle.width
+  });
 
   useEffect(() => {
-    if (!session) {
+    void lockAsync(isFullScreen ? OrientationLock.LANDSCAPE : OrientationLock.PORTRAIT_UP).catch(
+      (caught) => {
+        setError(caught instanceof Error ? caught.message : "Unable to rotate remote control");
+      }
+    );
+
+    return () => {
+      if (isFullScreen) {
+        void lockAsync(OrientationLock.PORTRAIT_UP).catch(() => undefined);
+      }
+    };
+  }, [isFullScreen]);
+
+  useEffect(() => {
+    if (!hostMachineId || autoStartKey <= 0 || startedAutoStartKeyRef.current === autoStartKey) {
+      return;
+    }
+
+    startedAutoStartKeyRef.current = autoStartKey;
+    void startSessionFromDashboard();
+  }, [autoStartKey, hostMachineId]);
+
+  useEffect(() => {
+    if (!session || session.status === "ended" || session.status === "failed") {
       return;
     }
 
     let cancelled = false;
+    let refreshInFlight = false;
+    const sessionId = session.id;
+    async function refreshFrame() {
+      if (refreshInFlight) {
+        return;
+      }
+
+      refreshInFlight = true;
+      try {
+        const result = await api.getRemoteFrame(sessionId, lastFrameSequenceRef.current);
+        if (cancelled) {
+          return;
+        }
+
+        setSession(result.session);
+        syncVisualCursorFromHost(result.session.cursorPosition ?? null);
+        if (result.frame) {
+          lastFrameSequenceRef.current = result.frame.sequence;
+          setFrameAspectRatio(result.frame.width / result.frame.height);
+          setFrameUri(`data:image/jpeg;base64,${result.frame.dataBase64}`);
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : "Unable to refresh Mac screen");
+        }
+      } finally {
+        refreshInFlight = false;
+      }
+    }
+
+    void refreshFrame();
     const timer = setInterval(() => {
-      api
-        .listRemoteSignals(session.id)
-        .then((signals) => {
-          if (cancelled) {
-            return;
-          }
-
-          for (const signal of signals) {
-            if (seenSignalIds.current.has(signal.id)) {
-              continue;
-            }
-            seenSignalIds.current.add(signal.id);
-
-            if (signal.type === "frame" && typeof signal.payload.dataUrl === "string") {
-              setFrameDataUrl(signal.payload.dataUrl);
-            }
-          }
-        })
-        .catch(() => undefined);
-    }, 900);
+      void refreshFrame();
+    }, REMOTE_FRAME_REFRESH_INTERVAL_MS);
 
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [api, session]);
+  }, [api, session?.id, session?.status]);
 
-  async function start() {
+  async function startSessionFromDashboard() {
     setError(null);
+    lastFrameSequenceRef.current = -1;
+    setFrameUri(null);
+    setFrameAspectRatio(16 / 10);
+    setIsMissionControlMode(false);
+    setRemoteViewport(DEFAULT_REMOTE_VIEWPORT);
+    setVisualCursorPosition(null, "synced");
 
     try {
-      setSession(await api.createRemoteSession(hostMachineId));
+      const nextSession = await api.createRemoteSession(hostMachineId);
+      setSession(nextSession);
+      syncVisualCursorFromHost(nextSession.cursorPosition ?? null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to start remote control");
     }
@@ -79,49 +191,274 @@ export function RemoteControlScreen({ api, hostMachineId }: RemoteControlScreenP
       return;
     }
 
-    setSession(await api.endRemoteSession(session.id));
+    try {
+      setSession(await api.endRemoteSession(session.id));
+      setIsMissionControlMode(false);
+      setRemoteViewport(DEFAULT_REMOTE_VIEWPORT);
+      setVisualCursorPosition(null, "synced");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to end remote control");
+    }
   }
 
-  async function sendPointer(
-    phase: "down" | "move" | "up",
-    event: NativeSyntheticEvent<NativeTouchEvent>
+  function openFullScreen() {
+    setIsFullScreen(true);
+  }
+
+  function closeFullScreen() {
+    setIsFullScreen(false);
+    setIsMissionControlMode(false);
+    setRemoteViewport(DEFAULT_REMOTE_VIEWPORT);
+  }
+
+  function setRemoteViewport(nextViewport: RemoteViewportState) {
+    remoteViewportRef.current = nextViewport;
+    setRemoteViewportState(nextViewport);
+  }
+
+  function setVisualCursorPosition(
+    nextPosition: RemoteControlCursorPosition | null,
+    nextSyncState: VisualCursorSyncState
   ) {
-    if (!session) {
+    visualCursorPositionRef.current = nextPosition;
+    visualCursorSyncStateRef.current = nextSyncState;
+    setVisualCursorPositionState(nextPosition);
+    setVisualCursorSyncStateState(nextSyncState);
+  }
+
+  function syncVisualCursorFromHost(nextPosition: RemoteControlCursorPosition | null) {
+    if (!nextPosition) {
       return;
     }
 
-    const touch = event.nativeEvent;
-    const x = clamp01(touch.locationX / surfaceSize.width);
-    const y = clamp01(touch.locationY / surfaceSize.height);
+    const currentVisualPosition = visualCursorPositionRef.current;
+    if (
+      !currentVisualPosition ||
+      visualCursorSyncStateRef.current === "synced" ||
+      cursorPositionsMatch(currentVisualPosition, nextPosition)
+    ) {
+      setVisualCursorPosition(nextPosition, "synced");
+    }
+  }
 
-    await api.sendRemoteSignal(session.id, {
-      type: "input",
-      payload: {
-        event: {
-          type: "pointer",
-          phase,
-          x,
-          y
-        }
+  function positionFromSurfacePoint(point: SurfacePoint) {
+    return cursorPositionFromSurfacePoint(point, remoteViewportRef.current, fullScreenSurfaceSize);
+  }
+
+  function remoteSurfaceShouldSetResponder() {
+    return true;
+  }
+
+  function handleRemoteSurfaceResponderGrant(event: GestureResponderEvent) {
+    const touches = event.nativeEvent.touches;
+    if (touches.length >= 2) {
+      startRemoteViewportPinch(touches);
+      return;
+    }
+
+    touchStartRef.current = surfacePointFromTouchEvent(event);
+  }
+
+  function handleRemoteSurfaceResponderMove(event: GestureResponderEvent) {
+    const touches = event.nativeEvent.touches;
+    if (touches.length < 2) {
+      return;
+    }
+
+    if (!pinchGestureRef.current) {
+      startRemoteViewportPinch(touches);
+      return;
+    }
+
+    updateRemoteViewportPinch(touches);
+  }
+
+  function handleRemoteSurfaceResponderRelease(event: GestureResponderEvent) {
+    if (pinchGestureRef.current) {
+      pinchGestureRef.current = null;
+      touchStartRef.current = null;
+      return;
+    }
+
+    const releasePoint = surfacePointFromTouchEvent(event);
+    const startPoint = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!startPoint || distanceBetweenPoints(startPoint, releasePoint) > REMOTE_TAP_MOVEMENT_TOLERANCE) {
+      return;
+    }
+
+    void sendRemoteCursorMove(positionFromSurfacePoint(releasePoint));
+  }
+
+  function handleRemoteSurfaceResponderTerminate() {
+    pinchGestureRef.current = null;
+    touchStartRef.current = null;
+  }
+
+  function startRemoteViewportPinch(touches: readonly NativeTouchEvent[]) {
+    const metrics = pinchMetricsFromTouches(touches);
+    if (!metrics) {
+      return;
+    }
+
+    const viewport = remoteViewportRef.current;
+    pinchGestureRef.current = {
+      anchor: {
+        x: (metrics.center.x - viewport.offsetX) / viewport.scale,
+        y: (metrics.center.y - viewport.offsetY) / viewport.scale
+      },
+      initialDistance: metrics.distance
+    };
+  }
+
+  function updateRemoteViewportPinch(touches: readonly NativeTouchEvent[]) {
+    const gesture = pinchGestureRef.current;
+    const metrics = pinchMetricsFromTouches(touches);
+    if (!gesture || !metrics) {
+      return;
+    }
+
+    const nextScale = clamp(
+      remoteViewportRef.current.scale * (metrics.distance / Math.max(1, gesture.initialDistance)),
+      MIN_REMOTE_VIEWPORT_SCALE,
+      MAX_REMOTE_VIEWPORT_SCALE
+    );
+    const nextViewport = clampRemoteViewport(
+      {
+        offsetX: metrics.center.x - gesture.anchor.x * nextScale,
+        offsetY: metrics.center.y - gesture.anchor.y * nextScale,
+        scale: nextScale
+      },
+      fullScreenSurfaceSize
+    );
+    setRemoteViewport(nextViewport);
+    pinchGestureRef.current = {
+      anchor: {
+        x: (metrics.center.x - nextViewport.offsetX) / nextViewport.scale,
+        y: (metrics.center.y - nextViewport.offsetY) / nextViewport.scale
+      },
+      initialDistance: metrics.distance
+    };
+  }
+
+  async function sendRemoteCursorMove(position: RemoteControlCursorPosition) {
+    if (!session || session.status === "ended" || session.status === "failed") {
+      return;
+    }
+
+    try {
+      setVisualCursorPosition(position, "pending");
+      const nextSession = await api.sendRemoteInput(session.id, {
+        phase: "move",
+        type: "pointer",
+        x: position.x,
+        y: position.y
+      });
+      setSession(nextSession);
+      syncVisualCursorFromHost(nextSession.cursorPosition ?? null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to move cursor");
+    }
+  }
+
+  async function sendRemoteClick(buttons: 1 | 2) {
+    if (!session || session.status === "ended" || session.status === "failed") {
+      return;
+    }
+
+    try {
+      setVisualCursorPosition(visualCursorPositionRef.current, "pending");
+      const nextSession = await api.sendRemoteInput(session.id, {
+        buttons,
+        dx: 0,
+        dy: 0,
+        phase: "up",
+        type: "pointer",
+        x: CURRENT_CURSOR_CLICK_ORIGIN.x,
+        y: CURRENT_CURSOR_CLICK_ORIGIN.y
+      });
+      setSession(nextSession);
+      syncVisualCursorFromHost(nextSession.cursorPosition ?? null);
+      if (buttons === 1 && isMissionControlMode) {
+        setIsMissionControlMode(false);
       }
-    });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to send click");
+    }
+  }
+
+  async function showMissionControl() {
+    if (!session || session.status === "ended" || session.status === "failed") {
+      return;
+    }
+
+    try {
+      setSession(
+        await api.sendRemoteInput(session.id, {
+          key: "mission-control",
+          modifiers: [],
+          type: "key"
+        })
+      );
+      setIsMissionControlMode(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to show all desktops");
+    }
+  }
+
+  async function showDock() {
+    if (!session || session.status === "ended" || session.status === "failed") {
+      return;
+    }
+
+    try {
+      setSession(
+        await api.sendRemoteInput(session.id, {
+          key: "dock",
+          modifiers: [],
+          type: "key"
+        })
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to show Dock");
+    }
+  }
+
+  async function moveMissionControlDesktop(direction: "left" | "right") {
+    if (!session || session.status === "ended" || session.status === "failed") {
+      return;
+    }
+
+    try {
+      setSession(
+        await api.sendRemoteInput(session.id, {
+          key: `mission-control-${direction}`,
+          modifiers: [],
+          type: "key"
+        })
+      );
+      setIsMissionControlMode(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to move between desktops");
+    }
   }
 
   async function sendText() {
-    if (!session || keyboardText.length === 0) {
+    if (!session || keyboardText.trim().length === 0) {
       return;
     }
 
-    await api.sendRemoteSignal(session.id, {
-      type: "input",
-      payload: {
-        event: {
+    try {
+      setSession(
+        await api.sendRemoteInput(session.id, {
           type: "text",
           value: keyboardText
-        }
-      }
-    });
-    setKeyboardText("");
+        })
+      );
+      setKeyboardText("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to send text");
+    }
   }
 
   return (
@@ -129,93 +466,465 @@ export function RemoteControlScreen({ api, hostMachineId }: RemoteControlScreenP
       <Header
         eyebrow="Remote Control"
         title="Mac Screen"
-        subtitle="Session signaling works through Abitat; media connects through WebRTC."
+        subtitle="Whole Mac screen from this paired host."
       />
 
       <View style={sharedStyles.card}>
         <View style={[sharedStyles.row, { justifyContent: "space-between" }]}>
-          <Text style={sharedStyles.value}>{session ? "Session ready" : "No active session"}</Text>
+          <Text style={sharedStyles.value}>{session ? session.status : "Not connected"}</Text>
           <StatusPill status={session?.status ?? "pending"} />
         </View>
-        {session?.errorMessage ? (
-          <Text style={[sharedStyles.subtitle, { color: colors.danger }]}>
-            {session.errorMessage}
+        {permissionMessage(session) ? (
+          <Text style={[sharedStyles.subtitle, { color: colors.warning }]}>
+            {permissionMessage(session)}
           </Text>
+        ) : null}
+        {error ? (
+          <Text style={[sharedStyles.subtitle, { color: colors.danger }]}>{error}</Text>
         ) : null}
       </View>
 
-      <View
-        onLayout={(event) => {
-          setSurfaceSize({
-            height: Math.max(1, event.nativeEvent.layout.height),
-            width: Math.max(1, event.nativeEvent.layout.width)
-          });
-        }}
-        onTouchEnd={(event) => void sendPointer("up", event)}
-        onTouchMove={(event) => void sendPointer("move", event)}
-        onTouchStart={(event) => void sendPointer("down", event)}
-        style={[
-          sharedStyles.card,
-          {
-            alignItems: "center",
-            aspectRatio: 9 / 16,
-            backgroundColor: "#05070b",
-            justifyContent: "center"
-          }
-        ]}
+      <Pressable
+        accessibilityLabel="Open full screen remote control"
+        accessibilityRole="button"
+        onPress={openFullScreen}
+        style={[styles.remoteSurface, { aspectRatio: frameAspectRatio }]}
       >
-        {frameDataUrl ? (
-          <Image
-            resizeMode="contain"
-            source={{ uri: frameDataUrl }}
-            style={{ height: "100%", width: "100%" }}
-          />
+        {frameUri ? (
+          <Image resizeMode="contain" source={{ uri: frameUri }} style={styles.remoteFrame} />
         ) : (
-          <Text style={{ color: colors.muted, fontSize: 13, textAlign: "center" }}>
-            Waiting for Mac frames
-          </Text>
+          <Text style={styles.remotePlaceholder}>Waiting for Mac screen</Text>
         )}
-      </View>
+      </Pressable>
 
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        {(["trackpad", "direct", "keyboard"] as ControlMode[]).map((item) => (
-          <View key={item} style={{ flex: 1 }}>
-            <Button onPress={() => setMode(item)} variant={mode === item ? "primary" : "secondary"}>
-              {item}
-            </Button>
+      <Modal
+        animationType="fade"
+        onRequestClose={closeFullScreen}
+        presentationStyle="fullScreen"
+        statusBarTranslucent
+        supportedOrientations={["landscape", "landscape-left", "landscape-right"]}
+        visible={isFullScreen}
+      >
+        <View style={styles.fullScreenBackdrop}>
+          <View
+            onLayout={(event) => {
+              const nextSize = {
+                height: Math.max(1, event.nativeEvent.layout.height),
+                width: Math.max(1, event.nativeEvent.layout.width)
+              };
+              setFullScreenSurfaceSize(nextSize);
+              setRemoteViewport(clampRemoteViewport(remoteViewportRef.current, nextSize));
+            }}
+            onMoveShouldSetResponder={remoteSurfaceShouldSetResponder}
+            onResponderGrant={handleRemoteSurfaceResponderGrant}
+            onResponderMove={handleRemoteSurfaceResponderMove}
+            onResponderRelease={handleRemoteSurfaceResponderRelease}
+            onResponderTerminate={handleRemoteSurfaceResponderTerminate}
+            onStartShouldSetResponder={remoteSurfaceShouldSetResponder}
+            style={[styles.fullScreenSurface, fullScreenFrameStyle]}
+          >
+            <View pointerEvents="none" style={[styles.fullScreenContent, fullScreenContentStyle]}>
+              {frameUri ? (
+                <Image resizeMode="contain" source={{ uri: frameUri }} style={styles.remoteFrame} />
+              ) : (
+                <Text style={styles.remotePlaceholder}>Waiting for Mac screen</Text>
+              )}
+              {visualCursorPosition ? (
+                <View
+                  pointerEvents="none"
+                  style={[
+                    styles.visualCursor,
+                    {
+                      left: `${visualCursorPosition.x * 100}%`,
+                      top: `${visualCursorPosition.y * 100}%`
+                    },
+                    visualCursorSyncState === "synced"
+                      ? styles.visualCursorSynced
+                      : styles.visualCursorPending
+                  ]}
+                >
+                  <Feather
+                    color={visualCursorSyncState === "synced" ? "#22c55e" : "#f8fafc"}
+                    name="mouse-pointer"
+                    size={VISUAL_CURSOR_SIZE}
+                  />
+                </View>
+              ) : null}
+            </View>
           </View>
-        ))}
-      </View>
-
-      {mode === "keyboard" ? (
-        <View style={sharedStyles.card}>
-          <TextInput
-            keyboardAppearance="dark"
-            onChangeText={setKeyboardText}
-            placeholder="Type to Mac"
-            placeholderTextColor={colors.muted}
-            style={sharedStyles.input}
-            value={keyboardText}
-          />
-          <View style={{ marginTop: 10 }}>
-            <Button onPress={sendText}>Send Text</Button>
+          <Pressable
+            accessibilityLabel="Exit full screen remote control"
+            accessibilityRole="button"
+            onPress={closeFullScreen}
+            style={({ pressed }) => [
+              styles.fullScreenCloseButton,
+              pressed ? styles.fullScreenCloseButtonPressed : null
+            ]}
+          >
+            <Feather color="#f3f3f3" name="x" size={22} />
+          </Pressable>
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.remoteClickRail,
+              isMissionControlMode ? styles.remoteClickRailThree : styles.remoteClickRailFour
+            ]}
+          >
+            {isMissionControlMode ? (
+              <>
+                <Pressable
+                  accessibilityLabel="Move to left desktop"
+                  accessibilityRole="button"
+                  onPress={() => void moveMissionControlDesktop("left")}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="arrow-left" size={18} />
+                  <Text style={styles.remoteClickLabel}>Left</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Move to right desktop"
+                  accessibilityRole="button"
+                  onPress={() => void moveMissionControlDesktop("right")}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="arrow-right" size={18} />
+                  <Text style={styles.remoteClickLabel}>Right</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Left click"
+                  accessibilityRole="button"
+                  onPress={() => void sendRemoteClick(1)}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="mouse-pointer" size={18} />
+                  <Text style={styles.remoteClickLabel}>Left click</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Pressable
+                  accessibilityLabel="Left click"
+                  accessibilityRole="button"
+                  onPress={() => void sendRemoteClick(1)}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="mouse-pointer" size={18} />
+                  <Text style={styles.remoteClickLabel}>Left click</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Right click"
+                  accessibilityRole="button"
+                  onPress={() => void sendRemoteClick(2)}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="corner-down-left" size={18} />
+                  <Text style={styles.remoteClickLabel}>Right click</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Show Dock"
+                  accessibilityRole="button"
+                  onPress={() => void showDock()}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="monitor" size={18} />
+                  <Text style={styles.remoteClickLabel}>Dock</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Show all desktops"
+                  accessibilityRole="button"
+                  onPress={() => void showMissionControl()}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="grid" size={18} />
+                  <Text style={styles.remoteClickLabel}>Desktops</Text>
+                </Pressable>
+              </>
+            )}
           </View>
         </View>
-      ) : null}
+      </Modal>
 
-      {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
+      <View style={sharedStyles.card}>
+        <TextInput
+          keyboardAppearance="dark"
+          onChangeText={setKeyboardText}
+          placeholder="Type to Mac"
+          placeholderTextColor={colors.muted}
+          style={sharedStyles.input}
+          value={keyboardText}
+        />
+        <View style={{ marginTop: 10 }}>
+          <Button disabled={!session || session.status === "ended"} onPress={sendText}>
+            Send Text
+          </Button>
+        </View>
+      </View>
 
       {session && session.status !== "ended" ? (
         <Button onPress={end} variant="danger">
           End Session
         </Button>
       ) : (
-        <Button onPress={start}>Start Session</Button>
+        <Text style={sharedStyles.subtitle}>Start remote control from the dashboard.</Text>
       )}
+      <Button onPress={onBack} variant="secondary">
+        Back to Dashboard
+      </Button>
     </Screen>
   );
 }
 
-function clamp01(value: number) {
-  return Math.max(0, Math.min(1, value));
+function permissionMessage(session: RemoteControlSession | null) {
+  if (session?.permissionState?.screenRecording === "needed") {
+    return "Screen Recording permission is needed on the Mac.";
+  }
+  if (session?.permissionState?.accessibility === "needed") {
+    return "Accessibility permission is needed on the Mac.";
+  }
+  return null;
 }
+
+function cursorPositionsMatch(
+  first: RemoteControlCursorPosition,
+  second: RemoteControlCursorPosition
+) {
+  return (
+    Math.abs(first.x - second.x) <= CURSOR_SYNC_TOLERANCE &&
+    Math.abs(first.y - second.y) <= CURSOR_SYNC_TOLERANCE
+  );
+}
+
+function clampCursorPosition(position: RemoteControlCursorPosition): RemoteControlCursorPosition {
+  return {
+    x: clamp01(position.x),
+    y: clamp01(position.y)
+  };
+}
+
+function clamp01(value: number) {
+  return clamp(value, 0, 1);
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function remoteFrameLayout(input: { aspectRatio: number; height: number; width: number }) {
+  const aspectRatio =
+    Number.isFinite(input.aspectRatio) && input.aspectRatio > 0 ? input.aspectRatio : 16 / 10;
+  const availableWidth = Math.max(1, input.width);
+  const availableHeight = Math.max(1, input.height);
+  const availableAspectRatio = availableWidth / availableHeight;
+
+  if (availableAspectRatio > aspectRatio) {
+    return {
+      height: availableHeight,
+      width: availableHeight * aspectRatio
+    };
+  }
+
+  return {
+    height: availableWidth / aspectRatio,
+    width: availableWidth
+  };
+}
+
+function surfacePointFromTouchEvent(event: GestureResponderEvent): SurfacePoint {
+  return {
+    x: event.nativeEvent.locationX,
+    y: event.nativeEvent.locationY
+  };
+}
+
+function cursorPositionFromSurfacePoint(
+  point: SurfacePoint,
+  viewport: RemoteViewportState,
+  surfaceSize: RemoteSurfaceSize
+): RemoteControlCursorPosition {
+  const scaledWidth = Math.max(1, surfaceSize.width * viewport.scale);
+  const scaledHeight = Math.max(1, surfaceSize.height * viewport.scale);
+  return clampCursorPosition({
+    x: (point.x - viewport.offsetX) / scaledWidth,
+    y: (point.y - viewport.offsetY) / scaledHeight
+  });
+}
+
+function pinchMetricsFromTouches(touches: readonly NativeTouchEvent[]) {
+  const first = touches[0];
+  const second = touches[1];
+  if (!first || !second) {
+    return null;
+  }
+
+  return {
+    center: {
+      x: (first.locationX + second.locationX) / 2,
+      y: (first.locationY + second.locationY) / 2
+    },
+    distance: distanceBetweenPoints(
+      { x: first.locationX, y: first.locationY },
+      { x: second.locationX, y: second.locationY }
+    )
+  };
+}
+
+function distanceBetweenPoints(first: SurfacePoint, second: SurfacePoint) {
+  return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function clampRemoteViewport(
+  viewport: RemoteViewportState,
+  surfaceSize: RemoteSurfaceSize
+): RemoteViewportState {
+  const scale = clamp(viewport.scale, MIN_REMOTE_VIEWPORT_SCALE, MAX_REMOTE_VIEWPORT_SCALE);
+  if (scale <= MIN_REMOTE_VIEWPORT_SCALE) {
+    return DEFAULT_REMOTE_VIEWPORT;
+  }
+
+  const scaledWidth = surfaceSize.width * scale;
+  const scaledHeight = surfaceSize.height * scale;
+  return {
+    offsetX: clamp(viewport.offsetX, surfaceSize.width - scaledWidth, 0),
+    offsetY: clamp(viewport.offsetY, surfaceSize.height - scaledHeight, 0),
+    scale
+  };
+}
+
+function remoteViewportContentStyle(input: {
+  height: number;
+  viewport: RemoteViewportState;
+  width: number;
+}) {
+  return {
+    height: input.height * input.viewport.scale,
+    left: input.viewport.offsetX,
+    top: input.viewport.offsetY,
+    width: input.width * input.viewport.scale
+  };
+}
+
+const styles = StyleSheet.create({
+  fullScreenBackdrop: {
+    alignItems: "center",
+    backgroundColor: "#000000",
+    flex: 1,
+    justifyContent: "center"
+  },
+  fullScreenCloseButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.64)",
+    borderColor: "rgba(255,255,255,0.18)",
+    borderRadius: 999,
+    borderWidth: 1,
+    height: 44,
+    justifyContent: "center",
+    position: "absolute",
+    right: 16,
+    top: 18,
+    width: 44
+  },
+  fullScreenCloseButtonPressed: {
+    opacity: 0.68,
+    transform: [{ scale: 0.96 }]
+  },
+  fullScreenContent: {
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    position: "absolute"
+  },
+  fullScreenSurface: {
+    alignItems: "center",
+    backgroundColor: "#05070b",
+    justifyContent: "center",
+    overflow: "hidden",
+    position: "relative"
+  },
+  remoteFrame: {
+    height: "100%",
+    width: "100%"
+  },
+  remoteClickButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(15,23,42,0.82)",
+    borderColor: "rgba(248,250,252,0.2)",
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 4,
+    minHeight: 64,
+    justifyContent: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    width: 84
+  },
+  remoteClickButtonPressed: {
+    opacity: 0.7,
+    transform: [{ scale: 0.96 }]
+  },
+  remoteClickLabel: {
+    color: "#f8fafc",
+    fontSize: 11,
+    textAlign: "center"
+  },
+  remoteClickRail: {
+    gap: 10,
+    left: 14,
+    position: "absolute",
+    top: "50%"
+  },
+  remoteClickRailFour: {
+    transform: [{ translateY: -143 }]
+  },
+  remoteClickRailThree: {
+    transform: [{ translateY: -106 }]
+  },
+  remotePlaceholder: {
+    color: colors.muted,
+    fontSize: 13,
+    textAlign: "center"
+  },
+  remoteSurface: {
+    alignItems: "center",
+    backgroundColor: "#05070b",
+    borderColor: "#1f2937",
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: "center",
+    overflow: "hidden",
+    width: "100%"
+  },
+  visualCursor: {
+    height: VISUAL_CURSOR_SIZE,
+    marginLeft: -2,
+    marginTop: -2,
+    position: "absolute",
+    width: VISUAL_CURSOR_SIZE
+  },
+  visualCursorPending: {
+    opacity: 0.92
+  },
+  visualCursorSynced: {
+    opacity: 1
+  }
+});
