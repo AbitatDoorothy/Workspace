@@ -381,6 +381,20 @@ export const remoteControlFrameResponseSchema = z.object({
   session: remoteControlSessionResponseSchema
 });
 
+export const remoteControlTextTargetSchema = z
+  .object({
+    appName: z.string().min(1),
+    isTextInput: z.boolean(),
+    role: z.string().default(""),
+    roleDescription: z.string().optional(),
+    subrole: z.string().optional()
+  })
+  .strict();
+
+export const remoteControlTextTargetResponseSchema = z.object({
+  target: remoteControlTextTargetSchema.nullable()
+});
+
 export const remoteControlSignalTypeSchema = z.enum([
   "offer",
   "answer",
@@ -473,6 +487,10 @@ export type RemoteControlSignal = z.infer<typeof remoteControlSignalSchema>;
 export type RemoteInputEvent = z.infer<typeof remoteInputEventSchema>;
 export type RemoteControlInputRequest = z.infer<typeof remoteControlInputRequestSchema>;
 export type RemoteControlInputResponse = z.infer<typeof remoteControlInputResponseSchema>;
+export type RemoteControlTextTarget = z.infer<typeof remoteControlTextTargetSchema>;
+export type RemoteControlTextTargetResponse = z.infer<
+  typeof remoteControlTextTargetResponseSchema
+>;
 export type HostPairingRequest = z.infer<typeof hostPairingRequestSchema>;
 export type HostPairingResponse = z.infer<typeof hostPairingResponseSchema>;
 export type HostHeartbeatRequest = z.infer<typeof hostHeartbeatRequestSchema>;

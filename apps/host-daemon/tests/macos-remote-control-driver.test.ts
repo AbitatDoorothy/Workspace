@@ -101,6 +101,30 @@ describe("macOS remote-control driver", () => {
     ]);
   });
 
+  it("reports the focused text target without reading the focused field value", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const driver = createMacOsRemoteControlDriver({
+      execFile: async (command, args) => {
+        calls.push({ command, args });
+        return { stderr: "", stdout: "Notes\nAXTextArea\n\ntext area\n" };
+      }
+    });
+
+    await expect(driver.getTextInputTarget?.()).resolves.toEqual({
+      appName: "Notes",
+      isTextInput: true,
+      role: "AXTextArea",
+      roleDescription: "text area"
+    });
+    expect(calls).toEqual([
+      {
+        command: "/usr/bin/osascript",
+        args: ["-e", expect.stringContaining("AXFocusedUIElement")]
+      }
+    ]);
+    expect(calls[0]?.args.join("\n")).not.toContain("AXValue");
+  });
+
   it("opens Mission Control for the all desktops phone control", async () => {
     const calls: Array<{ command: string; args: string[] }> = [];
     const driver = createMacOsRemoteControlDriver({

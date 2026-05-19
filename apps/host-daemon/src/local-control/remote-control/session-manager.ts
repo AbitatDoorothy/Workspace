@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import type { RemoteControlCursorPosition, RemoteControlFrame } from "@abitat_reece/shared";
+import type {
+  RemoteControlCursorPosition,
+  RemoteControlFrame,
+  RemoteControlTextTarget
+} from "@abitat_reece/shared";
 
 import {
   type LocalRemoteControlDriver,
@@ -126,6 +130,14 @@ export function createLocalRemoteControlManager(
     }
   }
 
+  async function readTextInputTarget(): Promise<RemoteControlTextTarget | null> {
+    if (!options.driver.getTextInputTarget) {
+      return null;
+    }
+
+    return options.driver.getTextInputTarget();
+  }
+
   return {
     async applyInput(sessionId, clientMachineId, event) {
       const state = requireSession(sessionId, clientMachineId);
@@ -200,6 +212,44 @@ export function createLocalRemoteControlManager(
     },
     getSession(sessionId, clientMachineId) {
       return requireSession(sessionId, clientMachineId).session;
+    },
+    async getTextInputTarget(sessionId, clientMachineId) {
+      const state = requireSession(sessionId, clientMachineId);
+      if (stoppedStatuses.has(state.session.status)) {
+        throw Object.assign(new Error("Remote-control session is not active"), {
+          statusCode: 409
+        });
+      }
+
+      try {
+        const target = await readTextInputTarget();
+        state.session = {
+          ...state.session,
+          errorMessage: null,
+          permissionState: {
+            ...state.session.permissionState,
+            accessibility: options.driver.getTextInputTarget
+              ? "granted"
+              : state.session.permissionState.accessibility
+          },
+          updatedAt: now().toISOString()
+        };
+        return target;
+      } catch (error) {
+        const permission = permissionKind(error);
+        state.session = {
+          ...state.session,
+          errorMessage:
+            error instanceof Error ? error.message : "Unable to inspect Mac text input focus",
+          permissionState: {
+            ...state.session.permissionState,
+            accessibility:
+              permission === "accessibility" ? "needed" : state.session.permissionState.accessibility
+          },
+          updatedAt: now().toISOString()
+        };
+        throw error;
+      }
     },
     listSessions(clientMachineId) {
       return [...states.values()]

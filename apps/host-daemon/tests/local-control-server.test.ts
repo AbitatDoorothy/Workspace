@@ -524,6 +524,19 @@ describe("local control server", () => {
       expect(remoteControl.inputEvents).toEqual([{ type: "text", value: "hello" }]);
 
       await expect(
+        fetchJson(`${endpoint}/api/remote-control/sessions/remote_test/text-target`, {
+          headers: auth
+        })
+      ).resolves.toEqual({
+        target: {
+          appName: "Notes",
+          isTextInput: true,
+          role: "AXTextArea",
+          roleDescription: "text area"
+        }
+      });
+
+      await expect(
         fetchJson(`${endpoint}/api/remote-control/sessions/remote_test/signals`, {
           headers: auth
         })
@@ -755,6 +768,14 @@ function createFakeRemoteControlManager(): LocalRemoteControlManager & {
     },
     getSession() {
       return session;
+    },
+    async getTextInputTarget() {
+      return {
+        appName: "Notes",
+        isTextInput: true,
+        role: "AXTextArea",
+        roleDescription: "text area"
+      };
     },
     listSessions() {
       return [session];

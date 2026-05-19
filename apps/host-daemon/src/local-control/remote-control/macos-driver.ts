@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import type { RemoteControlCursorPosition, RemoteInputEvent } from "@abitat_reece/shared";
+import type {
+  RemoteControlCursorPosition,
+  RemoteControlTextTarget,
+  RemoteInputEvent
+} from "@abitat_reece/shared";
 
 import type { LocalRemoteControlDriver } from "./types.js";
 
@@ -120,6 +124,17 @@ export function createMacOsRemoteControlDriver(
         javaScriptForCurrentCursorPosition()
       ]);
       return cursorPositionFromStdout(result.stdout, screenSize)?.cursorPosition ?? null;
+    },
+    async getTextInputTarget() {
+      try {
+        const result = await execFile("/usr/bin/osascript", [
+          "-e",
+          appleScriptForFocusedTextTarget()
+        ]);
+        return textInputTargetFromStdout(result.stdout);
+      } catch (error) {
+        throw normalizeInputError(error);
+      }
     }
   };
 }
@@ -186,6 +201,34 @@ function appleScriptForInput(
   }
 
   return `tell application "System Events" to delay 0`;
+}
+
+function appleScriptForFocusedTextTarget() {
+  return [
+    'tell application "System Events"',
+    "  set frontApp to first application process whose frontmost is true",
+    "  set appName to name of frontApp",
+    "  try",
+    '    set focusedElement to value of attribute "AXFocusedUIElement" of frontApp',
+    "  on error errorMessage",
+    '    if errorMessage contains "not allowed" or errorMessage contains "not authorized" or errorMessage contains "assistive" or errorMessage contains "permission" then error errorMessage',
+    '    return appName & linefeed & "" & linefeed & "" & linefeed & ""',
+    "  end try",
+    '  set roleValue to ""',
+    "  try",
+    '    set roleValue to value of attribute "AXRole" of focusedElement as text',
+    "  end try",
+    '  set subroleValue to ""',
+    "  try",
+    '    set subroleValue to value of attribute "AXSubrole" of focusedElement as text',
+    "  end try",
+    '  set roleDescriptionValue to ""',
+    "  try",
+    '    set roleDescriptionValue to value of attribute "AXRoleDescription" of focusedElement as text',
+    "  end try",
+    "  return appName & linefeed & roleValue & linefeed & subroleValue & linefeed & roleDescriptionValue",
+    "end tell"
+  ].join("\n");
 }
 
 function javaScriptForPointerMove(event: Extract<RemoteInputEvent, { type: "pointer" }>) {
@@ -361,6 +404,37 @@ function parseBounds(value: unknown) {
         y: bounds.y
       }
     : null;
+}
+
+function textInputTargetFromStdout(stdout: string): RemoteControlTextTarget | null {
+  const [rawAppName = "", rawRole = "", rawSubrole = "", rawRoleDescription = ""] = stdout
+    .replace(/\r/gu, "")
+    .split("\n");
+  const appName = rawAppName.trim();
+  const role = rawRole.trim();
+  const subrole = rawSubrole.trim();
+  const roleDescription = rawRoleDescription.trim();
+
+  if (!appName && !role) {
+    return null;
+  }
+
+  return {
+    appName: appName || "Unknown app",
+    isTextInput: isTextInputTarget(role, subrole, roleDescription),
+    role,
+    ...(roleDescription ? { roleDescription } : {}),
+    ...(subrole ? { subrole } : {})
+  };
+}
+
+function isTextInputTarget(role: string, subrole: string, roleDescription: string) {
+  if (["AXTextArea", "AXTextField", "AXSearchField", "AXComboBox"].includes(role)) {
+    return true;
+  }
+
+  const searchableText = `${role} ${subrole} ${roleDescription}`;
+  return /\b(text|search|editor|combo box)\b/iu.test(searchableText);
 }
 
 function normalizedCursorPosition(

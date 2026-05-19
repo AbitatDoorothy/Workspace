@@ -27,7 +27,8 @@ import type {
   RemoteControlFrame,
   RemoteControlInputEvent,
   RemoteControlSignal,
-  RemoteControlSession
+  RemoteControlSession,
+  RemoteControlTextTarget
 } from "../types";
 
 export interface ApiClient {
@@ -84,6 +85,7 @@ export interface ApiClient {
     afterSequence?: number
   ): Promise<{ frame: RemoteControlFrame | null; session: RemoteControlSession }>;
   getRemoteSession(sessionId: string): Promise<RemoteControlSession>;
+  getRemoteTextTarget(sessionId: string): Promise<RemoteControlTextTarget | null>;
   requestMobileControlLog(): Promise<MobileDiagnosticsLogDownload>;
   listProjects(): Promise<ProjectSummary[]>;
   listRemoteSignals(sessionId: string): Promise<RemoteControlSignal[]>;
@@ -209,6 +211,10 @@ export function createApiClient(pairing: PairingState): ApiClient {
     getRemoteSession: (sessionId) =>
       get(pairing, `/api/remote-control/sessions/${sessionId}`).then(
         (body) => body.session as RemoteControlSession
+      ),
+    getRemoteTextTarget: (sessionId) =>
+      get(pairing, `/api/remote-control/sessions/${sessionId}/text-target`).then(
+        (body) => body.target as RemoteControlTextTarget | null
       ),
     requestMobileControlLog: () =>
       get(pairing, "/api/mobile/diagnostics/log").then(

@@ -115,6 +115,19 @@ export async function handleLocalRemoteControlRoute(input: HandleRemoteControlRo
     return true;
   }
 
+  const textTargetMatch = input.path.match(
+    /^\/api\/remote-control\/sessions\/([^/]+)\/text-target$/u
+  );
+  if (textTargetMatch && input.method === "GET") {
+    input.writeJson(input.response, 200, {
+      target: await input.manager.getTextInputTarget(
+        decodeURIComponent(textTargetMatch[1]),
+        input.actor.id
+      )
+    });
+    return true;
+  }
+
   const signalMatch = input.path.match(/^\/api\/remote-control\/sessions\/([^/]+)\/signals$/u);
   if (signalMatch && input.method === "GET") {
     input.manager.getSession(decodeURIComponent(signalMatch[1]), input.actor.id);

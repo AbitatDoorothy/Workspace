@@ -4,8 +4,11 @@ import { lockAsync, OrientationLock } from "expo-screen-orientation";
 import {
   type GestureResponderEvent,
   Image,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
   type NativeTouchEvent,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -18,7 +21,11 @@ import type { ApiClient } from "../api/client";
 import { Button, Header, StatusPill } from "../components/Controls";
 import { Screen } from "../components/Screen";
 import { colors, sharedStyles } from "../theme";
-import type { RemoteControlCursorPosition, RemoteControlSession } from "../types";
+import type {
+  RemoteControlCursorPosition,
+  RemoteControlSession,
+  RemoteControlTextTarget
+} from "../types";
 
 const REMOTE_FRAME_REFRESH_INTERVAL_MS = 120;
 const CURSOR_SYNC_TOLERANCE = 0.012;
@@ -71,9 +78,13 @@ export function RemoteControlScreen({
   const [frameUri, setFrameUri] = useState<string | null>(null);
   const [frameAspectRatio, setFrameAspectRatio] = useState(16 / 10);
   const [keyboardText, setKeyboardText] = useState("");
+  const [keyboardDraft, setKeyboardDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [isKeyboardComposerOpen, setIsKeyboardComposerOpen] = useState(false);
+  const [isTextTargetLoading, setIsTextTargetLoading] = useState(false);
   const [isMissionControlMode, setIsMissionControlMode] = useState(false);
+  const [focusedTextTarget, setFocusedTextTarget] = useState<RemoteControlTextTarget | null>(null);
   const [visualCursorPosition, setVisualCursorPositionState] =
     useState<RemoteControlCursorPosition | null>(null);
   const [visualCursorSyncState, setVisualCursorSyncStateState] =
@@ -203,6 +214,7 @@ export function RemoteControlScreen({
     try {
       setSession(await api.endRemoteSession(session.id));
       setIsMissionControlMode(false);
+      closeKeyboardComposer();
       setRemoteViewport(DEFAULT_REMOTE_VIEWPORT);
       setVisualCursorPosition(null, "synced");
     } catch (caught) {
@@ -217,9 +229,18 @@ export function RemoteControlScreen({
 
   function closeFullScreen() {
     onFullScreenChange?.(false);
+    closeKeyboardComposer();
     setIsFullScreen(false);
     setIsMissionControlMode(false);
     setRemoteViewport(DEFAULT_REMOTE_VIEWPORT);
+  }
+
+  function closeKeyboardComposer() {
+    Keyboard.dismiss();
+    setIsKeyboardComposerOpen(false);
+    setKeyboardDraft("");
+    setFocusedTextTarget(null);
+    setIsTextTargetLoading(false);
   }
 
   function setRemoteViewport(nextViewport: RemoteViewportState) {
@@ -461,6 +482,53 @@ export function RemoteControlScreen({
     }
   }
 
+  async function openKeyboardComposer() {
+    if (!session || session.status === "ended" || session.status === "failed") {
+      return;
+    }
+
+    setError(null);
+    setKeyboardDraft("");
+    setFocusedTextTarget(null);
+    setIsTextTargetLoading(true);
+    setIsKeyboardComposerOpen(true);
+
+    try {
+      setFocusedTextTarget(await api.getRemoteTextTarget(session.id));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to inspect Mac text input");
+    } finally {
+      setIsTextTargetLoading(false);
+    }
+  }
+
+  async function finishKeyboardTyping() {
+    const value = keyboardDraft;
+    closeKeyboardComposer();
+    if (value.length === 0) {
+      return;
+    }
+
+    await sendTextDraft(value);
+  }
+
+  async function sendTextDraft(value: string) {
+    if (!session || session.status === "ended" || session.status === "failed") {
+      return;
+    }
+
+    try {
+      setSession(
+        await api.sendRemoteInput(session.id, {
+          type: "text",
+          value
+        })
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to send text");
+    }
+  }
+
   async function moveMissionControlDesktop(direction: "left" | "right") {
     if (!session || session.status === "ended" || session.status === "failed") {
       return;
@@ -606,7 +674,7 @@ export function RemoteControlScreen({
             pointerEvents="box-none"
             style={[
               styles.remoteClickRail,
-              isMissionControlMode ? styles.remoteClickRailThree : styles.remoteClickRailFour
+              isMissionControlMode ? styles.remoteClickRailThree : styles.remoteClickRailFive
             ]}
           >
             {isMissionControlMode ? (
@@ -675,6 +743,18 @@ export function RemoteControlScreen({
                   <Text style={styles.remoteClickLabel}>Right click</Text>
                 </Pressable>
                 <Pressable
+                  accessibilityLabel="Open remote keyboard"
+                  accessibilityRole="button"
+                  onPress={() => void openKeyboardComposer()}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="type" size={18} />
+                  <Text style={styles.remoteClickLabel}>Keyboard</Text>
+                </Pressable>
+                <Pressable
                   accessibilityLabel="Show Dock"
                   accessibilityRole="button"
                   onPress={() => void showDock()}
@@ -701,6 +781,54 @@ export function RemoteControlScreen({
               </>
             )}
           </View>
+          {isKeyboardComposerOpen ? (
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
+              pointerEvents="box-none"
+              style={styles.keyboardComposerLayer}
+            >
+              <View style={styles.keyboardComposer}>
+                <Text style={styles.keyboardComposerTarget}>
+                  {keyboardTargetMessage(isTextTargetLoading, focusedTextTarget)}
+                </Text>
+                <TextInput
+                  autoFocus
+                  keyboardAppearance="dark"
+                  multiline
+                  onChangeText={setKeyboardDraft}
+                  placeholder="Type on iPhone"
+                  placeholderTextColor="rgba(248,250,252,0.46)"
+                  style={styles.keyboardComposerInput}
+                  value={keyboardDraft}
+                />
+                <View style={styles.keyboardComposerActions}>
+                  <Pressable
+                    accessibilityLabel="Cancel remote keyboard"
+                    accessibilityRole="button"
+                    onPress={closeKeyboardComposer}
+                    style={({ pressed }) => [
+                      styles.keyboardComposerButton,
+                      pressed ? styles.remoteClickButtonPressed : null
+                    ]}
+                  >
+                    <Text style={styles.keyboardComposerButtonLabel}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityLabel="Finish typing"
+                    accessibilityRole="button"
+                    onPress={() => void finishKeyboardTyping()}
+                    style={({ pressed }) => [
+                      styles.keyboardComposerButton,
+                      styles.keyboardComposerPrimaryButton,
+                      pressed ? styles.remoteClickButtonPressed : null
+                    ]}
+                  >
+                    <Text style={styles.keyboardComposerButtonLabel}>Finish typing</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </KeyboardAvoidingView>
+          ) : null}
         </View>
       </Modal>
 
@@ -742,6 +870,23 @@ function permissionMessage(session: RemoteControlSession | null) {
     return "Accessibility permission is needed on the Mac.";
   }
   return null;
+}
+
+function keyboardTargetMessage(isLoading: boolean, target: RemoteControlTextTarget | null) {
+  if (isLoading) {
+    return "Checking Mac focus...";
+  }
+
+  if (!target) {
+    return "No Mac text field detected. Text will go to the active Mac focus.";
+  }
+
+  if (target.isTextInput) {
+    return `Typing into ${target.appName}`;
+  }
+
+  const focusedRole = target.roleDescription || target.role || "current control";
+  return `${target.appName} focus is ${focusedRole}. Text will go to the active Mac focus.`;
 }
 
 function cursorPositionsMatch(
@@ -932,11 +1077,66 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: "50%"
   },
-  remoteClickRailFour: {
-    transform: [{ translateY: -143 }]
+  remoteClickRailFive: {
+    transform: [{ translateY: -180 }]
   },
   remoteClickRailThree: {
     transform: [{ translateY: -106 }]
+  },
+  keyboardComposer: {
+    backgroundColor: "rgba(15,23,42,0.94)",
+    borderColor: "rgba(248,250,252,0.18)",
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 10,
+    padding: 12
+  },
+  keyboardComposerActions: {
+    flexDirection: "row",
+    gap: 10,
+    justifyContent: "flex-end"
+  },
+  keyboardComposerButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(30,41,59,0.9)",
+    borderColor: "rgba(248,250,252,0.18)",
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 42,
+    minWidth: 92,
+    paddingHorizontal: 12
+  },
+  keyboardComposerButtonLabel: {
+    color: "#f8fafc",
+    fontSize: 13,
+    fontWeight: "700"
+  },
+  keyboardComposerInput: {
+    backgroundColor: "rgba(2,6,23,0.82)",
+    borderColor: "rgba(248,250,252,0.14)",
+    borderRadius: 8,
+    borderWidth: 1,
+    color: "#f8fafc",
+    fontSize: 15,
+    minHeight: 72,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    textAlignVertical: "top"
+  },
+  keyboardComposerLayer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "flex-end",
+    paddingBottom: 16,
+    paddingLeft: 112,
+    paddingRight: 16
+  },
+  keyboardComposerPrimaryButton: {
+    backgroundColor: "#2563eb"
+  },
+  keyboardComposerTarget: {
+    color: "rgba(248,250,252,0.74)",
+    fontSize: 12
   },
   remotePlaceholder: {
     color: colors.muted,

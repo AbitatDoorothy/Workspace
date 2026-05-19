@@ -24,6 +24,7 @@ import {
   remoteControlSessionCreateRequestSchema,
   remoteControlSessionResponseSchema,
   remoteControlSignalSchema,
+  remoteControlTextTargetResponseSchema,
   remoteInputEventSchema,
   startConversationJobSchema,
   runtimeSchema,
@@ -587,5 +588,40 @@ describe("shared schema validation", () => {
         y: 0.75
       }
     });
+
+    expect(
+      remoteControlTextTargetResponseSchema.parse({
+        target: {
+          appName: "Notes",
+          isTextInput: true,
+          role: "AXTextArea",
+          roleDescription: "text area"
+        }
+      })
+    ).toEqual({
+      target: {
+        appName: "Notes",
+        isTextInput: true,
+        role: "AXTextArea",
+        roleDescription: "text area"
+      }
+    });
+
+    expect(
+      remoteControlTextTargetResponseSchema.parse({
+        target: null
+      })
+    ).toEqual({ target: null });
+
+    expect(() =>
+      remoteControlTextTargetResponseSchema.parse({
+        target: {
+          appName: "Notes",
+          isTextInput: true,
+          role: "AXTextArea",
+          value: "do not expose existing field contents"
+        }
+      })
+    ).toThrow();
   });
 });

@@ -63,6 +63,37 @@ describe("local remote-control manager", () => {
     );
   });
 
+  it("reports the focused Mac text target for the active paired phone", async () => {
+    const driver = createFakeDriver();
+    driver.currentTextInputTarget = {
+      appName: "Notes",
+      isTextInput: true,
+      role: "AXTextArea",
+      roleDescription: "text area"
+    };
+    const manager = createLocalRemoteControlManager({
+      driver,
+      idGenerator: (prefix) => `${prefix}_demo`,
+      now: () => new Date("2026-05-18T09:00:00.000Z")
+    });
+    const session = await manager.startSession({
+      clientMachineId: "phone_demo",
+      hostMachineId: "mac_demo",
+      inputEnabled: true,
+      screenEnabled: true
+    });
+
+    await expect(manager.getTextInputTarget(session.id, "phone_demo")).resolves.toEqual({
+      appName: "Notes",
+      isTextInput: true,
+      role: "AXTextArea",
+      roleDescription: "text area"
+    });
+    await expect(manager.getTextInputTarget(session.id, "phone_other")).rejects.toThrow(
+      "Remote-control session not found"
+    );
+  });
+
   it("dispatches validated input to the driver and marks accessibility needed on failure", async () => {
     const driver = createFakeDriver();
     driver.inputError = Object.assign(new Error("Accessibility permission required"), {
@@ -290,6 +321,13 @@ function createFakeDriver() {
   const driver: LocalRemoteControlDriver & {
     captureCount: number;
     currentCursorPosition: { x: number; y: number } | null;
+    currentTextInputTarget: {
+      appName: string;
+      isTextInput: boolean;
+      role: string;
+      roleDescription?: string;
+      subrole?: string;
+    } | null;
     inputError: Error | null;
     holdCaptures: boolean;
     nextInputCursorPosition: { x: number; y: number } | null;
@@ -299,6 +337,7 @@ function createFakeDriver() {
   } = {
     captureCount: 0,
     currentCursorPosition: null,
+    currentTextInputTarget: null,
     holdCaptures: false,
     inputError: null,
     nextInputCursorPosition: null,
@@ -338,6 +377,9 @@ function createFakeDriver() {
     async closeSession() {},
     async getCursorPosition() {
       return driver.currentCursorPosition;
+    },
+    async getTextInputTarget() {
+      return driver.currentTextInputTarget;
     }
   };
 

@@ -2,6 +2,7 @@ import type {
   RemoteControlCursorPosition,
   RemoteControlFrame,
   RemoteControlStatus,
+  RemoteControlTextTarget,
   RemoteInputEvent
 } from "@abitat_reece/shared";
 
@@ -41,6 +42,7 @@ export interface LocalRemoteControlDriver {
   ): Promise<{ cursorPosition?: RemoteControlCursorPosition | null } | void>;
   closeSession(session: LocalRemoteControlSession): Promise<void>;
   getCursorPosition?(): Promise<RemoteControlCursorPosition | null>;
+  getTextInputTarget?(): Promise<RemoteControlTextTarget | null>;
 }
 
 export interface LocalRemoteControlManager {
@@ -60,6 +62,10 @@ export interface LocalRemoteControlManager {
     session: LocalRemoteControlSession;
   };
   getSession(sessionId: string, clientMachineId: string): LocalRemoteControlSession;
+  getTextInputTarget(
+    sessionId: string,
+    clientMachineId: string
+  ): Promise<RemoteControlTextTarget | null>;
   listSessions(clientMachineId: string): LocalRemoteControlSession[];
   startSession(input: LocalRemoteControlStartInput): Promise<LocalRemoteControlSession>;
   stopAll(): Promise<void>;

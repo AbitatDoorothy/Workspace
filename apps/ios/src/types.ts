@@ -193,6 +193,14 @@ export interface RemoteControlFrame {
   dataBase64: string;
 }
 
+export interface RemoteControlTextTarget {
+  appName: string;
+  isTextInput: boolean;
+  role: string;
+  roleDescription?: string;
+  subrole?: string;
+}
+
 export type RemoteControlInputEvent =
   | {
       type: "pointer";
