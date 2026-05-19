@@ -72,6 +72,29 @@ describe("macOS remote-control driver", () => {
     ]);
   });
 
+  it("opens Mission Control for the all desktops phone control", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const driver = createMacOsRemoteControlDriver({
+      execFile: async (command, args) => {
+        calls.push({ command, args });
+        return { stderr: "", stdout: "" };
+      }
+    });
+
+    await driver.applyInput(session(), {
+      key: "mission-control",
+      modifiers: [],
+      type: "key"
+    });
+
+    expect(calls).toEqual([
+      {
+        command: "/usr/bin/osascript",
+        args: ["-e", expect.stringContaining("key code 126 using {control down}")]
+      }
+    ]);
+  });
+
   it("moves the cursor to absolute screen coordinates and reports that position", async () => {
     const calls: Array<{ command: string; args: string[] }> = [];
     const driver = createMacOsRemoteControlDriver({

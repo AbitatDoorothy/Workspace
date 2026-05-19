@@ -152,6 +152,10 @@ function appleScriptForInput(
   }
 
   if (event.type === "key") {
+    if (event.key === "mission-control") {
+      return "tell application \"System Events\" to key code 126 using {control down}";
+    }
+
     const modifierPrefix = event.modifiers.length
       ? ` using {${event.modifiers.map(appleScriptModifier).join(", ")}}`
       : "";

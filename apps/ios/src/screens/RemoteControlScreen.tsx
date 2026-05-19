@@ -248,6 +248,24 @@ export function RemoteControlScreen({
     }
   }
 
+  async function showMissionControl() {
+    if (!session || session.status === "ended" || session.status === "failed") {
+      return;
+    }
+
+    try {
+      setSession(
+        await api.sendRemoteInput(session.id, {
+          key: "mission-control",
+          modifiers: [],
+          type: "key"
+        })
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to show all desktops");
+    }
+  }
+
   async function sendText() {
     if (!session || keyboardText.trim().length === 0) {
       return;
@@ -383,6 +401,18 @@ export function RemoteControlScreen({
             >
               <Feather color="#f8fafc" name="corner-down-left" size={18} />
               <Text style={styles.remoteClickLabel}>Right click</Text>
+            </Pressable>
+            <Pressable
+              accessibilityLabel="Show all desktops"
+              accessibilityRole="button"
+              onPress={() => void showMissionControl()}
+              style={({ pressed }) => [
+                styles.remoteClickButton,
+                pressed ? styles.remoteClickButtonPressed : null
+              ]}
+            >
+              <Feather color="#f8fafc" name="grid" size={18} />
+              <Text style={styles.remoteClickLabel}>Desktops</Text>
             </Pressable>
           </View>
         </View>
@@ -530,7 +560,7 @@ const styles = StyleSheet.create({
     left: 14,
     position: "absolute",
     top: "50%",
-    transform: [{ translateY: -69 }]
+    transform: [{ translateY: -106 }]
   },
   remotePlaceholder: {
     color: colors.muted,
