@@ -41,7 +41,13 @@ const THREAD_LIST_CACHE_TTL_MS = 2_500;
 const LOCAL_STARTED_TURN_MATERIALIZATION_GRACE_MS = 5 * 60_000;
 const MAX_CODEX_MESSAGE_CONTENT_LENGTH = 12_000;
 const MAX_CONTEXT_SYNC_TURNS_WITHOUT_CURSOR = 6;
-const HIDDEN_CODEX_ITEM_TYPES = new Set(["reasoning"]);
+const HIDDEN_CODEX_ITEM_TYPES = new Set([
+  "contextCompaction",
+  "enteredReviewMode",
+  "exitedReviewMode",
+  "reasoning"
+]);
+const MAX_CODEX_ITEM_SUMMARY_LENGTH = 240;
 const PHONE_FULL_ACCESS_TURN_OPTIONS = {
   approvalPolicy: "never",
   sandboxPolicy: { type: "dangerFullAccess" }
@@ -151,6 +157,12 @@ interface MessageHistoryCacheEntry {
   updatedAt: number;
 }
 
+interface ConversationStatusCacheEntry {
+  summaryStatusType: string | null | undefined;
+  summaryUpdatedAt: number;
+  thread: CodexAppThread;
+}
+
 interface LocallyStartedTurn {
   startedAtMs: number;
   turnId: string;
@@ -196,6 +208,7 @@ export function createLocalCodexBridge(
     string,
     { expiresAt: number; promise: Promise<CodexAppThread[]> }
   >();
+  const conversationStatusCache = new Map<string, ConversationStatusCacheEntry>();
   const messageHistoryCache = new Map<string, MessageHistoryCacheEntry>();
   const modelContextSyncedTurnIds = new Map<string, string>();
   const locallyStartedTurnsByThread = new Map<string, LocallyStartedTurn>();
@@ -478,6 +491,7 @@ export function createLocalCodexBridge(
   }
 
   function invalidateMessageHistoryCache(threadId: string) {
+    conversationStatusCache.delete(threadId);
     messageHistoryCache.delete(threadId);
   }
 
@@ -647,7 +661,9 @@ export function createLocalCodexBridge(
     },
 
     async listCompletionStates() {
-      const threads = await readThreadsWithTurns(await loadAllThreads());
+      const threads = await hydrateConversationStatusThreads(await loadAllThreads(), {
+        hydrateIdleSummaries: false
+      });
       const states = threads.map((thread) =>
         codexThreadToCompletionState(thread, workspaceId, {
           forceRunning: Boolean(locallyStartedTurnForThread(thread))
@@ -710,7 +726,9 @@ export function createLocalCodexBridge(
 
     async listProjectConversations(projectId) {
       const cwd = await resolveProjectCwd(projectId);
-      const threads = await hydrateConversationStatusThreads(await listAllThreads({ cwd }));
+      const threads = await hydrateConversationStatusThreads(await listAllThreads({ cwd }), {
+        hydrateIdleSummaries: true
+      });
       return threads
         .filter((thread) => externalCodexProjectId(thread.cwd) === projectId)
         .sort((left, right) => right.updatedAt - left.updatedAt)
@@ -750,24 +768,29 @@ export function createLocalCodexBridge(
     }
   };
 
-  async function readThreadsWithTurns(threads: CodexAppThread[]) {
+  async function hydrateConversationStatusThreads(
+    threads: CodexAppThread[],
+    options: { hydrateIdleSummaries: boolean }
+  ) {
     return Promise.all(
       threads.map(async (thread) => {
-        const readThread = await client.readThread(thread.id, true).catch(() => thread);
-        return mergeCodexThreadSnapshots(readThread, thread);
-      })
-    );
-  }
+        const cached = conversationStatusCache.get(thread.id);
+        if (cached && canUseCachedConversationStatusThread(cached, thread)) {
+          return mergeCodexThreadSnapshots(cached.thread, thread);
+        }
 
-  async function hydrateConversationStatusThreads(threads: CodexAppThread[]) {
-    return Promise.all(
-      threads.map(async (thread) => {
-        if (!needsConversationStatusHydration(thread)) {
+        if (!needsConversationStatusHydration(thread, options)) {
           return thread;
         }
 
         const readThread = await client.readThread(thread.id, true).catch(() => thread);
-        return mergeCodexThreadSnapshots(readThread, thread);
+        const mergedThread = mergeCodexThreadSnapshots(readThread, thread);
+        conversationStatusCache.set(thread.id, {
+          summaryStatusType: threadStatusType(thread.status),
+          summaryUpdatedAt: safeSeconds(thread.updatedAt, thread.createdAt),
+          thread: mergedThread
+        });
+        return mergedThread;
       })
     );
   }
@@ -808,6 +831,16 @@ export function createLocalCodexBridge(
       !isCodexThreadBusy(summary) &&
       cached.statusType === threadStatusType(summary.status) &&
       cached.updatedAt === safeSeconds(summary.updatedAt, summary.createdAt)
+    );
+  }
+
+  function canUseCachedConversationStatusThread(
+    cached: ConversationStatusCacheEntry,
+    summary: CodexAppThread
+  ) {
+    return (
+      cached.summaryStatusType === threadStatusType(summary.status) &&
+      cached.summaryUpdatedAt === safeSeconds(summary.updatedAt, summary.createdAt)
     );
   }
 
@@ -1991,11 +2024,15 @@ function isThreadListActivitySummaryStatus(status: CodexAppThreadStatus) {
   return statusType === "idle" || statusType === "notLoaded";
 }
 
-function needsConversationStatusHydration(thread: CodexAppThread) {
+function needsConversationStatusHydration(
+  thread: CodexAppThread,
+  options: { hydrateIdleSummaries: boolean }
+) {
   return (
     thread.turns.length === 0 &&
-    (isThreadListActivitySummaryStatus(thread.status) ||
-      threadStatusType(thread.status) === "active")
+    (threadStatusType(thread.status) === "active" ||
+      thread.abitatLoadedFromAppServer === true ||
+      (options.hydrateIdleSummaries && isThreadListActivitySummaryStatus(thread.status)))
   );
 }
 
@@ -2095,8 +2132,11 @@ export function flattenThreadMessages(
       itemTypeCounts.set(item.type, (itemTypeCounts.get(item.type) ?? 0) + 1);
       const flattened = threadItemToMessageContent(item);
       if (!flattened) {
-        if (!HIDDEN_CODEX_ITEM_TYPES.has(item.type) && !isKnownCodexItemType(item.type)) {
-          unknownItemTypes.add(item.type);
+        if (
+          !HIDDEN_CODEX_ITEM_TYPES.has(item.type) &&
+          !isKnownCodexItemType(item.type) &&
+          !unknownItemTypes.has(item.type)
+        ) {
           logDiagnostics(diagnostics, "warn", "codex.thread_item.unknown", {
             codexItemId: item.id,
             codexItemType: item.type,
@@ -2104,6 +2144,7 @@ export function flattenThreadMessages(
             threadId: thread.id,
             turnId: turn.id
           });
+          unknownItemTypes.add(item.type);
         }
         continue;
       }
@@ -2231,6 +2272,33 @@ function generatedFileId(threadId: string, path: string) {
 function stringField(value: Record<string, unknown>, key: string) {
   const field = value[key];
   return typeof field === "string" && field.trim() ? field.trim() : null;
+}
+
+function recordField(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const field = (value as Record<string, unknown>)[key];
+  return field && typeof field === "object" ? (field as Record<string, unknown>) : null;
+}
+
+function summarizedStringField(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const field = stringField(value as Record<string, unknown>, key);
+  return field ? summarizeInlineContent(field) : null;
+}
+
+function summarizeInlineContent(content: string) {
+  const normalized = content.replace(/\s+/gu, " ").trim();
+  if (normalized.length <= MAX_CODEX_ITEM_SUMMARY_LENGTH) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, MAX_CODEX_ITEM_SUMMARY_LENGTH)}...`;
 }
 
 function mimeTypeForPath(path: string) {
@@ -2379,6 +2447,41 @@ function threadItemToMessageContent(
     };
   }
 
+  if (item.type === "imageGeneration") {
+    return {
+      content: imageGenerationSummary(item),
+      role: "assistant"
+    };
+  }
+
+  if (item.type === "webSearch") {
+    return {
+      content: webSearchSummary(item),
+      role: "runtime"
+    };
+  }
+
+  if (item.type === "imageView") {
+    return {
+      content: "Viewed an image.",
+      role: "runtime"
+    };
+  }
+
+  if (item.type === "mcpToolCall" || item.type === "dynamicToolCall") {
+    return {
+      content: toolCallSummary(item),
+      role: "runtime"
+    };
+  }
+
+  if (item.type === "collabAgentToolCall") {
+    return {
+      content: collabAgentToolCallSummary(item),
+      role: "runtime"
+    };
+  }
+
   return null;
 }
 
@@ -2389,8 +2492,68 @@ function isKnownCodexItemType(type: string) {
     type === "plan" ||
     type === "commandExecution" ||
     type === "fileChange" ||
+    type === "imageGeneration" ||
+    type === "imageView" ||
+    type === "webSearch" ||
+    type === "mcpToolCall" ||
+    type === "dynamicToolCall" ||
+    type === "collabAgentToolCall" ||
     HIDDEN_CODEX_ITEM_TYPES.has(type)
   );
+}
+
+function imageGenerationSummary(item: CodexAppThreadItem) {
+  const prompt = summarizedStringField(item, "prompt") ?? summarizedStringField(item, "userPrompt");
+  const savedPath =
+    summarizedStringField(item, "savedPath") ??
+    summarizedStringField(item, "saved_path") ??
+    summarizedStringField(item, "path");
+
+  if (prompt && savedPath) {
+    return `Generated an image: ${prompt}. Saved to ${savedPath}.`;
+  }
+
+  if (prompt) {
+    return `Generated an image: ${prompt}.`;
+  }
+
+  if (savedPath) {
+    return `Generated an image: ${savedPath}.`;
+  }
+
+  return "Generated an image.";
+}
+
+function webSearchSummary(item: CodexAppThreadItem) {
+  const action = recordField(item, "action");
+  const query =
+    summarizedStringField(item, "query") ??
+    summarizedStringField(action, "query") ??
+    summarizedStringField(item, "url") ??
+    summarizedStringField(action, "url");
+
+  return query ? `Searched the web: ${query}.` : "Searched the web.";
+}
+
+function toolCallSummary(item: CodexAppThreadItem) {
+  const toolName =
+    summarizedStringField(item, "name") ??
+    summarizedStringField(item, "toolName") ??
+    summarizedStringField(item, "tool_name") ??
+    summarizedStringField(item, "serverName") ??
+    summarizedStringField(item, "server_name");
+
+  return toolName ? `Used tool: ${toolName}.` : "Used a tool.";
+}
+
+function collabAgentToolCallSummary(item: CodexAppThreadItem) {
+  const name =
+    summarizedStringField(item, "name") ??
+    summarizedStringField(item, "toolName") ??
+    summarizedStringField(item, "agentPath") ??
+    summarizedStringField(item, "agent_path");
+
+  return name ? `Used collaboration tool: ${name}.` : "Used a collaboration tool.";
 }
 
 function filterThreadMessages(

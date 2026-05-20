@@ -26,6 +26,90 @@ afterEach(async () => {
 });
 
 describe("local Codex bridge diagnostics", () => {
+  it("handles native Codex media and search items without leaking payloads or warning as unknown", () => {
+    const diagnostics = createMemoryDiagnostics();
+    const hugeImagePayload = "a".repeat(100_000);
+    const thread = {
+      createdAt: 1_778_400_000,
+      cwd: "/Users/reece/Desktop/Demo",
+      ephemeral: false,
+      id: "thread_media",
+      name: null,
+      preview: "Generate travel postcard image",
+      status: { type: "idle" },
+      turns: [
+        {
+          completedAt: 1_778_400_010,
+          error: null,
+          id: "turn_1",
+          items: [
+            {
+              content: [{ text: "Make a travel postcard", text_elements: [], type: "text" }],
+              id: "item_user",
+              type: "userMessage"
+            },
+            {
+              action: { query: "Singapore Gardens by the Bay" },
+              id: "item_search",
+              status: "completed",
+              type: "webSearch"
+            },
+            {
+              id: "item_image",
+              prompt: "Travel postcard",
+              result: hugeImagePayload,
+              status: "completed",
+              type: "imageGeneration"
+            },
+            {
+              id: "item_compaction",
+              type: "contextCompaction"
+            }
+          ],
+          startedAt: 1_778_400_000,
+          status: { type: "completed" }
+        }
+      ],
+      updatedAt: 1_778_400_010
+    } as unknown as Parameters<typeof flattenThreadMessages>[0];
+
+    const messages = flattenThreadMessages(thread, "codex_thread_thread_media", diagnostics);
+
+    expect(messages).toEqual([
+      expect.objectContaining({
+        content: "Make a travel postcard",
+        role: "user"
+      }),
+      expect.objectContaining({
+        content: "Searched the web: Singapore Gardens by the Bay.",
+        role: "runtime"
+      }),
+      expect.objectContaining({
+        content: "Generated an image: Travel postcard.",
+        role: "assistant"
+      })
+    ]);
+    expect(JSON.stringify(messages)).not.toContain(hugeImagePayload);
+    expect(diagnostics.events).not.toContainEqual(
+      expect.objectContaining({ event: "codex.thread_item.unknown" })
+    );
+    expect(diagnostics.events).not.toContainEqual(
+      expect.objectContaining({ event: "codex.turn.completed_without_visible_assistant" })
+    );
+    expect(diagnostics.events).toContainEqual(
+      expect.objectContaining({
+        event: "codex.thread.messages_flattened",
+        itemTypeCounts: expect.objectContaining({
+          contextCompaction: 1,
+          imageGeneration: 1,
+          userMessage: 1,
+          webSearch: 1
+        }),
+        unknownItemTypes: []
+      })
+    );
+  });
+
   it("logs unknown thread item types and completed turns without visible assistant messages", () => {
     const diagnostics = createMemoryDiagnostics();
     const thread = {
@@ -170,7 +254,53 @@ describe("local Codex bridge app-server transport", () => {
 });
 
 describe("local Codex bridge loading performance", () => {
-  it("falls back to thread summaries for unmaterialized Codex threads without error diagnostics", async () => {
+  it("lists completion states from idle summaries without reading full thread history", async () => {
+    const calls: string[] = [];
+    const summaryThread = {
+      createdAt: 1_778_000_000,
+      cwd: "/Users/reece/Desktop/Huge Media Project",
+      ephemeral: false,
+      id: "thread_huge_media",
+      name: null,
+      preview: "Generate travel postcard image",
+      status: { activeFlags: [], type: "idle" },
+      turns: [],
+      updatedAt: 1_778_000_010
+    };
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (typeof message.method === "string") {
+        calls.push(message.method);
+      }
+
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/loaded/list") {
+        sendResult(socket, message.id, { data: [], nextCursor: null });
+      }
+
+      if (message.method === "thread/list") {
+        sendResult(socket, message.id, { data: [summaryThread], nextCursor: null });
+      }
+
+      if (message.method === "thread/read") {
+        sendError(socket, message.id, "full history should not be read for idle summaries");
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+
+    await expect(bridge.listCompletionStates()).resolves.toEqual([
+      expect.objectContaining({
+        conversationId: "codex_thread_thread_huge_media",
+        latestTurnId: null,
+        status: "approved"
+      })
+    ]);
+    expect(calls.filter((method) => method === "thread/read")).toHaveLength(0);
+  });
+
+  it("falls back to summaries for active unmaterialized Codex threads without error diagnostics", async () => {
     const diagnostics = createMemoryDiagnostics();
     const threadReads: Array<{ includeTurns?: boolean; threadId?: string }> = [];
     const summaryThread = {
@@ -180,7 +310,7 @@ describe("local Codex bridge loading performance", () => {
       id: "thread_empty",
       name: null,
       preview: "Empty thread",
-      status: { activeFlags: [], type: "idle" },
+      status: { activeFlags: [], type: "active" },
       turns: [],
       updatedAt: 1_778_000_010
     };
@@ -209,7 +339,9 @@ describe("local Codex bridge loading performance", () => {
           return;
         }
 
-        sendResult(socket, message.id, { thread: summaryThread });
+        sendResult(socket, message.id, {
+          thread: { ...summaryThread, status: { activeFlags: [], type: "idle" } }
+        });
       }
     });
     const bridge = createLocalCodexBridge({
@@ -224,7 +356,7 @@ describe("local Codex bridge loading performance", () => {
       expect.objectContaining({
         conversationId: "codex_thread_thread_empty",
         latestTurnId: null,
-        status: "approved"
+        status: "running"
       })
     ]);
     expect(threadReads).toEqual([

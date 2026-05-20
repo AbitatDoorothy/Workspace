@@ -10,12 +10,14 @@ import {
   type NativeTouchEvent,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { ApiClient } from "../api/client";
 import { Button, Header, StatusPill } from "../components/Controls";
@@ -35,6 +37,12 @@ const MAX_REMOTE_VIEWPORT_SCALE = 4;
 const MIN_REMOTE_VIEWPORT_SCALE = 1;
 const REMOTE_TAP_MOVEMENT_TOLERANCE = 8;
 const VISUAL_CURSOR_SIZE = 30;
+const FULL_SCREEN_CONTROL_RAIL_MIN_LEFT = 72;
+const FULL_SCREEN_CONTROL_RAIL_SAFE_AREA_GAP = 18;
+const FULL_SCREEN_CONTROL_RAIL_WIDTH = 84;
+const FULL_SCREEN_CONTROL_RAIL_TO_COMPOSER_GAP = 16;
+const FULL_SCREEN_CONTROL_RAIL_TO_SURFACE_GAP = 18;
+const FULL_SCREEN_SURFACE_EDGE_GAP = 10;
 
 type VisualCursorSyncState = "pending" | "synced";
 
@@ -77,7 +85,6 @@ export function RemoteControlScreen({
   const [session, setSession] = useState<RemoteControlSession | null>(null);
   const [frameUri, setFrameUri] = useState<string | null>(null);
   const [frameAspectRatio, setFrameAspectRatio] = useState(16 / 10);
-  const [keyboardText, setKeyboardText] = useState("");
   const [keyboardDraft, setKeyboardDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -92,6 +99,7 @@ export function RemoteControlScreen({
   const [fullScreenSurfaceSize, setFullScreenSurfaceSize] = useState({ height: 1, width: 1 });
   const [remoteViewport, setRemoteViewportState] =
     useState<RemoteViewportState>(DEFAULT_REMOTE_VIEWPORT);
+  const safeAreaInsets = useSafeAreaInsets();
   const windowDimensions = useWindowDimensions();
   const lastFrameSequenceRef = useRef(-1);
   const didPinchDuringGestureRef = useRef(false);
@@ -101,9 +109,23 @@ export function RemoteControlScreen({
   const touchStartRef = useRef<SurfacePoint | null>(null);
   const visualCursorPositionRef = useRef<RemoteControlCursorPosition | null>(null);
   const visualCursorSyncStateRef = useRef<VisualCursorSyncState>("synced");
+  const fullScreenControlRailLeft = Math.max(
+    FULL_SCREEN_CONTROL_RAIL_MIN_LEFT,
+    safeAreaInsets.left + FULL_SCREEN_CONTROL_RAIL_SAFE_AREA_GAP
+  );
+  const fullScreenControlLaneWidth =
+    fullScreenControlRailLeft +
+    FULL_SCREEN_CONTROL_RAIL_WIDTH +
+    FULL_SCREEN_CONTROL_RAIL_TO_SURFACE_GAP;
+  const fullScreenSurfaceRightInset = Math.max(
+    FULL_SCREEN_SURFACE_EDGE_GAP,
+    safeAreaInsets.right + FULL_SCREEN_SURFACE_EDGE_GAP
+  );
   const fullScreenFrameStyle = remoteFrameLayout({
     aspectRatio: frameAspectRatio,
     height: windowDimensions.height,
+    leftInset: fullScreenControlLaneWidth,
+    rightInset: fullScreenSurfaceRightInset,
     width: windowDimensions.width
   });
   const fullScreenContentStyle = remoteViewportContentStyle({
@@ -111,6 +133,16 @@ export function RemoteControlScreen({
     viewport: remoteViewport,
     width: fullScreenFrameStyle.width
   });
+  const keyboardComposerLayerStyle = {
+    paddingLeft:
+      fullScreenControlRailLeft +
+      FULL_SCREEN_CONTROL_RAIL_WIDTH +
+      FULL_SCREEN_CONTROL_RAIL_TO_COMPOSER_GAP
+  };
+  const fullScreenControlRailVerticalStyle = {
+    bottom: Math.max(12, safeAreaInsets.bottom + 12),
+    top: Math.max(12, safeAreaInsets.top + 12)
+  };
 
   useEffect(() => {
     void lockAsync(isFullScreen ? OrientationLock.LANDSCAPE : OrientationLock.PORTRAIT_UP).catch(
@@ -445,6 +477,33 @@ export function RemoteControlScreen({
     }
   }
 
+  async function sendRemoteDoubleClick() {
+    if (!session || session.status === "ended" || session.status === "failed") {
+      return;
+    }
+
+    try {
+      setVisualCursorPosition(visualCursorPositionRef.current, "pending");
+      const nextSession = await api.sendRemoteInput(session.id, {
+        buttons: 1,
+        clickCount: 2,
+        dx: 0,
+        dy: 0,
+        phase: "up",
+        type: "pointer",
+        x: CURRENT_CURSOR_CLICK_ORIGIN.x,
+        y: CURRENT_CURSOR_CLICK_ORIGIN.y
+      });
+      setSession(nextSession);
+      syncVisualCursorFromHost(nextSession.cursorPosition ?? null);
+      if (isMissionControlMode) {
+        setIsMissionControlMode(false);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to send double click");
+    }
+  }
+
   async function showMissionControl() {
     if (!session || session.status === "ended" || session.status === "failed") {
       return;
@@ -479,6 +538,24 @@ export function RemoteControlScreen({
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to show Dock");
+    }
+  }
+
+  async function sendRemoteEnter() {
+    if (!session || session.status === "ended" || session.status === "failed") {
+      return;
+    }
+
+    try {
+      setSession(
+        await api.sendRemoteInput(session.id, {
+          key: "enter",
+          modifiers: [],
+          type: "key"
+        })
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to send Enter");
     }
   }
 
@@ -545,24 +622,6 @@ export function RemoteControlScreen({
       setIsMissionControlMode(true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to move between desktops");
-    }
-  }
-
-  async function sendText() {
-    if (!session || keyboardText.trim().length === 0) {
-      return;
-    }
-
-    try {
-      setSession(
-        await api.sendRemoteInput(session.id, {
-          type: "text",
-          value: keyboardText
-        })
-      );
-      setKeyboardText("");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to send text");
     }
   }
 
@@ -670,12 +729,15 @@ export function RemoteControlScreen({
           >
             <Feather color="#f3f3f3" name="x" size={22} />
           </Pressable>
-          <View
-            pointerEvents="box-none"
+          <ScrollView
+            contentContainerStyle={styles.remoteClickRailContent}
             style={[
               styles.remoteClickRail,
-              isMissionControlMode ? styles.remoteClickRailThree : styles.remoteClickRailFive
+              { left: fullScreenControlRailLeft },
+              fullScreenControlRailVerticalStyle,
+              isMissionControlMode ? styles.remoteClickRailThree : styles.remoteClickRailSix
             ]}
+            showsVerticalScrollIndicator={false}
           >
             {isMissionControlMode ? (
               <>
@@ -704,8 +766,10 @@ export function RemoteControlScreen({
                   <Text style={styles.remoteClickLabel}>Right</Text>
                 </Pressable>
                 <Pressable
+                  accessibilityHint="Long press for double click"
                   accessibilityLabel="Left click"
                   accessibilityRole="button"
+                  onLongPress={() => void sendRemoteDoubleClick()}
                   onPress={() => void sendRemoteClick(1)}
                   style={({ pressed }) => [
                     styles.remoteClickButton,
@@ -719,8 +783,10 @@ export function RemoteControlScreen({
             ) : (
               <>
                 <Pressable
+                  accessibilityHint="Long press for double click"
                   accessibilityLabel="Left click"
                   accessibilityRole="button"
+                  onLongPress={() => void sendRemoteDoubleClick()}
                   onPress={() => void sendRemoteClick(1)}
                   style={({ pressed }) => [
                     styles.remoteClickButton,
@@ -755,6 +821,18 @@ export function RemoteControlScreen({
                   <Text style={styles.remoteClickLabel}>Keyboard</Text>
                 </Pressable>
                 <Pressable
+                  accessibilityLabel="Enter"
+                  accessibilityRole="button"
+                  onPress={() => void sendRemoteEnter()}
+                  style={({ pressed }) => [
+                    styles.remoteClickButton,
+                    pressed ? styles.remoteClickButtonPressed : null
+                  ]}
+                >
+                  <Feather color="#f8fafc" name="corner-down-left" size={18} />
+                  <Text style={styles.remoteClickLabel}>Enter</Text>
+                </Pressable>
+                <Pressable
                   accessibilityLabel="Show Dock"
                   accessibilityRole="button"
                   onPress={() => void showDock()}
@@ -780,12 +858,12 @@ export function RemoteControlScreen({
                 </Pressable>
               </>
             )}
-          </View>
+          </ScrollView>
           {isKeyboardComposerOpen ? (
             <KeyboardAvoidingView
               behavior={Platform.OS === "ios" ? "padding" : undefined}
               pointerEvents="box-none"
-              style={styles.keyboardComposerLayer}
+              style={[styles.keyboardComposerLayer, keyboardComposerLayerStyle]}
             >
               <View style={styles.keyboardComposer}>
                 <Text style={styles.keyboardComposerTarget}>
@@ -831,22 +909,6 @@ export function RemoteControlScreen({
           ) : null}
         </View>
       </Modal>
-
-      <View style={sharedStyles.card}>
-        <TextInput
-          keyboardAppearance="dark"
-          onChangeText={setKeyboardText}
-          placeholder="Type to Mac"
-          placeholderTextColor={colors.muted}
-          style={sharedStyles.input}
-          value={keyboardText}
-        />
-        <View style={{ marginTop: 10 }}>
-          <Button disabled={!session || session.status === "ended"} onPress={sendText}>
-            Send Text
-          </Button>
-        </View>
-      </View>
 
       {session && session.status !== "ended" ? (
         <Button onPress={end} variant="danger">
@@ -914,23 +976,37 @@ function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-function remoteFrameLayout(input: { aspectRatio: number; height: number; width: number }) {
+function remoteFrameLayout(input: {
+  aspectRatio: number;
+  height: number;
+  leftInset?: number;
+  rightInset?: number;
+  width: number;
+}) {
   const aspectRatio =
     Number.isFinite(input.aspectRatio) && input.aspectRatio > 0 ? input.aspectRatio : 16 / 10;
-  const availableWidth = Math.max(1, input.width);
+  const leftInset = Math.max(0, input.leftInset ?? 0);
+  const rightInset = Math.max(0, input.rightInset ?? 0);
+  const availableWidth = Math.max(1, input.width - leftInset - rightInset);
   const availableHeight = Math.max(1, input.height);
   const availableAspectRatio = availableWidth / availableHeight;
-
-  if (availableAspectRatio > aspectRatio) {
-    return {
-      height: availableHeight,
-      width: availableHeight * aspectRatio
-    };
-  }
+  const frame =
+    availableAspectRatio > aspectRatio
+      ? {
+          height: availableHeight,
+          width: availableHeight * aspectRatio
+        }
+      : {
+          height: availableWidth / aspectRatio,
+          width: availableWidth
+        };
 
   return {
-    height: availableWidth / aspectRatio,
-    width: availableWidth
+    height: frame.height,
+    left: leftInset + (availableWidth - frame.width) / 2,
+    position: "absolute" as const,
+    top: (availableHeight - frame.height) / 2,
+    width: frame.width
   };
 }
 
@@ -1072,16 +1148,21 @@ const styles = StyleSheet.create({
     textAlign: "center"
   },
   remoteClickRail: {
-    gap: 10,
-    left: 14,
     position: "absolute",
-    top: "50%"
+    width: FULL_SCREEN_CONTROL_RAIL_WIDTH
+  },
+  remoteClickRailContent: {
+    gap: 10,
+    paddingVertical: 6
   },
   remoteClickRailFive: {
-    transform: [{ translateY: -180 }]
+    flexGrow: 0
+  },
+  remoteClickRailSix: {
+    flexGrow: 0
   },
   remoteClickRailThree: {
-    transform: [{ translateY: -106 }]
+    flexGrow: 0
   },
   keyboardComposer: {
     backgroundColor: "rgba(15,23,42,0.94)",
@@ -1128,7 +1209,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-end",
     paddingBottom: 16,
-    paddingLeft: 112,
     paddingRight: 16
   },
   keyboardComposerPrimaryButton: {

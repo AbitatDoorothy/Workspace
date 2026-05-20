@@ -173,6 +173,9 @@ function appleScriptForInput(
     if (event.key === "dock") {
       return "tell application \"System Events\" to key code 2 using {command down, option down}";
     }
+    if (event.key === "enter") {
+      return "tell application \"System Events\" to key code 36";
+    }
     if (event.key === "mission-control") {
       return "tell application \"System Events\" to key code 126 using {control down}";
     }
@@ -266,16 +269,22 @@ function javaScriptForCurrentPointerClick(event: Extract<RemoteInputEvent, { typ
   const button = isRightClick ? "$.kCGMouseButtonRight" : "$.kCGMouseButtonLeft";
   const downEvent = isRightClick ? "$.kCGEventRightMouseDown" : "$.kCGEventLeftMouseDown";
   const upEvent = isRightClick ? "$.kCGEventRightMouseUp" : "$.kCGEventLeftMouseUp";
+  const clickCount = Math.max(1, Math.min(3, Math.trunc(event.clickCount ?? 1)));
   return [
     'ObjC.import("CoreGraphics");',
     'ObjC.import("AppKit");',
     javaScriptCursorSnapshotHelpers(),
     "const currentEvent = $.CGEventCreate(null);",
     "const point = $.CGEventGetLocation(currentEvent);",
-    `const mouseDown = $.CGEventCreateMouseEvent(null, ${downEvent}, point, ${button});`,
-    `const mouseUp = $.CGEventCreateMouseEvent(null, ${upEvent}, point, ${button});`,
-    "$.CGEventPost($.kCGHIDEventTap, mouseDown);",
-    "$.CGEventPost($.kCGHIDEventTap, mouseUp);",
+    `const clickCount = ${clickCount};`,
+    "for (let clickIndex = 1; clickIndex <= clickCount; clickIndex += 1) {",
+    `  const mouseDown = $.CGEventCreateMouseEvent(null, ${downEvent}, point, ${button});`,
+    `  const mouseUp = $.CGEventCreateMouseEvent(null, ${upEvent}, point, ${button});`,
+    "  $.CGEventSetIntegerValueField(mouseDown, $.kCGMouseEventClickState, clickIndex);",
+    "  $.CGEventSetIntegerValueField(mouseUp, $.kCGMouseEventClickState, clickIndex);",
+    "  $.CGEventPost($.kCGHIDEventTap, mouseDown);",
+    "  $.CGEventPost($.kCGHIDEventTap, mouseUp);",
+    "}",
     "cursorPositionSnapshot();"
   ].join("\n");
 }

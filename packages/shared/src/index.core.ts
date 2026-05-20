@@ -420,6 +420,7 @@ export const remotePointerInputEventSchema = z.object({
   x: z.number().min(0).max(1),
   y: z.number().min(0).max(1),
   buttons: z.number().int().nonnegative().optional(),
+  clickCount: z.number().int().min(1).max(3).optional(),
   dx: z.number().optional(),
   dy: z.number().optional()
 });

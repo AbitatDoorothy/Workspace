@@ -492,10 +492,12 @@ describe("shared schema validation", () => {
         phase: "move",
         x: 0.45,
         y: 0.25,
+        clickCount: 2,
         dx: 12,
         dy: -6
       })
     ).toMatchObject({
+      clickCount: 2,
       type: "pointer",
       phase: "move"
     });

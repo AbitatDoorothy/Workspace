@@ -203,6 +203,29 @@ describe("macOS remote-control driver", () => {
     ]);
   });
 
+  it("sends the Return key for the phone Enter control", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const driver = createMacOsRemoteControlDriver({
+      execFile: async (command, args) => {
+        calls.push({ command, args });
+        return { stderr: "", stdout: "" };
+      }
+    });
+
+    await driver.applyInput(session(), {
+      key: "enter",
+      modifiers: [],
+      type: "key"
+    });
+
+    expect(calls).toEqual([
+      {
+        command: "/usr/bin/osascript",
+        args: ["-e", expect.stringContaining("key code 36")]
+      }
+    ]);
+  });
+
   it("moves the cursor to absolute screen coordinates and reports that position", async () => {
     const calls: Array<{ command: string; args: string[] }> = [];
     const driver = createMacOsRemoteControlDriver({
@@ -380,6 +403,32 @@ describe("macOS remote-control driver", () => {
     expect(calls[0]?.args[3]).toContain("kCGMouseButtonRight");
     expect(calls[0]?.args[3]).toContain("kCGEventRightMouseDown");
     expect(calls[0]?.args[3]).toContain("kCGEventRightMouseUp");
+  });
+
+  it("double clicks at the current Mac cursor position for trackpad double-click input", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const driver = createMacOsRemoteControlDriver({
+      execFile: async (command, args) => {
+        calls.push({ command, args });
+        return { stderr: "", stdout: '{"x":360,"y":540}\n' };
+      }
+    });
+
+    await driver.applyInput(session(), {
+      buttons: 1,
+      clickCount: 2,
+      dx: 0,
+      dy: 0,
+      phase: "up",
+      type: "pointer",
+      x: 0,
+      y: 0
+    });
+
+    expect(calls[0]?.args[3]).toContain("CGEventSetIntegerValueField");
+    expect(calls[0]?.args[3]).toContain("$.kCGMouseEventClickState");
+    expect(calls[0]?.args[3]).toContain("const clickCount = 2");
+    expect(calls[0]?.args[3]).toContain("clickIndex <= clickCount");
   });
 
   it("keeps absolute pointer taps compatible with direct screen coordinates", async () => {

@@ -208,6 +208,7 @@ export type RemoteControlInputEvent =
       x: number;
       y: number;
       buttons?: number;
+      clickCount?: number;
       dx?: number;
       dy?: number;
     }
