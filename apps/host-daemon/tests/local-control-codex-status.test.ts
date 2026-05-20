@@ -472,6 +472,137 @@ describe("local Codex mobile status sync", () => {
     );
   });
 
+  it("hydrates idle no-turn summaries when completion states need the finished turn", async () => {
+    let exposeIdleSummary = false;
+    const runningSummary = createThread({
+      id: "thread_completion_transition",
+      preview: "Completion transition",
+      status: { activeFlags: [], type: "active" },
+      turns: [],
+      updatedAt: 1_778_000_060
+    });
+    const runningThread = createThread({
+      id: "thread_completion_transition",
+      preview: "Completion transition",
+      status: { activeFlags: [], type: "active" },
+      turns: [
+        createTurn({
+          completedAt: null,
+          id: "turn_transition",
+          status: "inProgress"
+        })
+      ],
+      updatedAt: 1_778_000_060
+    });
+    const completedSummary = createThread({
+      id: "thread_completion_transition",
+      preview: "Completion transition",
+      status: { type: "idle" },
+      turns: [],
+      updatedAt: 1_778_000_090
+    });
+    const completedThread = createThread({
+      id: "thread_completion_transition",
+      preview: "Completion transition",
+      status: { type: "idle" },
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_090,
+          id: "turn_transition",
+          status: "completed"
+        })
+      ],
+      updatedAt: 1_778_000_090
+    });
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      const params = message.params as { includeTurns?: boolean };
+      if (message.method === "thread/list") {
+        sendResult(socket, message.id, {
+          data: [exposeIdleSummary ? completedSummary : runningSummary],
+          nextCursor: null
+        });
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          thread: exposeIdleSummary
+            ? completedThread
+            : params.includeTurns === false
+              ? runningSummary
+              : runningThread
+        });
+      }
+    });
+    const bridge = createBridge(serverUrl);
+
+    const [runningCompletion] = await bridge.listCompletionStates();
+    exposeIdleSummary = true;
+    const [completedCompletion] = await bridge.listCompletionStates();
+
+    expect(runningCompletion).toEqual(
+      expect.objectContaining({
+        conversationId: "codex_thread_thread_completion_transition",
+        isComplete: false,
+        latestTurnId: "turn_transition",
+        status: "running"
+      })
+    );
+    expect(completedCompletion).toEqual(
+      expect.objectContaining({
+        conversationId: "codex_thread_thread_completion_transition",
+        isComplete: true,
+        latestTurnId: "turn_transition",
+        status: "approved"
+      })
+    );
+  });
+
+  it("hydrates recent idle no-turn summaries for completion notification polling", async () => {
+    const completedSummary = createThread({
+      id: "thread_recent_completion",
+      preview: "Recent completion",
+      status: { type: "idle" },
+      turns: [],
+      updatedAt: 1_778_000_090
+    });
+    const completedThread = createThread({
+      id: "thread_recent_completion",
+      preview: "Recent completion",
+      status: { type: "idle" },
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_090,
+          id: "turn_recent_completion",
+          status: "completed"
+        })
+      ],
+      updatedAt: 1_778_000_090
+    });
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "thread/list") {
+        sendResult(socket, message.id, { data: [completedSummary], nextCursor: null });
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, { thread: completedThread });
+      }
+    });
+    const bridge = createBridge(serverUrl);
+
+    const [completion] = await bridge.listCompletionStates({
+      hydrateIdleSummariesSince: 1_778_000_080_000
+    });
+
+    expect(completion).toEqual(
+      expect.objectContaining({
+        conversationId: "codex_thread_thread_recent_completion",
+        isComplete: true,
+        latestTurnId: "turn_recent_completion",
+        status: "approved"
+      })
+    );
+  });
+
   it("keeps a locally started mobile turn running while Codex snapshots lag behind", async () => {
     const staleCompletedThread = createThread({
       id: "thread_mobile_started",
@@ -585,6 +716,93 @@ describe("local Codex mobile status sync", () => {
         conversationId: "codex_thread_thread_mobile_started",
         isComplete: true,
         latestTurnId: "turn_mobile_started",
+        status: "approved"
+      })
+    );
+  });
+
+  it("stops forcing a locally started mobile turn running once Codex reports newer idle activity", async () => {
+    const previousUpdatedAt = Math.floor(Date.now() / 1000) - 60;
+    const completedUpdatedAt = Math.ceil(Date.now() / 1000) + 5;
+    const staleCompletedThread = createThread({
+      id: "thread_mobile_started_idle_summary",
+      preview: "Mobile started idle summary",
+      status: { type: "idle" },
+      turns: [
+        createTurn({
+          completedAt: previousUpdatedAt,
+          id: "turn_previous",
+          status: "completed"
+        })
+      ],
+      updatedAt: previousUpdatedAt
+    });
+    const completedSummary = createThread({
+      id: "thread_mobile_started_idle_summary",
+      preview: "Mobile started idle summary",
+      status: { type: "idle" },
+      turns: [],
+      updatedAt: completedUpdatedAt
+    });
+    let exposeCompletedSummary = false;
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/list" || message.method === "thread/read") {
+        const thread = exposeCompletedSummary ? completedSummary : staleCompletedThread;
+        sendResult(socket, message.id, {
+          data: message.method === "thread/list" ? [thread] : undefined,
+          nextCursor: message.method === "thread/list" ? null : undefined,
+          thread: message.method === "thread/read" ? thread : undefined
+        });
+      }
+
+      if (message.method === "thread/resume") {
+        sendResult(socket, message.id, { thread: staleCompletedThread });
+      }
+
+      if (message.method === "turn/start") {
+        sendResult(socket, message.id, {
+          turn: createTurn({
+            completedAt: null,
+            id: "turn_mobile_started",
+            status: "inProgress"
+          })
+        });
+      }
+    });
+    const bridge = createBridge(serverUrl);
+
+    await bridge.continueConversation("codex_thread_thread_mobile_started_idle_summary", {
+      prompt: "hihi"
+    });
+
+    const [project] = await bridge.listProjects();
+    const [runningConversation] = await bridge.listProjectConversations(project.id);
+    expect(runningConversation).toEqual(
+      expect.objectContaining({
+        id: "codex_thread_thread_mobile_started_idle_summary",
+        status: "running"
+      })
+    );
+
+    exposeCompletedSummary = true;
+    const [approvedConversation] = await bridge.listProjectConversations(project.id);
+    const [approvedCompletion] = await bridge.listCompletionStates();
+
+    expect(approvedConversation).toEqual(
+      expect.objectContaining({
+        id: "codex_thread_thread_mobile_started_idle_summary",
+        status: "approved"
+      })
+    );
+    expect(approvedCompletion).toEqual(
+      expect.objectContaining({
+        conversationId: "codex_thread_thread_mobile_started_idle_summary",
+        isComplete: false,
+        latestTurnId: null,
         status: "approved"
       })
     );

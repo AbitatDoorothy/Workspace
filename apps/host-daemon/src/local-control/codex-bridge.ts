@@ -16,6 +16,7 @@ import WebSocket from "ws";
 import type {
   LocalAttachmentReference,
   LocalCodexBridge,
+  LocalCodexCompletionStateOptions,
   LocalCodexConversationSummary,
   LocalCodexMessage,
   LocalCodexProjectSummary,
@@ -163,6 +164,12 @@ interface ConversationStatusCacheEntry {
   thread: CodexAppThread;
 }
 
+interface ConversationStatusHydrationOptions {
+  hydrateCompletionTransitions?: boolean;
+  hydrateIdleSummariesSince?: number;
+  hydrateIdleSummaries: boolean;
+}
+
 interface LocallyStartedTurn {
   startedAtMs: number;
   turnId: string;
@@ -238,6 +245,11 @@ export function createLocalCodexBridge(
       }
 
       return tracked;
+    }
+
+    if (shouldClearMissingLocalStartedTurn(thread, tracked)) {
+      locallyStartedTurnsByThread.delete(thread.id);
+      return null;
     }
 
     if (Date.now() - tracked.startedAtMs > LOCAL_STARTED_TURN_MATERIALIZATION_GRACE_MS) {
@@ -660,8 +672,10 @@ export function createLocalCodexBridge(
       };
     },
 
-    async listCompletionStates() {
+    async listCompletionStates(completionOptions: LocalCodexCompletionStateOptions = {}) {
       const threads = await hydrateConversationStatusThreads(await loadAllThreads(), {
+        hydrateCompletionTransitions: true,
+        hydrateIdleSummariesSince: completionOptions.hydrateIdleSummariesSince,
         hydrateIdleSummaries: false
       });
       const states = threads.map((thread) =>
@@ -770,7 +784,7 @@ export function createLocalCodexBridge(
 
   async function hydrateConversationStatusThreads(
     threads: CodexAppThread[],
-    options: { hydrateIdleSummaries: boolean }
+    options: ConversationStatusHydrationOptions
   ) {
     return Promise.all(
       threads.map(async (thread) => {
@@ -779,7 +793,10 @@ export function createLocalCodexBridge(
           return mergeCodexThreadSnapshots(cached.thread, thread);
         }
 
-        if (!needsConversationStatusHydration(thread, options)) {
+        if (
+          !needsConversationStatusHydration(thread, options) &&
+          !needsCompletionTransitionHydration(thread, cached, options)
+        ) {
           return thread;
         }
 
@@ -2026,7 +2043,7 @@ function isThreadListActivitySummaryStatus(status: CodexAppThreadStatus) {
 
 function needsConversationStatusHydration(
   thread: CodexAppThread,
-  options: { hydrateIdleSummaries: boolean }
+  options: ConversationStatusHydrationOptions
 ) {
   return (
     thread.turns.length === 0 &&
@@ -2034,6 +2051,63 @@ function needsConversationStatusHydration(
       thread.abitatLoadedFromAppServer === true ||
       (options.hydrateIdleSummaries && isThreadListActivitySummaryStatus(thread.status)))
   );
+}
+
+function needsCompletionTransitionHydration(
+  thread: CodexAppThread,
+  cached: ConversationStatusCacheEntry | undefined,
+  options: ConversationStatusHydrationOptions
+) {
+  if (
+    !options.hydrateCompletionTransitions ||
+    thread.turns.length > 0 ||
+    !isThreadListActivitySummaryStatus(thread.status)
+  ) {
+    return false;
+  }
+
+  return (
+    Boolean(cached && isCodexThreadBusy(cached.thread)) ||
+    summaryUpdatedAfter(thread, options.hydrateIdleSummariesSince)
+  );
+}
+
+function summaryUpdatedAfter(thread: CodexAppThread, timestampMs: number | undefined) {
+  if (typeof timestampMs !== "number" || !Number.isFinite(timestampMs)) {
+    return false;
+  }
+
+  return safeSeconds(thread.updatedAt, thread.createdAt) * 1000 >= timestampMs;
+}
+
+function shouldClearMissingLocalStartedTurn(thread: CodexAppThread, tracked: LocallyStartedTurn) {
+  const latestTurn = thread.turns.at(-1) ?? null;
+  if (
+    latestTurn &&
+    latestTurn.id !== tracked.turnId &&
+    isTurnTerminal(latestTurn) &&
+    turnEndedAfterLocalStart(thread, latestTurn, tracked)
+  ) {
+    return true;
+  }
+
+  const statusType = threadStatusType(thread.status);
+  return statusType !== "active" && threadUpdatedAfterLocalStart(thread, tracked);
+}
+
+function turnEndedAfterLocalStart(
+  thread: CodexAppThread,
+  turn: CodexAppTurn,
+  tracked: LocallyStartedTurn
+) {
+  return (
+    safeSeconds(turn.completedAt, thread.updatedAt, thread.createdAt) * 1000 >=
+    tracked.startedAtMs
+  );
+}
+
+function threadUpdatedAfterLocalStart(thread: CodexAppThread, tracked: LocallyStartedTurn) {
+  return safeSeconds(thread.updatedAt, thread.createdAt) * 1000 >= tracked.startedAtMs;
 }
 
 function threadListActivitySeconds(thread: CodexAppThread) {

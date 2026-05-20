@@ -104,6 +104,10 @@ export interface LocalCodexCompletionState {
   workspaceId: string;
 }
 
+export interface LocalCodexCompletionStateOptions {
+  hydrateIdleSummariesSince?: number;
+}
+
 export interface LocalCodexBridge {
   bootstrap(): Promise<{ available: boolean; error?: string }>;
   continueConversation(
@@ -127,7 +131,9 @@ export interface LocalCodexBridge {
       prompt: string;
     }
   ): Promise<{ conversationId: string; status: ConversationStatus | string; updated: boolean }>;
-  listCompletionStates(): Promise<LocalCodexCompletionState[]>;
+  listCompletionStates(
+    options?: LocalCodexCompletionStateOptions
+  ): Promise<LocalCodexCompletionState[]>;
   downloadGeneratedFile(
     conversationId: string,
     fileId: string

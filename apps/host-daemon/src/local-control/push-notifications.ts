@@ -1,4 +1,4 @@
-import type { LocalCodexCompletionState } from "./server.js";
+import type { LocalCodexCompletionState, LocalCodexCompletionStateOptions } from "./server.js";
 import type { LocalPushSubscription } from "./state.js";
 import {
   errorDiagnostics,
@@ -30,7 +30,9 @@ interface LocalPushSubscriptionStore {
 }
 
 interface LocalCompletionCodex {
-  listCompletionStates(): Promise<LocalCodexCompletionState[]>;
+  listCompletionStates(
+    options?: LocalCodexCompletionStateOptions
+  ): Promise<LocalCodexCompletionState[]>;
 }
 
 interface LocalCompletionPushService {
@@ -173,7 +175,9 @@ export function createLocalCodexCompletionNotifier(options: LocalCompletionNotif
     isPolling = true;
     try {
       logDiagnostics(options.diagnostics, "debug", "completion.poll.start");
-      const states = await options.codex.listCompletionStates();
+      const states = await options.codex.listCompletionStates({
+        hydrateIdleSummariesSince: startedAtMs
+      });
       logDiagnostics(options.diagnostics, "info", "completion.poll.result", {
         activeCount: states.filter(isActiveCompletionState).length,
         completeCount: states.filter((state) => state.isComplete).length,
