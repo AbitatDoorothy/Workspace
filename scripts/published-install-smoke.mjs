@@ -7,8 +7,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const packDir = await mkdtemp(join(tmpdir(), "abitat-pack-"));
-const installDir = await mkdtemp(join(tmpdir(), "abitat-install-"));
+const installDir = await mkdtemp(join(tmpdir(), "abitat-published-install-"));
 const packages = {
   cli: await readPackage("apps/cli/package.json"),
   hostDaemon: await readPackage("apps/host-daemon/package.json"),
@@ -16,22 +15,14 @@ const packages = {
 };
 
 try {
-  await run("pnpm", ["--filter", "@abitat_reece/shared", "build"], { cwd: root });
-  await run("pnpm", ["--filter", "@abitat_reece/host-daemon", "build"], { cwd: root });
-  await run("pnpm", ["--filter", "@abitat_reece/cli", "build"], { cwd: root });
-
-  await pack("@abitat_reece/shared");
-  await pack("@abitat_reece/host-daemon");
-  await pack("@abitat_reece/cli");
-
   await run("npm", ["init", "-y"], { cwd: installDir, quiet: true });
   await run(
     "npm",
     [
       "install",
-      packedTarball(packages.shared),
-      packedTarball(packages.hostDaemon),
-      packedTarball(packages.cli)
+      packageSpec(packages.shared),
+      packageSpec(packages.hostDaemon),
+      packageSpec(packages.cli)
     ],
     { cwd: installDir, quiet: true }
   );
@@ -46,19 +37,6 @@ try {
     throw new Error(`Unexpected abitat doctor output: ${doctor.stdout}`);
   }
 
-  const resolvedDaemon = await run(
-    "node",
-    [
-      "--input-type=module",
-      "-e",
-      "console.log(import.meta.resolve('@abitat_reece/host-daemon/cli'))"
-    ],
-    { cwd: installDir }
-  );
-  if (!resolvedDaemon.stdout.includes("@abitat_reece/host-daemon/dist/cli/index.js")) {
-    throw new Error(`Unable to resolve packaged host daemon: ${resolvedDaemon.stdout}`);
-  }
-
   const hostSmoke = await runAllowFailure(
     "node",
     ["node_modules/@abitat_reece/host-daemon/dist/cli/index.js", "__smoke__"],
@@ -70,26 +48,21 @@ try {
     );
   }
 
-  console.log("public install smoke passed");
+  console.log(
+    `published install smoke passed for ${packageSpec(packages.shared)}, ${packageSpec(
+      packages.hostDaemon
+    )}, ${packageSpec(packages.cli)}`
+  );
 } finally {
-  await rm(packDir, { force: true, recursive: true });
   await rm(installDir, { force: true, recursive: true });
-}
-
-async function pack(filter) {
-  await run("pnpm", ["--filter", filter, "pack", "--pack-destination", packDir], {
-    cwd: root,
-    quiet: true
-  });
 }
 
 async function readPackage(relativePath) {
   return JSON.parse(await readFile(join(root, relativePath), "utf8"));
 }
 
-function packedTarball(packageJson) {
-  const packageSlug = packageJson.name.replace(/^@/u, "").replace(/\//gu, "-");
-  return join(packDir, `${packageSlug}-${packageJson.version}.tgz`);
+function packageSpec(packageJson) {
+  return `${packageJson.name}@${packageJson.version}`;
 }
 
 function run(command, args, options = {}) {

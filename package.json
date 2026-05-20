@@ -22,6 +22,7 @@
     "iphone": "node scripts/dev-iphone.mjs",
     "lint": "pnpm -r lint",
     "smoke:public-install": "node scripts/public-install-smoke.mjs",
+    "smoke:published-install": "node scripts/published-install-smoke.mjs",
     "test:homebrew": "node scripts/validate-homebrew-formula.mjs",
     "test": "pnpm --filter @abitat_reece/shared build && pnpm -r test",
     "typecheck": "pnpm --filter @abitat_reece/shared build && pnpm db:generate && pnpm -r typecheck"
