@@ -121,6 +121,11 @@ interface CodexAppThread {
   status: CodexAppThreadStatus;
   cwd: string;
   name: string | null;
+  agentNickname?: string | null;
+  agentRole?: string | null;
+  forkedFromId?: string | null;
+  source?: string | null;
+  threadSource?: unknown;
   turns: CodexAppTurn[];
   abitatLoadedFromAppServer?: boolean;
   abitatThreadListActivityAt?: number;
@@ -291,13 +296,12 @@ export function createLocalCodexBridge(
     const liveThreads = await listAllThreadsOnce({ ...params, useStateDbOnly: false }).catch(
       () => []
     );
-    const listedThreads = mergeCodexThreadLists(stateThreads, liveThreads);
+    const archivedThreadIds = await listArchivedThreadIds(params).catch(() => new Set<string>());
+    const listedThreads = mergeCodexThreadLists(stateThreads, liveThreads).filter(
+      (thread) => !archivedThreadIds.has(thread.id)
+    );
     const listedThreadIds = new Set(listedThreads.map((thread) => thread.id));
     const loadedThreadIds = await client.listLoadedThreads().catch(() => []);
-    const hasLoadedOnlyThreads = loadedThreadIds.some((threadId) => !listedThreadIds.has(threadId));
-    const archivedThreadIds = hasLoadedOnlyThreads
-      ? await listArchivedThreadIds(params).catch(() => new Set<string>())
-      : new Set<string>();
     const loadedThreads = await listLoadedThreads(loadedThreadIds, params, {
       archivedThreadIds,
       listedThreadIds
@@ -312,7 +316,7 @@ export function createLocalCodexBridge(
 
     do {
       const page = await client.listThreads({ ...params, cursor });
-      threads.push(...page.data.filter((thread) => !thread.ephemeral && thread.cwd));
+      threads.push(...page.data.filter(isMobileVisibleCodexThread));
       cursor = page.nextCursor;
     } while (cursor);
 
@@ -340,7 +344,7 @@ export function createLocalCodexBridge(
     params: CodexAppThreadListParams,
     input: { archivedThreadIds: Set<string>; listedThreadIds: Set<string> }
   ) {
-    if (!thread || thread.ephemeral || !thread.cwd || !threadMatchesListParams(thread, params)) {
+    if (!thread || !isMobileVisibleCodexThread(thread) || !threadMatchesListParams(thread, params)) {
       return null;
     }
 
@@ -2003,6 +2007,51 @@ function threadMatchesListParams(thread: CodexAppThread, params: CodexAppThreadL
 
   const cwds = Array.isArray(params.cwd) ? params.cwd : [params.cwd];
   return cwds.includes(thread.cwd);
+}
+
+function isMobileVisibleCodexThread(thread: CodexAppThread) {
+  return !thread.ephemeral && Boolean(thread.cwd) && !isCodexSubagentThread(thread);
+}
+
+function isCodexSubagentThread(thread: CodexAppThread) {
+  if (hasSubagentMarker(thread.threadSource) || hasSubagentMarker(thread.source)) {
+    return true;
+  }
+
+  const agentRole = safeString(thread.agentRole).trim();
+  const agentNickname = safeString(thread.agentNickname).trim();
+
+  return Boolean(
+    (thread.forkedFromId && (agentRole || agentNickname)) ||
+      hasSubagentMarker(agentRole) ||
+      hasSubagentMarker(agentNickname)
+  );
+}
+
+function hasSubagentMarker(value: unknown, depth = 0): boolean {
+  if (depth > 4 || value === null || value === undefined) {
+    return false;
+  }
+
+  if (typeof value === "string") {
+    return /sub_?agent/iu.test(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((item) => hasSubagentMarker(item, depth + 1));
+  }
+
+  if (typeof value !== "object") {
+    return false;
+  }
+
+  return Object.entries(value as Record<string, unknown>).some(([key, entry]) => {
+    if (/sub_?agent/iu.test(key)) {
+      return true;
+    }
+
+    return hasSubagentMarker(entry, depth + 1);
+  });
 }
 
 function uniqueActiveFlags(...statuses: CodexAppThreadStatus[]) {

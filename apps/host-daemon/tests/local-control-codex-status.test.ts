@@ -923,6 +923,105 @@ describe("local Codex mobile status sync", () => {
     ]);
   });
 
+  it("does not reintroduce archived threads returned by Codex live lists", async () => {
+    const visibleThread = createThread({
+      id: "thread_visible",
+      preview: "Visible thread",
+      status: { type: "idle" },
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_050,
+          id: "turn_visible",
+          status: "completed"
+        })
+      ]
+    });
+    const archivedLiveThread = createThread({
+      id: "thread_archived_live",
+      preview: "hi",
+      status: { type: "idle" },
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_060,
+          id: "turn_archived_live",
+          status: "completed"
+        })
+      ]
+    });
+    const { serverUrl } = await startMockCodexAppServer(
+      (socket, message) => {
+        const params = message.params as { useStateDbOnly?: boolean };
+        if (message.method === "thread/list") {
+          sendResult(socket, message.id, {
+            data: params.useStateDbOnly === false ? [visibleThread, archivedLiveThread] : [visibleThread],
+            nextCursor: null
+          });
+        }
+
+        if (message.method === "thread/read") {
+          sendResult(socket, message.id, { thread: visibleThread });
+        }
+      },
+      { archivedThreads: [archivedLiveThread] }
+    );
+    const bridge = createBridge(serverUrl);
+
+    const [project] = await bridge.listProjects();
+    const conversations = await bridge.listProjectConversations(project.id);
+
+    expect(conversations.map((conversation) => conversation.id)).toEqual([
+      "codex_thread_thread_visible"
+    ]);
+  });
+
+  it("hides Codex subagent sidecar threads from mobile project thread lists", async () => {
+    const parentThread = createThread({
+      id: "thread_parent",
+      preview: "Continue Story Engine Runtime",
+      status: { activeFlags: [], type: "active" },
+      turns: []
+    });
+    const subagentThread = createThread({
+      agentNickname: "audit",
+      agentRole: "read-only audit subagent",
+      forkedFromId: parentThread.id,
+      id: "thread_subagent",
+      preview: "Read-only audit task B: validation artifact and baseline",
+      status: { activeFlags: [], type: "active" },
+      threadSource: {
+        subAgent: {
+          parentThreadId: parentThread.id
+        }
+      },
+      turns: []
+    });
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      const params = message.params as { threadId?: string };
+      if (message.method === "thread/list") {
+        sendResult(socket, message.id, { data: [parentThread, subagentThread], nextCursor: null });
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          thread: params.threadId === subagentThread.id ? subagentThread : parentThread
+        });
+      }
+    });
+    const bridge = createBridge(serverUrl);
+
+    const projects = await bridge.listProjects();
+    const conversations = await bridge.listProjectConversations(projects[0]!.id);
+
+    expect(projects).toEqual([
+      expect.objectContaining({
+        conversationCount: 1
+      })
+    ]);
+    expect(conversations.map((conversation) => conversation.id)).toEqual([
+      "codex_thread_thread_parent"
+    ]);
+  });
+
   it("keeps genuinely interrupted inactive Codex threads cancelled", async () => {
     const interruptedThread = createThread({
       id: "thread_interrupted",
@@ -1024,9 +1123,13 @@ function sendResult(socket: WebSocket, id: number | undefined, result: unknown) 
 
 function createThread(
   input: {
+    agentNickname?: string | null;
+    agentRole?: string | null;
+    forkedFromId?: string | null;
     id?: string;
     preview?: string;
     status?: unknown;
+    threadSource?: unknown;
     turns?: unknown[];
     updatedAt?: number;
   } = {}
@@ -1038,7 +1141,12 @@ function createThread(
     id: input.id ?? "thread_active",
     name: null,
     preview: input.preview ?? "Desktop running thread",
+    source: "vscode",
     status: input.status ?? { activeFlags: [], type: "active" },
+    threadSource: input.threadSource ?? null,
+    agentNickname: input.agentNickname ?? null,
+    agentRole: input.agentRole ?? null,
+    forkedFromId: input.forkedFromId ?? null,
     turns: input.turns ?? [],
     updatedAt: input.updatedAt ?? 1_778_000_060
   };

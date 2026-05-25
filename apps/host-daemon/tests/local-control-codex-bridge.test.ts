@@ -221,9 +221,9 @@ describe("local Codex bridge app-server transport", () => {
       }
 
       if (message.method === "thread/list") {
-        const params = message.params as { useStateDbOnly?: boolean };
+        const params = message.params as { archived?: boolean; useStateDbOnly?: boolean };
         sendResult(socket, message.id, {
-          data: params.useStateDbOnly === false ? [liveThread] : [],
+          data: params.archived === true ? [] : params.useStateDbOnly === false ? [liveThread] : [],
           nextCursor: null
         });
       }
@@ -281,7 +281,11 @@ describe("local Codex bridge loading performance", () => {
       }
 
       if (message.method === "thread/list") {
-        sendResult(socket, message.id, { data: [summaryThread], nextCursor: null });
+        const params = message.params as { archived?: boolean };
+        sendResult(socket, message.id, {
+          data: params.archived === true ? [] : [summaryThread],
+          nextCursor: null
+        });
       }
 
       if (message.method === "thread/read") {
@@ -324,7 +328,11 @@ describe("local Codex bridge loading performance", () => {
       }
 
       if (message.method === "thread/list") {
-        sendResult(socket, message.id, { data: [summaryThread], nextCursor: null });
+        const params = message.params as { archived?: boolean };
+        sendResult(socket, message.id, {
+          data: params.archived === true ? [] : [summaryThread],
+          nextCursor: null
+        });
       }
 
       if (message.method === "thread/read") {
@@ -550,29 +558,33 @@ describe("local Codex bridge loading performance", () => {
       }
 
       if (message.method === "thread/list") {
+        const params = message.params as { archived?: boolean };
         sendResult(socket, message.id, {
-          data: [
-            {
-              createdAt: 1_778_000_000,
-              cwd: "/Users/reece/Desktop/Fast Project",
-              ephemeral: false,
-              id: "thread_fast",
-              name: null,
-              preview: "Make loading faster",
-              status: { activeFlags: [], type: "active" },
-              turns: [
-                {
-                  completedAt: null,
-                  error: null,
-                  id: "turn_fast",
-                  items: [],
-                  startedAt: 1_778_000_050,
-                  status: "inProgress"
-                }
-              ],
-              updatedAt: 1_778_000_050
-            }
-          ],
+          data:
+            params.archived === true
+              ? []
+              : [
+                  {
+                    createdAt: 1_778_000_000,
+                    cwd: "/Users/reece/Desktop/Fast Project",
+                    ephemeral: false,
+                    id: "thread_fast",
+                    name: null,
+                    preview: "Make loading faster",
+                    status: { activeFlags: [], type: "active" },
+                    turns: [
+                      {
+                        completedAt: null,
+                        error: null,
+                        id: "turn_fast",
+                        items: [],
+                        startedAt: 1_778_000_050,
+                        status: "inProgress"
+                      }
+                    ],
+                    updatedAt: 1_778_000_050
+                  }
+                ],
           nextCursor: null
         });
       }
@@ -945,7 +957,8 @@ rl.on("line", (line) => {
   }
 
   if (message.method === "thread/list") {
-    send(message.id, { data: [thread], nextCursor: null });
+    const params = message.params || {};
+    send(message.id, { data: params.archived === true ? [] : [thread], nextCursor: null });
     return;
   }
 
