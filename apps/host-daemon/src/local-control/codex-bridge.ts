@@ -32,6 +32,8 @@ import {
 
 const CODEX_PROJECT_PREFIX = "codex_project_";
 const CODEX_THREAD_PREFIX = "codex_thread_";
+const CODEX_CHATS_PROJECT_ID = "codex_project_chats";
+const CODEX_CHATS_PROJECT_NAME = "Chats";
 const DEFAULT_SERVER_URL = "stdio://";
 const DEFAULT_CODEX_BINARY = "/Applications/Codex.app/Contents/Resources/codex";
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -344,7 +346,11 @@ export function createLocalCodexBridge(
     params: CodexAppThreadListParams,
     input: { archivedThreadIds: Set<string>; listedThreadIds: Set<string> }
   ) {
-    if (!thread || !isMobileVisibleCodexThread(thread) || !threadMatchesListParams(thread, params)) {
+    if (
+      !thread ||
+      !isMobileVisibleCodexThread(thread) ||
+      !threadMatchesListParams(thread, params)
+    ) {
       return null;
     }
 
@@ -401,8 +407,15 @@ export function createLocalCodexBridge(
   }
 
   async function resolveProjectCwd(projectId: string) {
+    if (projectId === CODEX_CHATS_PROJECT_ID) {
+      throw Object.assign(new Error("Codex Chats project has no folder cwd"), { statusCode: 404 });
+    }
+
     for (const thread of await listAllThreads()) {
-      if (externalCodexProjectId(thread.cwd) === projectId) {
+      if (
+        !isCodexStandaloneChatThread(thread) &&
+        externalCodexProjectId(thread.cwd) === projectId
+      ) {
         return thread.cwd;
       }
     }
@@ -412,8 +425,14 @@ export function createLocalCodexBridge(
 
   async function listProjects(): Promise<LocalCodexProjectSummary[]> {
     const grouped = new Map<string, { cwd: string; count: number; latestUpdatedAt: number }>();
+    const chatThreads: CodexAppThread[] = [];
 
     for (const thread of await listAllThreads()) {
+      if (isCodexStandaloneChatThread(thread)) {
+        chatThreads.push(thread);
+        continue;
+      }
+
       const current = grouped.get(thread.cwd);
       grouped.set(thread.cwd, {
         count: (current?.count ?? 0) + 1,
@@ -422,20 +441,39 @@ export function createLocalCodexBridge(
       });
     }
 
-    return Array.from(grouped.values())
-      .sort((left, right) => right.latestUpdatedAt - left.latestUpdatedAt)
-      .map((project) => ({
-        conversationCount: project.count,
+    const projects: LocalCodexProjectSummary[] = Array.from(grouped.values()).map((project) => ({
+      conversationCount: project.count,
+      createdByUserId: userId,
+      hostLocalPath: project.cwd,
+      id: externalCodexProjectId(project.cwd),
+      name: projectNameFromCwd(project.cwd),
+      repoSyncStatus: "codex_app",
+      repoUrl: project.cwd,
+      source: "codex_app",
+      updatedAt: secondsToIso(project.latestUpdatedAt),
+      workspaceId
+    }));
+
+    if (chatThreads.length > 0) {
+      projects.push({
+        conversationCount: chatThreads.length,
         createdByUserId: userId,
-        hostLocalPath: project.cwd,
-        id: externalCodexProjectId(project.cwd),
-        name: projectNameFromCwd(project.cwd),
+        hostLocalPath: "",
+        id: CODEX_CHATS_PROJECT_ID,
+        name: CODEX_CHATS_PROJECT_NAME,
         repoSyncStatus: "codex_app",
-        repoUrl: project.cwd,
+        repoUrl: "",
         source: "codex_app",
-        updatedAt: secondsToIso(project.latestUpdatedAt),
+        updatedAt: secondsToIso(
+          Math.max(...chatThreads.map((thread) => safeSeconds(thread.updatedAt, thread.createdAt)))
+        ),
         workspaceId
-      }));
+      });
+    }
+
+    return projects.sort(
+      (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+    );
   }
 
   function enqueueTurn(threadId: string, input: QueuedCodexTurnInput, options = { front: false }) {
@@ -584,6 +622,18 @@ export function createLocalCodexBridge(
     rememberLocallyStartedTurn(threadId, started.turn.id);
   }
 
+  async function readThreadForContinuation(threadId: string) {
+    try {
+      return await client.readThread(threadId, true);
+    } catch (error) {
+      logDiagnostics(diagnostics, "warn", "codex.thread_continue.full_read_unavailable", {
+        error: errorDiagnostics(error),
+        threadId
+      });
+      return client.readThread(threadId, false);
+    }
+  }
+
   return {
     async bootstrap() {
       try {
@@ -603,7 +653,7 @@ export function createLocalCodexBridge(
 
     async continueConversation(conversationId, input) {
       const threadId = toCodexThreadId(conversationId);
-      const thread = await client.readThread(threadId, true);
+      const thread = await readThreadForContinuation(threadId);
       const delivery = input.delivery ?? "queue";
       const locallyStartedTurn = locallyStartedTurnForThread(thread);
 
@@ -743,6 +793,20 @@ export function createLocalCodexBridge(
     },
 
     async listProjectConversations(projectId) {
+      if (projectId === CODEX_CHATS_PROJECT_ID) {
+        const threads = await hydrateConversationStatusThreads(await listAllThreads(), {
+          hydrateIdleSummaries: true
+        });
+        return threads
+          .filter(isCodexStandaloneChatThread)
+          .sort((left, right) => right.updatedAt - left.updatedAt)
+          .map((thread) =>
+            codexThreadToConversation(thread, workspaceId, userId, {
+              forceRunning: Boolean(locallyStartedTurnForThread(thread))
+            })
+          );
+      }
+
       const cwd = await resolveProjectCwd(projectId);
       const threads = await hydrateConversationStatusThreads(await listAllThreads({ cwd }), {
         hydrateIdleSummaries: true
@@ -760,6 +824,31 @@ export function createLocalCodexBridge(
     listProjects,
 
     async startConversation(projectId, input) {
+      if (projectId === CODEX_CHATS_PROJECT_ID) {
+        const { thread } = await client.startThread({
+          cwd: null,
+          experimentalRawEvents: false,
+          persistExtendedHistory: true
+        });
+        invalidateMessageHistoryCache(thread.id);
+        const started = await client.startTurn(
+          thread.id,
+          userInput(input.prompt, input.attachments),
+          {
+            ...PHONE_FULL_ACCESS_TURN_OPTIONS,
+            cwd: thread.cwd,
+            ...turnModelSettings(input.modelSettings)
+          }
+        );
+        rememberModelContextSyncedTurn(thread.id, started.turn.id);
+        rememberLocallyStartedTurn(thread.id, started.turn.id);
+
+        return {
+          conversationId: externalCodexConversationId(thread.id),
+          status: "running"
+        };
+      }
+
       const cwd = await resolveProjectCwd(projectId);
       const { thread } = await client.startThread({
         cwd,
@@ -1537,7 +1626,9 @@ class StdioJsonRpcTransport implements JsonRpcTransport {
         }
         settled = true;
         clearTimeout(timer);
-        reject(new Error(`Codex app-server exited before stdio transport opened (${code ?? signal})`));
+        reject(
+          new Error(`Codex app-server exited before stdio transport opened (${code ?? signal})`)
+        );
       });
     });
   }
@@ -2010,7 +2101,42 @@ function threadMatchesListParams(thread: CodexAppThread, params: CodexAppThreadL
 }
 
 function isMobileVisibleCodexThread(thread: CodexAppThread) {
-  return !thread.ephemeral && Boolean(thread.cwd) && !isCodexSubagentThread(thread);
+  return (
+    !thread.ephemeral &&
+    Boolean(thread.cwd) &&
+    !isCodexSubagentThread(thread) &&
+    !isLegacyCodexCliThread(thread)
+  );
+}
+
+function isCodexStandaloneChatThread(thread: CodexAppThread) {
+  return isCodexGeneratedChatCwd(thread.cwd);
+}
+
+function isLegacyCodexCliThread(thread: CodexAppThread) {
+  return (
+    safeString(thread.source).trim().toLowerCase() === "cli" && !isCodexGeneratedChatCwd(thread.cwd)
+  );
+}
+
+function isCodexGeneratedChatCwd(cwd: string) {
+  return /^\/Users\/[^/]+\/Documents\/Codex\/\d{4}-\d{2}-\d{2}\/[^/]+$/u.test(normalize(cwd));
+}
+
+function codexThreadProjectId(thread: CodexAppThread) {
+  return isCodexStandaloneChatThread(thread)
+    ? CODEX_CHATS_PROJECT_ID
+    : externalCodexProjectId(thread.cwd);
+}
+
+function codexThreadProjectName(thread: CodexAppThread) {
+  return isCodexStandaloneChatThread(thread)
+    ? CODEX_CHATS_PROJECT_NAME
+    : projectNameFromCwd(thread.cwd);
+}
+
+function codexThreadWorktreePath(thread: CodexAppThread) {
+  return isCodexStandaloneChatThread(thread) ? null : thread.cwd;
 }
 
 function isCodexSubagentThread(thread: CodexAppThread) {
@@ -2023,8 +2149,8 @@ function isCodexSubagentThread(thread: CodexAppThread) {
 
   return Boolean(
     (thread.forkedFromId && (agentRole || agentNickname)) ||
-      hasSubagentMarker(agentRole) ||
-      hasSubagentMarker(agentNickname)
+    hasSubagentMarker(agentRole) ||
+    hasSubagentMarker(agentNickname)
   );
 }
 
@@ -2150,8 +2276,7 @@ function turnEndedAfterLocalStart(
   tracked: LocallyStartedTurn
 ) {
   return (
-    safeSeconds(turn.completedAt, thread.updatedAt, thread.createdAt) * 1000 >=
-    tracked.startedAtMs
+    safeSeconds(turn.completedAt, thread.updatedAt, thread.createdAt) * 1000 >= tracked.startedAtMs
   );
 }
 
@@ -2194,7 +2319,7 @@ function codexThreadToConversation(
     createdAt: secondsToIso(thread.createdAt),
     createdByUserId: userId,
     id: externalCodexConversationId(thread.id),
-    projectId: externalCodexProjectId(thread.cwd),
+    projectId: codexThreadProjectId(thread),
     prompt: codexThreadTitle(thread),
     runtimeSessionId: thread.id,
     source: "codex_app",
@@ -2202,7 +2327,7 @@ function codexThreadToConversation(
     type: "investigation",
     updatedAt: secondsToIso(safeSeconds(thread.updatedAt, thread.createdAt)),
     workspaceId,
-    worktreePath: thread.cwd
+    worktreePath: codexThreadWorktreePath(thread)
   };
 }
 
@@ -2228,8 +2353,8 @@ function codexThreadToCompletionState(
     ),
     latestTurnCompletedAt,
     latestTurnId: latestTurn?.id ?? null,
-    projectId: externalCodexProjectId(thread.cwd),
-    projectName: projectNameFromCwd(thread.cwd),
+    projectId: codexThreadProjectId(thread),
+    projectName: codexThreadProjectName(thread),
     prompt: codexThreadTitle(thread),
     source: "codex_app" as const,
     status,

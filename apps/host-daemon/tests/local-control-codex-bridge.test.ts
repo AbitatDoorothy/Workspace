@@ -756,6 +756,82 @@ describe("local Codex bridge loading performance", () => {
     expect(calls.indexOf("thread/inject_items")).toBeLessThan(calls.indexOf("turn/start"));
   });
 
+  it("continues a thread when full history read fails but summary read succeeds", async () => {
+    const diagnostics = createMemoryDiagnostics();
+    const threadSummary = {
+      createdAt: 1_778_000_000,
+      cwd: "/Users/reece/Desktop/Large Project",
+      ephemeral: false,
+      id: "thread_large",
+      name: null,
+      preview: "Large thread",
+      status: { activeFlags: [], type: "idle" },
+      turns: [],
+      updatedAt: 1_778_000_030
+    };
+    const readRequests: Array<{ includeTurns?: boolean; threadId?: string }> = [];
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/read") {
+        const params = message.params as { includeTurns?: boolean; threadId?: string };
+        readRequests.push(params);
+        if (params.includeTurns) {
+          sendError(socket, message.id, "full thread history is unavailable");
+          return;
+        }
+        sendResult(socket, message.id, { thread: threadSummary });
+      }
+
+      if (message.method === "thread/loaded/list") {
+        sendResult(socket, message.id, { data: [], nextCursor: null });
+      }
+
+      if (message.method === "thread/resume") {
+        sendResult(socket, message.id, { thread: threadSummary });
+      }
+
+      if (message.method === "turn/start") {
+        sendResult(socket, message.id, {
+          turn: {
+            completedAt: null,
+            error: null,
+            id: "turn_mobile_large",
+            items: [],
+            startedAt: 1_778_000_040,
+            status: { type: "inProgress" }
+          }
+        });
+      }
+    });
+    const bridge = createLocalCodexBridge({
+      codexBinaryPath: "/unused",
+      diagnostics,
+      serverUrl
+    });
+
+    await expect(
+      bridge.continueConversation("codex_thread_thread_large", {
+        prompt: "Continue from phone"
+      })
+    ).resolves.toEqual({
+      conversationId: "codex_thread_thread_large",
+      status: "running"
+    });
+    expect(readRequests).toEqual([
+      { includeTurns: true, threadId: "thread_large" },
+      { includeTurns: false, threadId: "thread_large" }
+    ]);
+    expect(diagnostics.events).toContainEqual(
+      expect.objectContaining({
+        event: "codex.thread_continue.full_read_unavailable",
+        threadId: "thread_large"
+      })
+    );
+  });
+
   it("syncs only desktop turns added after the previous phone turn in alternating desktop and mobile chat", async () => {
     let phase: "reece" | "iris" = "reece";
     let startCount = 0;

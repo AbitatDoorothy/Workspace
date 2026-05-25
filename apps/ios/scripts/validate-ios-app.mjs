@@ -79,7 +79,9 @@ if (appJson.expo?.icon !== "./assets/icon.png") {
   throw new Error("Expected app.json to use the bundled Abitat app icon");
 }
 if (appJson.expo?.orientation !== "default") {
-  throw new Error("Expected app.json to allow landscape orientation for full-screen remote control");
+  throw new Error(
+    "Expected app.json to allow landscape orientation for full-screen remote control"
+  );
 }
 const expoNotificationsPlugin = appJson.expo?.plugins?.find((plugin) =>
   Array.isArray(plugin) ? plugin[0] === "expo-notifications" : plugin === "expo-notifications"
@@ -156,7 +158,9 @@ if (!podfileLock.includes("ExpoCamera (55.0.16)")) {
   throw new Error("Expected native iOS Pods to include ExpoCamera for QR pairing scans");
 }
 if (!podfileLock.includes("ExpoScreenOrientation")) {
-  throw new Error("Expected native iOS Pods to include ExpoScreenOrientation for landscape remote control");
+  throw new Error(
+    "Expected native iOS Pods to include ExpoScreenOrientation for landscape remote control"
+  );
 }
 if (!podfileLock.includes("react-native-safe-area-context (5.6.2)")) {
   throw new Error("Expected native iOS Pods to include react-native-safe-area-context");
@@ -595,7 +599,7 @@ for (const expected of [
   "onProjectConversationsLoaded",
   "onProjectThread",
   "onNewThread(project)",
-  'accessibilityLabel={`Create thread in ${project.name}`}',
+  "accessibilityLabel={`Create thread in ${project.name}`}",
   'name="plus"',
   "ThreadAttentionTone",
   "projectConversations.map((conversation)",
@@ -605,7 +609,7 @@ for (const expected of [
   "styles.projectThreadRow",
   "styles.projectThreadRowPressed",
   "styles.projectThreadStatusLight",
-  "threadTone !== \"idle\" ? (",
+  'threadTone !== "idle" ? (',
   "styles.threadStatusRunning",
   "styles.threadStatusUnread",
   "collapsedProjectIds",
@@ -616,7 +620,7 @@ for (const expected of [
   "toggleArchivedProjectFold(project.id)",
   "archivedProjectThreadsExpanded",
   "accessibilityState={{ expanded: archivedProjectThreadsExpanded }}",
-  'accessibilityLabel={`Recover ${project.name} from archive`}',
+  "accessibilityLabel={`Recover ${project.name} from archive`}",
   'name="rotate-ccw"',
   "styles.projectRecoverButton",
   "isArchiveExpanded",
@@ -638,6 +642,13 @@ for (const expected of [
     throw new Error(`Expected ProjectsScreen to match the celestial project UI: ${expected}`);
   }
 }
+for (const removed of ["for (const entry of messageCacheIndex)", "byId.set(entry.conversationId"]) {
+  if (projectsScreen.includes(removed)) {
+    throw new Error(
+      `Expected ProjectsScreen to use message cache only for read state, not stale thread rows: ${removed}`
+    );
+  }
+}
 for (const removed of ["SWIPE_BACK_DISTANCE"]) {
   if (projectsScreen.includes(removed)) {
     throw new Error(`Expected ProjectsScreen to leave swipe navigation to App: ${removed}`);
@@ -651,7 +662,9 @@ for (const removed of [
   "archiveStatusLight"
 ]) {
   if (projectsScreen.includes(removed)) {
-    throw new Error(`Expected ProjectsScreen to remove project LEDs and idle thread LEDs: ${removed}`);
+    throw new Error(
+      `Expected ProjectsScreen to remove project LEDs and idle thread LEDs: ${removed}`
+    );
   }
 }
 for (const removed of [
@@ -663,7 +676,9 @@ for (const removed of [
   "attentionThreadsForProject"
 ]) {
   if (projectsScreen.includes(removed)) {
-    throw new Error(`Expected ProjectsScreen to show project threads inline without dropdowns: ${removed}`);
+    throw new Error(
+      `Expected ProjectsScreen to show project threads inline without dropdowns: ${removed}`
+    );
   }
 }
 for (const removed of [
@@ -969,6 +984,7 @@ if (!appScreen.includes("messageCacheScope: store.messageCacheScope")) {
 }
 for (const expected of [
   "NAVIGATION_CACHE_DIRECTORY",
+  "const NAVIGATION_CACHE_VERSION = 2;",
   "loadCachedNavigationData",
   "saveCachedProjects",
   "saveCachedProjectConversations",
@@ -1047,7 +1063,9 @@ for (const expected of [
   }
 }
 if (!appScreen.includes("onFullScreenChange={setIsRemoteControlFullScreen}")) {
-  throw new Error("Expected App to disable the global back swipe while remote control is fullscreen");
+  throw new Error(
+    "Expected App to disable the global back swipe while remote control is fullscreen"
+  );
 }
 if (appScreen.includes("requestAnimationFrame(() => {\n        backSwipeX.setValue(0);")) {
   throw new Error(
@@ -1084,7 +1102,7 @@ const settingsScreen = await readFile(
   "utf8"
 );
 for (const expected of [
-  "| \"remoteControl\"",
+  '| "remoteControl"',
   "RemoteControlScreen",
   "remoteControlStartKey",
   "startRemoteControlFromDashboard",
@@ -1092,7 +1110,11 @@ for (const expected of [
   "onStartRemoteControl={startRemoteControlFromDashboard}",
   'routeName === "remoteControl"'
 ]) {
-  if (!appScreen.includes(expected) && !settingsScreen.includes(expected) && !typesFile.includes(expected)) {
+  if (
+    !appScreen.includes(expected) &&
+    !settingsScreen.includes(expected) &&
+    !typesFile.includes(expected)
+  ) {
     throw new Error(`Expected isolated remote-control route wiring: ${expected}`);
   }
 }
@@ -1300,7 +1322,7 @@ for (const expected of [
   "Desktops",
   "Move to left desktop",
   "Move to right desktop",
-  'key: `mission-control-${direction}`',
+  "key: `mission-control-${direction}`",
   "isMissionControlMode ? (",
   "styles.remoteClickRail",
   "styles.remoteClickRailSix",
@@ -1357,7 +1379,9 @@ for (const expected of [
   "/api/remote-control/sessions/${sessionId}/input"
 ]) {
   if (!apiClient.includes(expected)) {
-    throw new Error(`Expected API client to support local remote-control frame/input APIs: ${expected}`);
+    throw new Error(
+      `Expected API client to support local remote-control frame/input APIs: ${expected}`
+    );
   }
 }
 for (const expected of ["forceRefresh?: boolean", 'params.push("forceRefresh=true")']) {

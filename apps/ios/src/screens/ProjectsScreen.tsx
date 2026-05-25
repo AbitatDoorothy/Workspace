@@ -216,9 +216,7 @@ export function ProjectsScreen({
   }, [api, onProjectsLoaded, refreshEnabled]);
 
   useEffect(() => {
-    const projectIds = projectThreadRefreshIdsKey
-      ? projectThreadRefreshIdsKey.split("\u0001")
-      : [];
+    const projectIds = projectThreadRefreshIdsKey ? projectThreadRefreshIdsKey.split("\u0001") : [];
     if (!refreshEnabled || projectIds.length === 0) {
       return;
     }
@@ -333,11 +331,7 @@ export function ProjectsScreen({
           <Text style={styles.sectionTitle}>PROJECTS</Text>
           <View style={styles.projectList}>
             {visibleProjects.map((project) => {
-              const projectConversations = conversationsForProject(
-                project,
-                conversationsByProject,
-                messageCacheIndex
-              );
+              const projectConversations = conversationsForProject(project, conversationsByProject);
               const isLoadingProject = loadingProjectIds.has(project.id);
               const projectThreadsCollapsed = collapsedProjectIds.has(project.id);
 
@@ -404,62 +398,61 @@ export function ProjectsScreen({
                 <View style={styles.archivedProjectList}>
                   {archivedProjects.length > 0 ? (
                     archivedProjects.map((project) => {
-                    const projectConversations = conversationsForProject(
-                      project,
-                      conversationsByProject,
-                      messageCacheIndex
-                    );
-                    const isLoadingProject = loadingProjectIds.has(project.id);
-                    const archivedProjectThreadsExpanded = expandedArchivedProjectIds.has(
-                      project.id
-                    );
+                      const projectConversations = conversationsForProject(
+                        project,
+                        conversationsByProject
+                      );
+                      const isLoadingProject = loadingProjectIds.has(project.id);
+                      const archivedProjectThreadsExpanded = expandedArchivedProjectIds.has(
+                        project.id
+                      );
 
-                    return (
-                      <View key={project.id} style={styles.archivedProjectGroup}>
-                        <Pressable
-                          accessibilityLabel={`${
-                            archivedProjectThreadsExpanded ? "Fold" : "Expand"
-                          } archived ${project.name} threads`}
-                          accessibilityRole="button"
-                          accessibilityState={{ expanded: archivedProjectThreadsExpanded }}
-                          onPress={() => toggleArchivedProjectFold(project.id)}
-                          style={({ pressed }) => [
-                            styles.archivedProjectRow,
-                            pressed ? styles.projectThreadRowPressed : null
-                          ]}
-                        >
-                          <Feather color="rgba(255,255,255,0.66)" name="folder" size={15} />
-                          <Text numberOfLines={1} style={styles.projectThreadName}>
-                            {project.name}
-                          </Text>
+                      return (
+                        <View key={project.id} style={styles.archivedProjectGroup}>
                           <Pressable
-                            accessibilityLabel={`Recover ${project.name} from archive`}
+                            accessibilityLabel={`${
+                              archivedProjectThreadsExpanded ? "Fold" : "Expand"
+                            } archived ${project.name} threads`}
                             accessibilityRole="button"
-                            hitSlop={10}
-                            onPress={(event) => {
-                              event.stopPropagation();
-                              recoverArchivedProject(project.id);
-                            }}
+                            accessibilityState={{ expanded: archivedProjectThreadsExpanded }}
+                            onPress={() => toggleArchivedProjectFold(project.id)}
                             style={({ pressed }) => [
-                              styles.projectRecoverButton,
-                              pressed ? styles.projectRecoverButtonPressed : null
+                              styles.archivedProjectRow,
+                              pressed ? styles.projectThreadRowPressed : null
                             ]}
                           >
-                            <Feather color="rgba(255,255,255,0.76)" name="rotate-ccw" size={15} />
+                            <Feather color="rgba(255,255,255,0.66)" name="folder" size={15} />
+                            <Text numberOfLines={1} style={styles.projectThreadName}>
+                              {project.name}
+                            </Text>
+                            <Pressable
+                              accessibilityLabel={`Recover ${project.name} from archive`}
+                              accessibilityRole="button"
+                              hitSlop={10}
+                              onPress={(event) => {
+                                event.stopPropagation();
+                                recoverArchivedProject(project.id);
+                              }}
+                              style={({ pressed }) => [
+                                styles.projectRecoverButton,
+                                pressed ? styles.projectRecoverButtonPressed : null
+                              ]}
+                            >
+                              <Feather color="rgba(255,255,255,0.76)" name="rotate-ccw" size={15} />
+                            </Pressable>
                           </Pressable>
-                        </Pressable>
-                        {archivedProjectThreadsExpanded ? (
-                          <ProjectThreadList
-                            isLoadingProject={isLoadingProject}
-                            messageCacheIndex={messageCacheIndex}
-                            onProjectThread={onProjectThread}
-                            project={project}
-                            projectConversations={projectConversations}
-                          />
-                        ) : null}
-                      </View>
-                    );
-                  })
+                          {archivedProjectThreadsExpanded ? (
+                            <ProjectThreadList
+                              isLoadingProject={isLoadingProject}
+                              messageCacheIndex={messageCacheIndex}
+                              onProjectThread={onProjectThread}
+                              project={project}
+                              projectConversations={projectConversations}
+                            />
+                          ) : null}
+                        </View>
+                      );
+                    })
                   ) : (
                     <Text style={styles.projectThreadEmptyText}>NO ARCHIVED PROJECTS</Text>
                   )}
@@ -789,10 +782,7 @@ function ProjectSwipeRow({
 
             onPress();
           }}
-          style={({ pressed }) => [
-            styles.projectRow,
-            pressed ? styles.projectRowPressed : null
-          ]}
+          style={({ pressed }) => [styles.projectRow, pressed ? styles.projectRowPressed : null]}
         >
           {children}
         </Pressable>
@@ -882,28 +872,9 @@ function resetProjectSwipe(
 
 function conversationsForProject(
   project: ProjectSummary,
-  conversationsByProject: Record<string, ConversationSummary[]>,
-  messageCacheIndex: MessageCacheIndexEntry[]
+  conversationsByProject: Record<string, ConversationSummary[]>
 ) {
   const byId = new Map<string, ConversationSummary>();
-
-  for (const entry of messageCacheIndex) {
-    if (entry.projectId !== project.id) {
-      continue;
-    }
-
-    byId.set(entry.conversationId, {
-      id: entry.conversationId,
-      projectId: project.id,
-      prompt: entry.prompt ?? "Codex thread",
-      source: project.source,
-      status: entry.status ?? "approved",
-      type: "codex_app",
-      updatedAt: entry.updatedAt,
-      workspaceId: entry.workspaceId ?? project.workspaceId,
-      worktreePath: project.hostLocalPath ?? null
-    });
-  }
 
   for (const conversation of conversationsByProject[project.id] ?? []) {
     byId.set(conversation.id, conversation);
@@ -929,10 +900,7 @@ function isThreadRunningStatus(status: string) {
   return ["awaiting_approval", "committing", "preparing", "queued", "running"].includes(status);
 }
 
-function isConversationUnread(
-  conversationId: string,
-  messageCacheIndex: MessageCacheIndexEntry[]
-) {
+function isConversationUnread(conversationId: string, messageCacheIndex: MessageCacheIndexEntry[]) {
   const entry = messageCacheIndex.find((candidate) => candidate.conversationId === conversationId);
   return Boolean(entry && entry.latestSequence > (entry.lastReadSequence ?? 0));
 }

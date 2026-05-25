@@ -23,7 +23,7 @@
           "remote-notification"
         ]
       },
-      "buildNumber": "17"
+      "buildNumber": "19"
     },
     "plugins": [
       "expo-secure-store",

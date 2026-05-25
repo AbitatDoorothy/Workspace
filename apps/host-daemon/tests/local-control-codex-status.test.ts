@@ -953,7 +953,10 @@ describe("local Codex mobile status sync", () => {
         const params = message.params as { useStateDbOnly?: boolean };
         if (message.method === "thread/list") {
           sendResult(socket, message.id, {
-            data: params.useStateDbOnly === false ? [visibleThread, archivedLiveThread] : [visibleThread],
+            data:
+              params.useStateDbOnly === false
+                ? [visibleThread, archivedLiveThread]
+                : [visibleThread],
             nextCursor: null
           });
         }
@@ -1019,6 +1022,215 @@ describe("local Codex mobile status sync", () => {
     ]);
     expect(conversations.map((conversation) => conversation.id)).toEqual([
       "codex_thread_thread_parent"
+    ]);
+  });
+
+  it("groups desktop Codex chats into a synthetic mobile Chats project without legacy CLI sessions", async () => {
+    const projectThread = createThread({
+      id: "thread_project",
+      preview: "Project-backed thread",
+      source: "vscode",
+      status: { type: "idle" },
+      updatedAt: 1_778_000_050,
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_050,
+          id: "turn_project",
+          status: "completed"
+        })
+      ]
+    });
+    const legacyCliThread = createThread({
+      cwd: "/Users/reece",
+      id: "thread_chat",
+      preview: "Play Ed Sheeran in Apple Music",
+      source: "cli",
+      status: { type: "idle" },
+      updatedAt: 1_778_000_060,
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_060,
+          id: "turn_chat",
+          status: "completed"
+        })
+      ]
+    });
+    const desktopChatThread = createThread({
+      cwd: "/Users/reece/Documents/Codex/2026-05-25/reply-hello-only",
+      id: "thread_desktop_chat",
+      preview: "reply hello only",
+      source: "vscode",
+      status: { type: "idle" },
+      updatedAt: 1_778_000_070,
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_070,
+          id: "turn_desktop_chat",
+          status: "completed"
+        })
+      ]
+    });
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "thread/list") {
+        sendResult(socket, message.id, {
+          data: [desktopChatThread, legacyCliThread, projectThread],
+          nextCursor: null
+        });
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, { thread: projectThread });
+      }
+    });
+    const bridge = createBridge(serverUrl);
+
+    const projects = await bridge.listProjects();
+    const chatConversations = await bridge.listProjectConversations("codex_project_chats");
+    const completionStates = await bridge.listCompletionStates();
+
+    expect(projects.map((project) => project.name)).toEqual(["Chats", "Abitat_Workspace"]);
+    expect(projects).toEqual([
+      expect.objectContaining({
+        conversationCount: 1,
+        hostLocalPath: "",
+        id: "codex_project_chats",
+        repoUrl: ""
+      }),
+      expect.objectContaining({
+        conversationCount: 1,
+        hostLocalPath: cwd,
+        name: "Abitat_Workspace"
+      })
+    ]);
+    expect(chatConversations.map((conversation) => conversation.id)).toEqual([
+      "codex_thread_thread_desktop_chat"
+    ]);
+    expect(chatConversations.map((conversation) => conversation.projectId)).toEqual([
+      "codex_project_chats"
+    ]);
+    expect(chatConversations.map((conversation) => conversation.worktreePath)).toEqual([null]);
+    expect(
+      completionStates
+        .filter((state) => state.projectId === "codex_project_chats")
+        .map((state) => state.projectName)
+    ).toEqual(["Chats"]);
+    expect(JSON.stringify(projects)).not.toContain(legacyCliThread.id);
+    expect(JSON.stringify(chatConversations)).not.toContain(legacyCliThread.id);
+    expect(JSON.stringify(completionStates)).not.toContain(legacyCliThread.id);
+  });
+
+  it("starts new standalone Codex chats from the synthetic mobile Chats project", async () => {
+    let startThreadParams: unknown = null;
+    let startTurnParams: unknown = null;
+    const newChatThread = createThread({
+      cwd: "/Users/reece/Documents/Codex/2026-05-25/new-chat",
+      id: "thread_new_chat",
+      preview: "New chat",
+      source: "vscode",
+      status: { type: "idle" },
+      updatedAt: 1_778_000_080
+    });
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "thread/start") {
+        startThreadParams = message.params;
+        sendResult(socket, message.id, { thread: newChatThread });
+      }
+
+      if (message.method === "turn/start") {
+        startTurnParams = message.params;
+        sendResult(socket, message.id, {
+          turn: createTurn({
+            completedAt: 1_778_000_090,
+            id: "turn_new_chat",
+            status: "completed"
+          })
+        });
+      }
+    });
+    const bridge = createBridge(serverUrl);
+
+    await expect(
+      bridge.startConversation("codex_project_chats", { prompt: "hello from phone" })
+    ).resolves.toEqual({
+      conversationId: "codex_thread_thread_new_chat",
+      status: "running"
+    });
+    expect(startThreadParams).toEqual(
+      expect.objectContaining({
+        cwd: null,
+        experimentalRawEvents: false,
+        persistExtendedHistory: true
+      })
+    );
+    expect(startTurnParams).toEqual(
+      expect.objectContaining({
+        cwd: "/Users/reece/Documents/Codex/2026-05-25/new-chat",
+        input: [
+          {
+            text: "hello from phone",
+            text_elements: [],
+            type: "text"
+          }
+        ],
+        threadId: "thread_new_chat"
+      })
+    );
+  });
+
+  it("does not include archived standalone Codex chats in the synthetic mobile Chats project", async () => {
+    const activeChatThread = createThread({
+      cwd: "/Users/reece/Documents/Codex/2026-05-25/active-chat",
+      id: "thread_active_chat",
+      preview: "active chat",
+      source: "vscode",
+      status: { type: "idle" },
+      updatedAt: 1_778_000_090,
+      turns: [
+        createTurn({
+          completedAt: 1_778_000_090,
+          id: "turn_active_chat",
+          status: "completed"
+        })
+      ]
+    });
+    const archivedChatThread = createThread({
+      cwd: "/Users/reece/Documents/Codex/2026-05-24/archived-chat",
+      id: "thread_archived_chat",
+      preview: "archived chat",
+      source: "vscode",
+      status: { activeFlags: [], type: "active" },
+      updatedAt: 1_777_900_000,
+      turns: []
+    });
+    const { serverUrl } = await startMockCodexAppServer(
+      (socket, message) => {
+        const params = message.params as { useStateDbOnly?: boolean };
+        if (message.method === "thread/list") {
+          sendResult(socket, message.id, {
+            data:
+              params.useStateDbOnly === false
+                ? [activeChatThread, archivedChatThread]
+                : [activeChatThread],
+            nextCursor: null
+          });
+        }
+      },
+      { archivedThreads: [archivedChatThread] }
+    );
+    const bridge = createBridge(serverUrl);
+
+    const projects = await bridge.listProjects();
+    const chatConversations = await bridge.listProjectConversations("codex_project_chats");
+
+    expect(projects).toEqual([
+      expect.objectContaining({
+        conversationCount: 1,
+        id: "codex_project_chats",
+        name: "Chats"
+      })
+    ]);
+    expect(chatConversations.map((conversation) => conversation.id)).toEqual([
+      "codex_thread_thread_active_chat"
     ]);
   });
 
@@ -1125,9 +1337,11 @@ function createThread(
   input: {
     agentNickname?: string | null;
     agentRole?: string | null;
+    cwd?: string;
     forkedFromId?: string | null;
     id?: string;
     preview?: string;
+    source?: string | null;
     status?: unknown;
     threadSource?: unknown;
     turns?: unknown[];
@@ -1136,12 +1350,12 @@ function createThread(
 ) {
   return {
     createdAt: 1_778_000_000,
-    cwd,
+    cwd: input.cwd ?? cwd,
     ephemeral: false,
     id: input.id ?? "thread_active",
     name: null,
     preview: input.preview ?? "Desktop running thread",
-    source: "vscode",
+    source: input.source ?? "vscode",
     status: input.status ?? { activeFlags: [], type: "active" },
     threadSource: input.threadSource ?? null,
     agentNickname: input.agentNickname ?? null,

@@ -3,7 +3,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import type { ConversationSummary, ProjectSummary } from "../types";
 
 export const NAVIGATION_CACHE_DIRECTORY = "navigation-cache";
-const NAVIGATION_CACHE_VERSION = 1;
+const NAVIGATION_CACHE_VERSION = 2;
 const ARCHIVED_PROJECTS_CACHE_VERSION = 1;
 const MAX_CACHED_PROJECTS = 500;
 const MAX_CACHED_CONVERSATIONS_PER_PROJECT = 500;

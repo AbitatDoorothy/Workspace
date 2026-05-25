@@ -1,7 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 export type LocalControlTransport = "local" | "tailscale" | "quick-tunnel" | "manual" | "relay";
 
@@ -94,6 +95,8 @@ interface RegisterPushSubscriptionInput {
 
 const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
 const LOCAL_WORKSPACE_ID = "local";
+const STATE_READ_RETRY_ATTEMPTS = 5;
+const STATE_READ_RETRY_DELAY_MS = 10;
 const PAIRING_CAPABILITIES = [
   "codex_chat",
   "codex_projects",
@@ -123,8 +126,9 @@ export function createLocalControlStore(options: CreateLocalControlStoreOptions 
   const idGenerator =
     options.idGenerator ?? ((prefix: string) => `${prefix}_${randomBytes(8).toString("hex")}`);
   let hostToken: string | null = null;
+  let stateOperation = Promise.resolve();
 
-  async function loadState() {
+  async function readOrCreateState() {
     const existing = await readStateFile(statePath);
     if (existing) {
       return existing;
@@ -143,308 +147,352 @@ export function createLocalControlStore(options: CreateLocalControlStoreOptions 
     return created;
   }
 
+  function runStateOperation<T>(operation: () => Promise<T>) {
+    const running = stateOperation.then(operation, operation);
+    stateOperation = running.then(
+      () => undefined,
+      () => undefined
+    );
+    return running;
+  }
+
   async function saveState(state: LocalControlStateFile) {
     await mkdir(dirname(statePath), { recursive: true });
-    await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    const tempPath = `${statePath}.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.tmp`;
+    await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    await rename(tempPath, statePath);
   }
 
   return {
     statePath,
 
     async getMacIdentity() {
-      const state = await loadState();
-      return {
-        macId: state.macId,
-        macName: state.macName
-      };
+      return runStateOperation(async () => {
+        const state = await readOrCreateState();
+        return {
+          macId: state.macId,
+          macName: state.macName
+        };
+      });
     },
 
     async getHostToken() {
-      const state = await loadState();
-      if (hostToken && tokenMatchesHash(hostToken, state.hostTokenHash)) {
-        return hostToken;
-      }
+      return runStateOperation(async () => {
+        const state = await readOrCreateState();
+        if (hostToken && tokenMatchesHash(hostToken, state.hostTokenHash)) {
+          return hostToken;
+        }
 
-      hostToken = randomSecret();
-      await saveState({
-        ...state,
-        hostTokenHash: hashLocalControlToken(hostToken)
+        hostToken = randomSecret();
+        await saveState({
+          ...state,
+          hostTokenHash: hashLocalControlToken(hostToken)
+        });
+        return hostToken;
       });
-      return hostToken;
     },
 
     async getRelayId() {
-      const state = await loadState();
-      const existingRelayId = state.relayId ?? latestStoredRelayId(state);
-      if (existingRelayId) {
-        if (!state.relayId) {
-          await saveState({
-            ...state,
-            relayId: existingRelayId
-          });
+      return runStateOperation(async () => {
+        const state = await readOrCreateState();
+        const existingRelayId = state.relayId ?? latestStoredRelayId(state);
+        if (existingRelayId) {
+          if (!state.relayId) {
+            await saveState({
+              ...state,
+              relayId: existingRelayId
+            });
+          }
+          return existingRelayId;
         }
-        return existingRelayId;
-      }
 
-      const relayId = idGenerator("relay");
-      await saveState({
-        ...state,
-        relayId
+        const relayId = idGenerator("relay");
+        await saveState({
+          ...state,
+          relayId
+        });
+        return relayId;
       });
-      return relayId;
     },
 
     async createPairing(input: CreatePairingInput): Promise<LocalPairingPayload> {
-      const state = await loadState();
-      const createdAt = now();
-      const pairingSecret = randomSecret();
-      const manualCode = manualCodeFromSeed(randomSecret());
-      const pairing: LocalActivePairing = {
-        id: idGenerator("pairing"),
-        endpoint: input.endpoint,
-        secretHash: hashLocalControlToken(pairingSecret),
-        manualCodeHash: hashLocalControlToken(normalizeManualCode(manualCode)),
-        manualCode,
-        expiresAt: new Date(
-          createdAt.getTime() + (input.ttlMs ?? DEFAULT_PAIRING_TTL_MS)
-        ).toISOString(),
-        consumedAt: null,
-        createdAt: createdAt.toISOString(),
-        relayId: input.relayId ?? null,
-        transport: input.transport
-      };
+      return runStateOperation(async () => {
+        const state = await readOrCreateState();
+        const createdAt = now();
+        const pairingSecret = randomSecret();
+        const manualCode = manualCodeFromSeed(randomSecret());
+        const pairing: LocalActivePairing = {
+          id: idGenerator("pairing"),
+          endpoint: input.endpoint,
+          secretHash: hashLocalControlToken(pairingSecret),
+          manualCodeHash: hashLocalControlToken(normalizeManualCode(manualCode)),
+          manualCode,
+          expiresAt: new Date(
+            createdAt.getTime() + (input.ttlMs ?? DEFAULT_PAIRING_TTL_MS)
+          ).toISOString(),
+          consumedAt: null,
+          createdAt: createdAt.toISOString(),
+          relayId: input.relayId ?? null,
+          transport: input.transport
+        };
 
-      await saveState({
-        ...state,
-        activePairings: [
-          ...state.activePairings.filter((candidate) => !isExpired(candidate, createdAt)),
-          pairing
-        ]
+        await saveState({
+          ...state,
+          activePairings: [
+            ...state.activePairings.filter((candidate) => !isExpired(candidate, createdAt)),
+            pairing
+          ]
+        });
+
+        return {
+          version: 1,
+          product: "abitat",
+          endpoint: input.endpoint,
+          macId: state.macId,
+          pairingSecret,
+          manualCode,
+          expiresAt: pairing.expiresAt,
+          transport: input.transport,
+          relayId: input.relayId,
+          capabilities: [...PAIRING_CAPABILITIES]
+        };
       });
-
-      return {
-        version: 1,
-        product: "abitat",
-        endpoint: input.endpoint,
-        macId: state.macId,
-        pairingSecret,
-        manualCode,
-        expiresAt: pairing.expiresAt,
-        transport: input.transport,
-        relayId: input.relayId,
-        capabilities: [...PAIRING_CAPABILITIES]
-      };
     },
 
     async consumePairing(input: ConsumePairingInput) {
-      const state = await loadState();
-      const pairedAt = now();
-      const manualCode = input.manualCode ?? input.code;
-      const pairing = state.activePairings.find((candidate) => {
-        if (input.pairingSecret && tokenMatchesHash(input.pairingSecret, candidate.secretHash)) {
-          return true;
+      return runStateOperation(async () => {
+        const state = await readOrCreateState();
+        const pairedAt = now();
+        const manualCode = input.manualCode ?? input.code;
+        const pairing = state.activePairings.find((candidate) => {
+          if (input.pairingSecret && tokenMatchesHash(input.pairingSecret, candidate.secretHash)) {
+            return true;
+          }
+
+          return Boolean(
+            manualCode &&
+              tokenMatchesHash(normalizeManualCode(manualCode), candidate.manualCodeHash)
+          );
+        });
+
+        if (!pairing) {
+          throw new Error("Invalid pairing code");
         }
 
-        return Boolean(
-          manualCode && tokenMatchesHash(normalizeManualCode(manualCode), candidate.manualCodeHash)
+        if (pairing.consumedAt) {
+          throw new Error("Pairing code has already been used");
+        }
+
+        if (isExpired(pairing, pairedAt)) {
+          throw new Error("Pairing code has expired");
+        }
+
+        const clientToken = randomSecret();
+        const device: LocalPairedDevice = {
+          id: idGenerator("phone"),
+          name: input.deviceName,
+          platform: input.platform,
+          pushSubscriptions: [],
+          tokenHash: hashLocalControlToken(clientToken),
+          pairedAt: pairedAt.toISOString(),
+          lastSeenAt: pairedAt.toISOString(),
+          relayId: pairing.relayId ?? null,
+          revokedAt: null
+        };
+        const nextPairings = state.activePairings.map((candidate) =>
+          candidate.id === pairing.id
+            ? { ...candidate, consumedAt: pairedAt.toISOString() }
+            : candidate
         );
+
+        await saveState({
+          ...state,
+          activePairings: nextPairings,
+          pairedDevices: [...state.pairedDevices, device]
+        });
+
+        return {
+          machineId: device.id,
+          workspaceId: LOCAL_WORKSPACE_ID,
+          hostMachineId: state.macId,
+          clientToken,
+          endpoint: pairing.endpoint,
+          macId: state.macId
+        };
       });
-
-      if (!pairing) {
-        throw new Error("Invalid pairing code");
-      }
-
-      if (pairing.consumedAt) {
-        throw new Error("Pairing code has already been used");
-      }
-
-      if (isExpired(pairing, pairedAt)) {
-        throw new Error("Pairing code has expired");
-      }
-
-      const clientToken = randomSecret();
-      const device: LocalPairedDevice = {
-        id: idGenerator("phone"),
-        name: input.deviceName,
-        platform: input.platform,
-        pushSubscriptions: [],
-        tokenHash: hashLocalControlToken(clientToken),
-        pairedAt: pairedAt.toISOString(),
-        lastSeenAt: pairedAt.toISOString(),
-        relayId: pairing.relayId ?? null,
-        revokedAt: null
-      };
-      const nextPairings = state.activePairings.map((candidate) =>
-        candidate.id === pairing.id
-          ? { ...candidate, consumedAt: pairedAt.toISOString() }
-          : candidate
-      );
-
-      await saveState({
-        ...state,
-        activePairings: nextPairings,
-        pairedDevices: [...state.pairedDevices, device]
-      });
-
-      return {
-        machineId: device.id,
-        workspaceId: LOCAL_WORKSPACE_ID,
-        hostMachineId: state.macId,
-        clientToken,
-        endpoint: pairing.endpoint,
-        macId: state.macId
-      };
     },
 
     async getRelayKeyMaterials(relayId: string) {
-      const state = await loadState();
-      const checkedAt = now();
-      const pairingMaterials = state.activePairings
-        .filter(
-          (pairing) =>
-            pairing.relayId === relayId && !pairing.consumedAt && !isExpired(pairing, checkedAt)
-        )
-        .map((pairing) => ({
-          id: pairing.id,
-          kind: "pairing" as const,
-          keyMaterial: pairing.secretHash
-        }));
-      const deviceMaterials = state.pairedDevices
-        .filter((device) => device.relayId === relayId && !device.revokedAt)
-        .map((device) => ({
-          id: device.id,
-          kind: "device" as const,
-          keyMaterial: device.tokenHash
-        }));
+      return runStateOperation(async () => {
+        const state = await readOrCreateState();
+        const checkedAt = now();
+        const pairingMaterials = state.activePairings
+          .filter(
+            (pairing) =>
+              pairing.relayId === relayId && !pairing.consumedAt && !isExpired(pairing, checkedAt)
+          )
+          .map((pairing) => ({
+            id: pairing.id,
+            kind: "pairing" as const,
+            keyMaterial: pairing.secretHash
+          }));
+        const deviceMaterials = state.pairedDevices
+          .filter((device) => device.relayId === relayId && !device.revokedAt)
+          .map((device) => ({
+            id: device.id,
+            kind: "device" as const,
+            keyMaterial: device.tokenHash
+          }));
 
-      return [...pairingMaterials, ...deviceMaterials];
+        return [...pairingMaterials, ...deviceMaterials];
+      });
     },
 
     async listPushSubscriptions() {
-      const state = await loadState();
-      return state.pairedDevices
-        .filter((device) => !device.revokedAt)
-        .flatMap((device) =>
-          (device.pushSubscriptions ?? [])
-            .filter((subscription) => !subscription.revokedAt)
-            .map((subscription) => ({
-              ...subscription,
-              deviceId: device.id
-            }))
-        );
+      return runStateOperation(async () => {
+        const state = await readOrCreateState();
+        return state.pairedDevices
+          .filter((device) => !device.revokedAt)
+          .flatMap((device) =>
+            (device.pushSubscriptions ?? [])
+              .filter((subscription) => !subscription.revokedAt)
+              .map((subscription) => ({
+                ...subscription,
+                deviceId: device.id
+              }))
+          );
+      });
     },
 
     async registerPushSubscription(
       deviceId: string,
       input: RegisterPushSubscriptionInput
     ): Promise<LocalPushSubscription> {
-      const state = await loadState();
-      const device = state.pairedDevices.find(
-        (candidate) => candidate.id === deviceId && !candidate.revokedAt
-      );
-      const token = input.token.trim();
-      const provider = input.provider.trim() || "expo";
-      const platform = input.platform.trim() || "ios";
+      return runStateOperation(async () => {
+        const state = await readOrCreateState();
+        const device = state.pairedDevices.find(
+          (candidate) => candidate.id === deviceId && !candidate.revokedAt
+        );
+        const token = input.token.trim();
+        const provider = input.provider.trim() || "expo";
+        const platform = input.platform.trim() || "ios";
 
-      if (!device) {
-        throw new Error("Paired device not found");
-      }
-      if (provider !== "expo" || !isExpoPushToken(token)) {
-        throw new Error("Invalid Expo push token");
-      }
+        if (!device) {
+          throw new Error("Paired device not found");
+        }
+        if (provider !== "expo" || !isExpoPushToken(token)) {
+          throw new Error("Invalid Expo push token");
+        }
 
-      const seenAt = now().toISOString();
-      const subscriptions = device.pushSubscriptions ?? [];
-      const existing = subscriptions.find(
-        (subscription) =>
-          !subscription.revokedAt &&
-          subscription.provider === provider &&
-          subscription.platform === platform &&
-          subscription.token === token
-      );
-      const subscription: LocalPushSubscription = existing
-        ? {
-            ...existing,
-            deviceId: device.id,
-            lastSeenAt: seenAt
-          }
-        : {
-            deviceId: device.id,
-            id: `${idGenerator("push")}_${hashLocalControlToken(token).slice(0, 8)}`,
-            lastSeenAt: seenAt,
-            platform,
-            provider,
-            registeredAt: seenAt,
-            token,
-            revokedAt: null
-          };
+        const seenAt = now().toISOString();
+        const subscriptions = device.pushSubscriptions ?? [];
+        const existing = subscriptions.find(
+          (subscription) =>
+            !subscription.revokedAt &&
+            subscription.provider === provider &&
+            subscription.platform === platform &&
+            subscription.token === token
+        );
+        const subscription: LocalPushSubscription = existing
+          ? {
+              ...existing,
+              deviceId: device.id,
+              lastSeenAt: seenAt
+            }
+          : {
+              deviceId: device.id,
+              id: `${idGenerator("push")}_${hashLocalControlToken(token).slice(0, 8)}`,
+              lastSeenAt: seenAt,
+              platform,
+              provider,
+              registeredAt: seenAt,
+              token,
+              revokedAt: null
+            };
 
-      await saveState({
-        ...state,
-        pairedDevices: state.pairedDevices.map((candidate) =>
-          candidate.id === device.id
-            ? {
-                ...candidate,
-                pushSubscriptions: [
-                  ...subscriptions.filter(
-                    (candidateSubscription) => candidateSubscription.id !== subscription.id
-                  ),
-                  subscription
-                ]
-              }
-            : candidate
-        )
+        await saveState({
+          ...state,
+          pairedDevices: state.pairedDevices.map((candidate) =>
+            candidate.id === device.id
+              ? {
+                  ...candidate,
+                  pushSubscriptions: [
+                    ...subscriptions.filter(
+                      (candidateSubscription) => candidateSubscription.id !== subscription.id
+                    ),
+                    subscription
+                  ]
+                }
+              : candidate
+          )
+        });
+
+        return subscription;
       });
-
-      return subscription;
     },
 
     async requireDeviceByToken(token: string) {
-      const state = await loadState();
-      const device = state.pairedDevices.find(
-        (candidate) => !candidate.revokedAt && tokenMatchesHash(token, candidate.tokenHash)
-      );
+      return runStateOperation(async () => {
+        const state = await readOrCreateState();
+        const device = state.pairedDevices.find(
+          (candidate) => !candidate.revokedAt && tokenMatchesHash(token, candidate.tokenHash)
+        );
 
-      if (!device) {
-        throw new Error("Invalid mobile token");
-      }
+        if (!device) {
+          throw new Error("Invalid mobile token");
+        }
 
-      const seenAt = now().toISOString();
-      await saveState({
-        ...state,
-        pairedDevices: state.pairedDevices.map((candidate) =>
-          candidate.id === device.id ? { ...candidate, lastSeenAt: seenAt } : candidate
-        )
+        const seenAt = now().toISOString();
+        await saveState({
+          ...state,
+          pairedDevices: state.pairedDevices.map((candidate) =>
+            candidate.id === device.id ? { ...candidate, lastSeenAt: seenAt } : candidate
+          )
+        });
+
+        return { ...device, lastSeenAt: seenAt };
       });
-
-      return { ...device, lastSeenAt: seenAt };
     }
   };
 }
 
 async function readStateFile(path: string): Promise<LocalControlStateFile | null> {
-  try {
-    const parsed = JSON.parse(await readFile(path, "utf8")) as Partial<LocalControlStateFile>;
-    if (parsed.version !== 1 || typeof parsed.macId !== "string") {
-      return null;
-    }
+  for (let attempt = 0; attempt <= STATE_READ_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      const raw = await readFile(path, "utf8");
+      if (!raw.trim()) {
+        throw new SyntaxError("State file is empty");
+      }
 
-    return {
-      version: 1,
-      macId: parsed.macId,
-      macName: typeof parsed.macName === "string" ? parsed.macName : hostname() || "Abitat Mac",
-      hostTokenHash: typeof parsed.hostTokenHash === "string" ? parsed.hostTokenHash : "",
-      relayId: typeof parsed.relayId === "string" ? parsed.relayId : undefined,
-      pairedDevices: Array.isArray(parsed.pairedDevices) ? parsed.pairedDevices : [],
-      activePairings: Array.isArray(parsed.activePairings) ? parsed.activePairings : []
-    };
-  } catch (error) {
-    if (isNotFoundError(error)) {
-      return null;
-    }
+      const parsed = JSON.parse(raw) as Partial<LocalControlStateFile>;
+      if (parsed.version !== 1 || typeof parsed.macId !== "string") {
+        return null;
+      }
 
-    throw error;
+      return {
+        version: 1,
+        macId: parsed.macId,
+        macName: typeof parsed.macName === "string" ? parsed.macName : hostname() || "Abitat Mac",
+        hostTokenHash: typeof parsed.hostTokenHash === "string" ? parsed.hostTokenHash : "",
+        relayId: typeof parsed.relayId === "string" ? parsed.relayId : undefined,
+        pairedDevices: Array.isArray(parsed.pairedDevices) ? parsed.pairedDevices : [],
+        activePairings: Array.isArray(parsed.activePairings) ? parsed.activePairings : []
+      };
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return null;
+      }
+
+      if (isTransientStateReadError(error) && attempt < STATE_READ_RETRY_ATTEMPTS) {
+        await delay(STATE_READ_RETRY_DELAY_MS);
+        continue;
+      }
+
+      throw error;
+    }
   }
+
+  return null;
 }
 
 function isExpoPushToken(token: string) {
@@ -494,6 +542,10 @@ function isNotFoundError(error: unknown) {
   return Boolean(
     error && typeof error === "object" && (error as { code?: unknown }).code === "ENOENT"
   );
+}
+
+function isTransientStateReadError(error: unknown) {
+  return error instanceof SyntaxError;
 }
 
 export type LocalControlStore = ReturnType<typeof createLocalControlStore>;

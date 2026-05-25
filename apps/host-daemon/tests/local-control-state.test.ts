@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -209,6 +209,46 @@ describe("local control state", () => {
 
       const restarted = createLocalControlStore({ statePath });
       await expect(restarted.listPushSubscriptions()).resolves.toHaveLength(2);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("waits out transient partial state files during mobile auth", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "abitat-local-control-auth-race-"));
+    const statePath = join(directory, "state.json");
+    const store = createLocalControlStore({ statePath });
+    const validState = {
+      version: 1,
+      macId: "mac_race",
+      macName: "Race Mac",
+      hostTokenHash: hashLocalControlToken("host-token"),
+      pairedDevices: [
+        {
+          id: "phone_race",
+          name: "Race iPhone",
+          platform: "ios",
+          pushSubscriptions: [],
+          tokenHash: hashLocalControlToken("client-token"),
+          pairedAt: "2026-05-09T12:00:00.000Z",
+          lastSeenAt: "2026-05-09T12:00:00.000Z",
+          relayId: "relay_race",
+          revokedAt: null
+        }
+      ],
+      activePairings: []
+    };
+
+    try {
+      await writeFile(statePath, "", "utf8");
+      setTimeout(() => {
+        void writeFile(statePath, `${JSON.stringify(validState, null, 2)}\n`, "utf8");
+      }, 5);
+
+      await expect(store.requireDeviceByToken("client-token")).resolves.toMatchObject({
+        id: "phone_race",
+        name: "Race iPhone"
+      });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
