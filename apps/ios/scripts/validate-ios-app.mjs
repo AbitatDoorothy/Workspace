@@ -20,6 +20,7 @@ const requiredFiles = [
   "src/screens/ProjectsScreen.tsx",
   "src/screens/ConversationScreen.tsx",
   "src/screens/RemoteControlScreen.tsx",
+  "src/screens/AutomationsScreen.tsx",
   "src/screens/SettingsScreen.tsx"
 ];
 
@@ -1102,6 +1103,21 @@ const settingsScreen = await readFile(
   "utf8"
 );
 for (const expected of [
+  '| "automations"',
+  "AutomationsScreen",
+  'navigateToRoute("automations")',
+  "onAutomations={openAutomationsFromDashboard}",
+  'routeName === "automations"'
+]) {
+  if (
+    !appScreen.includes(expected) &&
+    !settingsScreen.includes(expected) &&
+    !typesFile.includes(expected)
+  ) {
+    throw new Error(`Expected isolated automations route wiring: ${expected}`);
+  }
+}
+for (const expected of [
   '| "remoteControl"',
   "RemoteControlScreen",
   "remoteControlStartKey",
@@ -1121,6 +1137,7 @@ for (const expected of [
 for (const expected of [
   "api: ApiClient;",
   "onStartRemoteControl(): void;",
+  "onAutomations(): void;",
   "onSignOut(): void;",
   "requestMobileControlLog",
   "requestLogProgress",
@@ -1137,6 +1154,8 @@ for (const expected of [
   "1D",
   "7D",
   "ALL",
+  'accessibilityLabel="Open automations"',
+  "AUTOMATIONS",
   'accessibilityLabel="Start remote control"',
   "START REMOTE CONTROL",
   'accessibilityLabel="Request Mac diagnostics log"',
@@ -1393,10 +1412,17 @@ for (const expected of ["forceRefresh?: boolean", 'params.push("forceRefresh=tru
 for (const expected of [
   "GeneratedFileDownload",
   "GeneratedFileSummary",
+  "CodexAutomationSummary",
+  "CodexAutomationWriteInput",
+  "listCodexAutomations",
+  "createCodexAutomation",
+  "updateCodexAutomation",
   "listGeneratedFiles",
   "downloadGeneratedFile",
   "requestMobileControlLog",
   "getCodexTokenUsage",
+  "/api/mobile/codex/automations",
+  "/api/mobile/codex/automations/${automationId}",
   "/api/mobile/codex/token-usage",
   "/api/mobile/diagnostics/log",
   "/api/mobile/conversations/${conversationId}/files",
@@ -1404,6 +1430,37 @@ for (const expected of [
 ]) {
   if (!apiClient.includes(expected)) {
     throw new Error(`Expected API client to support generated file downloads: ${expected}`);
+  }
+}
+
+const automationsScreen = await readFile(
+  join(process.cwd(), "src/screens/AutomationsScreen.tsx"),
+  "utf8"
+);
+for (const expected of [
+  "AUTOMATIONS",
+  "NEW AUTOMATION",
+  "AUTOMATION DETAIL",
+  "isEditing",
+  "setIsEditing(false)",
+  "setIsEditing(true)",
+  "editable={isEditing}",
+  "editable={editable}",
+  "selectTextOnFocus={editable}",
+  "textInputReadonly",
+  "EDIT",
+  "CANCEL",
+  "SAVE AUTOMATION",
+  "ACTIVE",
+  "PAUSED",
+  "listCodexAutomations",
+  "createCodexAutomation",
+  "updateCodexAutomation",
+  "styles.automationList",
+  "styles.editorPanel"
+]) {
+  if (!automationsScreen.includes(expected)) {
+    throw new Error(`Expected AutomationsScreen to list and edit Codex automations: ${expected}`);
   }
 }
 

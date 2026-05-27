@@ -17,6 +17,7 @@ import { ProjectsScreen } from "./screens/ProjectsScreen";
 import { RemoteControlScreen } from "./screens/RemoteControlScreen";
 import { ConversationScreen } from "./screens/ConversationScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
+import { AutomationsScreen } from "./screens/AutomationsScreen";
 import {
   type CodexCompletionNotificationTarget,
   useThreadCompletionNotifications
@@ -272,6 +273,9 @@ function AppContent() {
     setRemoteControlStartKey((current) => current + 1);
     navigateToRoute("remoteControl");
   }, [navigateToRoute]);
+  const openAutomationsFromDashboard = useCallback(() => {
+    navigateToRoute("automations");
+  }, [navigateToRoute]);
   const beginBackSwipe = useCallback(() => {
     const targetRoute = routeBackOneLevel(route);
     if (targetRoute === route) {
@@ -445,6 +449,10 @@ function AppContent() {
       );
     }
 
+    if (routeName === "automations") {
+      return <AutomationsScreen api={store.api} onBack={goBackOneLevel} />;
+    }
+
     if (routeName === "conversation" && conversation) {
       return (
         <ConversationScreen
@@ -463,6 +471,7 @@ function AppContent() {
       return (
         <SettingsScreen
           api={store.api}
+          onAutomations={openAutomationsFromDashboard}
           onBack={goBackOneLevel}
           onStartRemoteControl={startRemoteControlFromDashboard}
           onSignOut={() => {
@@ -646,7 +655,12 @@ function routeBackOneLevel(route: RouteName): RouteName {
     return "projects";
   }
 
-  if (route === "remoteControl" || route === "settings" || route === "workspace") {
+  if (
+    route === "automations" ||
+    route === "remoteControl" ||
+    route === "settings" ||
+    route === "workspace"
+  ) {
     return "projects";
   }
 

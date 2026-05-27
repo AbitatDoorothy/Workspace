@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { createCodexAutomation } from "../src/local-control/automations";
 import type { MobileControlDiagnosticsLogger } from "../src/local-control/diagnostics-log";
 import type { LocalRemoteControlManager } from "../src/local-control/remote-control/types";
 import { createLocalControlStore } from "../src/local-control/state";
@@ -410,6 +411,118 @@ describe("local control server", () => {
           "1d": tokenUsageBucket(100, 70, 14, 22),
           "7d": tokenUsageBucket(500, 350, 70, 110)
         }
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("serves and edits local Codex automations for paired phones", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "abitat-local-control-automations-"));
+    const automationRoot = join(directory, "automations");
+    await createCodexAutomation(
+      { now: () => 1_779_000_000_000, rootDir: automationRoot },
+      {
+        cwds: ["/Users/reece/Desktop/Abitat_Workspace"],
+        executionEnvironment: "local",
+        kind: "cron",
+        model: "gpt-5",
+        name: "Daily Review",
+        prompt: "Review yesterday's Codex work.",
+        reasoningEffort: "medium",
+        rrule: "FREQ=DAILY;INTERVAL=1",
+        status: "ACTIVE"
+      }
+    );
+    const store = createLocalControlStore({
+      idGenerator: (prefix) => `${prefix}_test`,
+      randomSecret: (() => {
+        let index = 0;
+        return () => `secret_${++index}`;
+      })(),
+      statePath: join(directory, "state.json")
+    });
+    const server = await startLocalControlServer({
+      automationsDirectory: automationRoot,
+      bindHost: "127.0.0.1",
+      codex: createFakeCodexBridge(),
+      endpoint: "http://127.0.0.1:0",
+      port: 0,
+      store,
+      transport: "local"
+    });
+    servers.push(server);
+
+    try {
+      const endpoint = server.endpoint;
+      const pairing = await store.createPairing({ endpoint, transport: "local" });
+      const paired = await fetchJson(`${endpoint}/pairing/consume`, {
+        body: JSON.stringify({
+          deviceName: "Reece iPhone",
+          pairingSecret: pairing.pairingSecret,
+          platform: "ios"
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      });
+      const auth = { authorization: `Bearer ${paired.clientToken}` };
+
+      await expect(fetchJson(`${endpoint}/api/mobile/codex/automations`)).rejects.toThrow("401");
+      const listed = await fetchJson(`${endpoint}/api/mobile/codex/automations`, {
+        headers: auth
+      });
+      expect(listed).toEqual({
+        automations: [
+          expect.objectContaining({
+            cwds: ["/Users/reece/Desktop/Abitat_Workspace"],
+            name: "Daily Review",
+            status: "ACTIVE"
+          })
+        ]
+      });
+      const automationId = listed.automations[0].id;
+
+      await expect(
+        fetchJson(`${endpoint}/api/mobile/codex/automations/${automationId}`, {
+          body: JSON.stringify({
+            cwds: [],
+            name: "Paused Review",
+            status: "PAUSED"
+          }),
+          headers: { ...auth, "content-type": "application/json" },
+          method: "PATCH"
+        })
+      ).resolves.toEqual({
+        automation: expect.objectContaining({
+          cwds: [],
+          id: automationId,
+          name: "Paused Review",
+          status: "PAUSED"
+        })
+      });
+
+      await expect(
+        fetchJson(`${endpoint}/api/mobile/codex/automations`, {
+          body: JSON.stringify({
+            cwds: ["/Users/reece/Desktop/Abitat_Workspace"],
+            executionEnvironment: "local",
+            kind: "cron",
+            model: "gpt-5",
+            name: "Phone Automation",
+            prompt: "Run from phone",
+            reasoningEffort: "medium",
+            rrule: "FREQ=HOURLY;INTERVAL=8",
+            status: "ACTIVE"
+          }),
+          headers: { ...auth, "content-type": "application/json" },
+          method: "POST"
+        })
+      ).resolves.toEqual({
+        automation: expect.objectContaining({
+          id: "phone-automation",
+          name: "Phone Automation",
+          prompt: "Run from phone"
+        })
       });
     } finally {
       await rm(directory, { recursive: true, force: true });

@@ -40,6 +40,30 @@ describe("Codex app client", () => {
     });
   });
 
+  it("defaults to the codex executable on PATH for stdio app-server transport", async () => {
+    const originalPath = process.env.PATH;
+    const directory = await createMockStdioCodexDirectory("codex");
+    process.env.PATH = `${directory}:${originalPath ?? ""}`;
+
+    try {
+      const client = createCodexAppClient({
+        serverUrl: "stdio://"
+      });
+
+      await expect(client.listThreads()).resolves.toEqual({
+        data: [
+          expect.objectContaining({
+            cwd: "/Users/reece/Desktop/Stdio Web Project",
+            id: "thread_stdio_web"
+          })
+        ],
+        nextCursor: null
+      });
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   it("declares the experimental API capability during initialization", async () => {
     let initializeParams: Record<string, unknown> | null = null;
     const { serverUrl } = await startMockCodexAppServer((socket, message) => {
@@ -450,8 +474,13 @@ async function startMockCodexAppServer(
 }
 
 async function createMockStdioCodexBinary() {
+  const directory = await createMockStdioCodexDirectory("codex-mock.js");
+  return join(directory, "codex-mock.js");
+}
+
+async function createMockStdioCodexDirectory(binaryName: string) {
   const directory = await mkdtemp(join(tmpdir(), "abitat-web-stdio-codex-"));
-  const scriptPath = join(directory, "codex-mock.js");
+  const scriptPath = join(directory, binaryName);
   await writeFile(
     scriptPath,
     `#!/usr/bin/env node
@@ -492,7 +521,7 @@ function send(id, result) {
 `
   );
   await chmod(scriptPath, 0o755);
-  return scriptPath;
+  return directory;
 }
 
 function sendResult(socket: WebSocket, id: number | undefined, result: unknown) {

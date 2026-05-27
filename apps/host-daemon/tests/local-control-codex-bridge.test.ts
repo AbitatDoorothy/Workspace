@@ -199,6 +199,25 @@ describe("local Codex bridge app-server transport", () => {
     ]);
   });
 
+  it("defaults to the codex executable on PATH for stdio app-server transport", async () => {
+    const originalPath = process.env.PATH;
+    const directory = await createMockStdioCodexDirectory("codex");
+    process.env.PATH = `${directory}:${originalPath ?? ""}`;
+
+    try {
+      const bridge = createLocalCodexBridge({ serverUrl: "stdio://" });
+
+      await expect(bridge.listProjects()).resolves.toEqual([
+        expect.objectContaining({
+          hostLocalPath: "/Users/reece/Desktop/Stdio Project",
+          name: "Stdio Project"
+        })
+      ]);
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   it("falls back to the live thread list when the state-db thread list is empty", async () => {
     const liveThread = {
       createdAt: 1_778_000_000,
@@ -1004,8 +1023,13 @@ async function startMockCodexAppServer(
 }
 
 async function createMockStdioCodexBinary() {
+  const directory = await createMockStdioCodexDirectory("codex-mock.js");
+  return join(directory, "codex-mock.js");
+}
+
+async function createMockStdioCodexDirectory(binaryName: string) {
   const directory = await mkdtemp(join(tmpdir(), "abitat-stdio-codex-"));
-  const scriptPath = join(directory, "codex-mock.js");
+  const scriptPath = join(directory, binaryName);
   await writeFile(
     scriptPath,
     `#!/usr/bin/env node
@@ -1052,7 +1076,7 @@ function send(id, result) {
 `
   );
   await chmod(scriptPath, 0o755);
-  return scriptPath;
+  return directory;
 }
 
 async function createStatefulTurnStartStdioCodexBinary() {

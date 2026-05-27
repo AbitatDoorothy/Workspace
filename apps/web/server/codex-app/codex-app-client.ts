@@ -18,7 +18,7 @@ import type {
 } from "./codex-app-service";
 
 const DEFAULT_SERVER_URL = "stdio://";
-const DEFAULT_CODEX_BINARY = "/Applications/Codex.app/Contents/Resources/codex";
+const DEFAULT_CODEX_BINARY = "codex";
 const REQUEST_TIMEOUT_MS = 30_000;
 const START_TIMEOUT_MS = 15_000;
 const TURN_KEEPALIVE_TIMEOUT_MS = 30 * 60_000;
@@ -812,7 +812,9 @@ async function ensureLocalAppServer(serverUrl: string, codexBinaryPath: string) 
     await delay(250);
   }
 
-  throw new Error("Unable to start Codex app-server. Open Codex.app or set CODEX_APP_SERVER_URL.");
+  throw new Error(
+    "Unable to start Codex app-server. Install the Codex CLI or set CODEX_APP_BINARY/CODEX_APP_SERVER_URL."
+  );
 }
 
 function canOpenWebSocket(serverUrl: string) {

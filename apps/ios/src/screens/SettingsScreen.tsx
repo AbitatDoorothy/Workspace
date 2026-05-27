@@ -2,7 +2,15 @@ import { useEffect, useState } from "react";
 import { Feather } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import { ActivityIndicator, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { ApiClient } from "../api/client";
@@ -14,6 +22,7 @@ import type {
 
 interface SettingsScreenProps {
   api: ApiClient;
+  onAutomations(): void;
   onBack(): void;
   onStartRemoteControl(): void;
   onSignOut(): void;
@@ -32,7 +41,12 @@ const TOKEN_USAGE_METRICS: Array<{ field: keyof CodexTokenUsageBucket; label: st
   { field: "cachedInputTokens", label: "CACHE" }
 ];
 
-export function SettingsScreen({ api, onStartRemoteControl, onSignOut }: SettingsScreenProps) {
+export function SettingsScreen({
+  api,
+  onAutomations,
+  onStartRemoteControl,
+  onSignOut
+}: SettingsScreenProps) {
   const [requestLogProgress, setRequestLogProgress] = useState<number | null>(null);
   const [requestLogStatus, setRequestLogStatus] = useState<string | null>(null);
   const [selectedTokenTimeframe, setSelectedTokenTimeframe] =
@@ -117,7 +131,11 @@ export function SettingsScreen({ api, onStartRemoteControl, onSignOut }: Setting
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.settingsScreen}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
-      <View style={styles.settingsPanel}>
+      <ScrollView
+        contentContainerStyle={styles.settingsPanel}
+        showsVerticalScrollIndicator={false}
+        style={styles.settingsScroll}
+      >
         <Text accessibilityRole="header" style={styles.brand}>
           ABITAT
         </Text>
@@ -221,6 +239,19 @@ export function SettingsScreen({ api, onStartRemoteControl, onSignOut }: Setting
           ) : null}
         </View>
         <Pressable
+          accessibilityLabel="Open automations"
+          accessibilityRole="button"
+          onPress={onAutomations}
+          style={({ pressed }) => [
+            styles.remoteControlButton,
+            pressed ? styles.buttonPressed : null
+          ]}
+        >
+          <Feather color="#f5f5f5" name="clock" size={20} />
+          <Text style={styles.remoteControlButtonText}>AUTOMATIONS</Text>
+          <Feather color="#8b949e" name="chevron-right" size={18} />
+        </Pressable>
+        <Pressable
           accessibilityLabel="Start remote control"
           accessibilityRole="button"
           onPress={onStartRemoteControl}
@@ -241,7 +272,7 @@ export function SettingsScreen({ api, onStartRemoteControl, onSignOut }: Setting
         >
           <Text style={styles.disconnectButtonText}>DISCONNECT</Text>
         </Pressable>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -344,7 +375,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 20,
     justifyContent: "center",
-    transform: [{ translateY: -18 }]
+    minHeight: "100%",
+    paddingVertical: 34
+  },
+  settingsScroll: {
+    alignSelf: "stretch",
+    flex: 1
   },
   settingsScreen: {
     alignItems: "center",

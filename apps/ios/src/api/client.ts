@@ -11,6 +11,8 @@ import {
 
 import type {
   CodexCompletionSummary,
+  CodexAutomationSummary,
+  CodexAutomationWriteInput,
   CodexModelOption,
   CodexReasoningEffort,
   CodexTokenUsageSummary,
@@ -72,6 +74,12 @@ export interface ApiClient {
   listConversations(projectId: string): Promise<ConversationSummary[]>;
   listCompletionStates(): Promise<CodexCompletionSummary[]>;
   listCodexModels(): Promise<CodexModelOption[]>;
+  listCodexAutomations(): Promise<CodexAutomationSummary[]>;
+  createCodexAutomation(input: CodexAutomationWriteInput): Promise<CodexAutomationSummary>;
+  updateCodexAutomation(
+    automationId: string,
+    input: Partial<CodexAutomationWriteInput>
+  ): Promise<CodexAutomationSummary>;
   getCodexTokenUsage(): Promise<CodexTokenUsageSummary>;
   listGeneratedFiles(conversationId: string): Promise<GeneratedFileSummary[]>;
   listMessages(
@@ -95,10 +103,7 @@ export interface ApiClient {
     sessionId: string,
     input: { type: string; payload: Record<string, unknown>; recipientMachineId?: string }
   ): Promise<void>;
-  sendRemoteInput(
-    sessionId: string,
-    event: RemoteControlInputEvent
-  ): Promise<RemoteControlSession>;
+  sendRemoteInput(sessionId: string, event: RemoteControlInputEvent): Promise<RemoteControlSession>;
   uploadAttachment(input: {
     dataBase64: string;
     fileName: string;
@@ -179,10 +184,20 @@ export function createApiClient(pairing: PairingState): ApiClient {
       ),
     listCodexModels: () =>
       get(pairing, "/api/mobile/codex/models").then((body) => body.models as CodexModelOption[]),
-    getCodexTokenUsage: () =>
-      get(pairing, "/api/mobile/codex/token-usage").then(
-        (body) => body as CodexTokenUsageSummary
+    listCodexAutomations: () =>
+      get(pairing, "/api/mobile/codex/automations").then(
+        (body) => body.automations as CodexAutomationSummary[]
       ),
+    createCodexAutomation: (input) =>
+      post(pairing, "/api/mobile/codex/automations", input).then(
+        (body) => body.automation as CodexAutomationSummary
+      ),
+    updateCodexAutomation: (automationId, input) =>
+      patch(pairing, `/api/mobile/codex/automations/${automationId}`, input).then(
+        (body) => body.automation as CodexAutomationSummary
+      ),
+    getCodexTokenUsage: () =>
+      get(pairing, "/api/mobile/codex/token-usage").then((body) => body as CodexTokenUsageSummary),
     listGeneratedFiles: (conversationId) =>
       get(pairing, `/api/mobile/conversations/${conversationId}/files`).then(
         (body) => body.files as GeneratedFileSummary[]

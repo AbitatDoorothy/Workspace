@@ -22,10 +22,13 @@ import {
   promptDiagnostics,
   type MobileControlDiagnosticsLogger
 } from "./diagnostics-log.js";
+import { readCodexTokenUsageSummary, type CodexTokenUsageSummary } from "./token-usage.js";
 import {
-  readCodexTokenUsageSummary,
-  type CodexTokenUsageSummary
-} from "./token-usage.js";
+  createCodexAutomation,
+  listCodexAutomations,
+  updateCodexAutomation,
+  type CodexAutomationStatus
+} from "./automations.js";
 import { createMacOsRemoteControlDriver } from "./remote-control/macos-driver.js";
 import { handleLocalRemoteControlRoute } from "./remote-control/routes.js";
 import {
@@ -164,6 +167,7 @@ export interface LocalAttachmentReference {
 
 interface StartLocalControlServerInput {
   attachmentDirectory?: string;
+  automationsDirectory?: string;
   bindHost: string;
   codex: LocalCodexBridge;
   diagnostics?: MobileControlDiagnosticsLogger;
@@ -319,6 +323,34 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
             all: tokenUsage.allTime
           }
         });
+        return;
+      }
+
+      if (method === "GET" && path === "/api/mobile/codex/automations") {
+        const automations = await listCodexAutomations({
+          rootDir: input.automationsDirectory
+        });
+        writeJson(response, 200, { automations });
+        return;
+      }
+
+      if (method === "POST" && path === "/api/mobile/codex/automations") {
+        const automation = await createCodexAutomation(
+          { rootDir: input.automationsDirectory },
+          automationWriteInput(await readJson(request))
+        );
+        writeJson(response, 201, { automation });
+        return;
+      }
+
+      const automationMatch = matchPath(path, "/api/mobile/codex/automations/:automationId");
+      if (automationMatch && method === "PATCH") {
+        const automation = await updateCodexAutomation(
+          { rootDir: input.automationsDirectory },
+          automationMatch.automationId,
+          automationUpdateInput(await readJson(request))
+        );
+        writeJson(response, 200, { automation });
         return;
       }
 
@@ -843,6 +875,82 @@ function attachmentReferences(value: unknown): LocalAttachmentReference[] {
     const path = stringValue(candidate.path);
     return name && path ? [{ kind, name, path }] : [];
   });
+}
+
+function automationWriteInput(body: Record<string, unknown>) {
+  return {
+    cwds: stringArrayValue(body.cwds),
+    executionEnvironment: requiredString(
+      body.executionEnvironment,
+      "Automation execution environment is required"
+    ),
+    kind: requiredString(body.kind, "Automation kind is required"),
+    model: requiredString(body.model, "Automation model is required"),
+    name: requiredString(body.name, "Automation name is required"),
+    prompt: requiredString(body.prompt, "Automation prompt is required"),
+    reasoningEffort: requiredString(
+      body.reasoningEffort,
+      "Automation reasoning effort is required"
+    ),
+    rrule: requiredString(body.rrule, "Automation schedule is required"),
+    status: automationStatus(body.status)
+  };
+}
+
+function automationUpdateInput(body: Record<string, unknown>) {
+  const update: Partial<ReturnType<typeof automationWriteInput>> = {};
+
+  if ("cwds" in body) {
+    update.cwds = stringArrayValue(body.cwds);
+  }
+  if ("executionEnvironment" in body) {
+    update.executionEnvironment = requiredString(
+      body.executionEnvironment,
+      "Automation execution environment is required"
+    );
+  }
+  if ("kind" in body) {
+    update.kind = requiredString(body.kind, "Automation kind is required");
+  }
+  if ("model" in body) {
+    update.model = requiredString(body.model, "Automation model is required");
+  }
+  if ("name" in body) {
+    update.name = requiredString(body.name, "Automation name is required");
+  }
+  if ("prompt" in body) {
+    update.prompt = requiredString(body.prompt, "Automation prompt is required");
+  }
+  if ("reasoningEffort" in body) {
+    update.reasoningEffort = requiredString(
+      body.reasoningEffort,
+      "Automation reasoning effort is required"
+    );
+  }
+  if ("rrule" in body) {
+    update.rrule = requiredString(body.rrule, "Automation schedule is required");
+  }
+  if ("status" in body) {
+    update.status = automationStatus(body.status);
+  }
+
+  return update;
+}
+
+function automationStatus(value: unknown): CodexAutomationStatus {
+  const status = requiredString(value, "Automation status is required").toUpperCase();
+  if (status !== "ACTIVE" && status !== "PAUSED") {
+    throw Object.assign(new Error("Automation status must be ACTIVE or PAUSED"), {
+      statusCode: 400
+    });
+  }
+  return status;
+}
+
+function stringArrayValue(value: unknown) {
+  return Array.isArray(value)
+    ? value.flatMap((item) => (typeof item === "string" ? [item] : []))
+    : [];
 }
 
 async function saveAttachment(directory: string, body: Record<string, unknown>) {

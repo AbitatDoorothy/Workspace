@@ -1,4 +1,5 @@
 export type RouteName =
+  | "automations"
   | "pairing"
   | "workspace"
   | "projects"
@@ -127,6 +128,35 @@ export interface CodexTokenUsageBucket {
 export interface CodexTokenUsageSummary {
   generatedAt: string;
   timeframes: Record<CodexTokenUsageTimeframe, CodexTokenUsageBucket>;
+}
+
+export type CodexAutomationStatus = "ACTIVE" | "PAUSED";
+
+export interface CodexAutomationSummary {
+  id: string;
+  kind: string;
+  name: string;
+  prompt: string;
+  status: CodexAutomationStatus;
+  rrule: string;
+  model: string;
+  reasoningEffort: string;
+  executionEnvironment: string;
+  cwds: string[];
+  createdAt: number | null;
+  updatedAt: number | null;
+}
+
+export interface CodexAutomationWriteInput {
+  kind: string;
+  name: string;
+  prompt: string;
+  status: CodexAutomationStatus;
+  rrule: string;
+  model: string;
+  reasoningEffort: string;
+  executionEnvironment: string;
+  cwds: string[];
 }
 
 export type CodexReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
