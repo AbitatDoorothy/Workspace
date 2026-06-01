@@ -1,8 +1,11 @@
 import { AddressInfo } from "node:net";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import WebSocket, { WebSocketServer } from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createLocalCodexBridge } from "../src/local-control/codex-bridge";
 
@@ -10,6 +13,7 @@ const openServers: WebSocketServer[] = [];
 const cwd = "/Users/reece/Desktop/Abitat_Workspace";
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(
     openServers.splice(0).map((server) => {
       for (const client of server.clients) {
@@ -228,6 +232,145 @@ describe("local Codex bridge command queue and steer", () => {
     await waitFor(() => turnStarts.length === 1);
     expect(turnStarts[0]).toMatchObject({
       input: [{ text: "Edited queued prompt", text_elements: [], type: "text" }],
+      threadId: "thread_busy"
+    });
+  });
+
+  it("resolves selected skill ids into Codex skill inputs when a turn starts", async () => {
+    const catalogRoot = await createPluginCatalogFixture();
+    vi.stubEnv("CODEX_HOME", join(catalogRoot, ".codex"));
+    vi.stubEnv("AGENTS_HOME", join(catalogRoot, ".agents"));
+    const skillPath = join(
+      catalogRoot,
+      ".codex",
+      "plugins",
+      "cache",
+      "openai-bundled",
+      "browser",
+      "1",
+      "skills",
+      "browser",
+      "SKILL.md"
+    );
+    const turnStarts: Array<Record<string, unknown>> = [];
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            status: { type: "idle" },
+            turns: [createTurn({ completedAt: 1_778_000_050, status: "completed" })]
+          })
+        });
+      }
+
+      if (message.method === "thread/resume") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            status: { activeFlags: [], type: "active" },
+            turns: [createTurn({ completedAt: 1_778_000_050, status: "completed" })]
+          })
+        });
+      }
+
+      if (message.method === "turn/start") {
+        turnStarts.push(message.params as Record<string, unknown>);
+        sendResult(socket, message.id, {
+          turn: createTurn({
+            completedAt: null,
+            id: "turn_skill",
+            status: "inProgress"
+          })
+        });
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+
+    await expect(
+      bridge.continueConversation("codex_thread_thread_busy", {
+        prompt: "Use @Browser",
+        skills: [{ id: "skill:browser:browser" }]
+      })
+    ).resolves.toEqual({
+      conversationId: "codex_thread_thread_busy",
+      status: "running"
+    });
+
+    expect(turnStarts[0]).toMatchObject({
+      input: [
+        { text: "Use @Browser", text_elements: [], type: "text" },
+        { name: "browser", path: skillPath, type: "skill" }
+      ],
+      threadId: "thread_busy"
+    });
+  });
+
+  it("clears stale selected skills when a queued turn is edited without updated skills", async () => {
+    const catalogRoot = await createPluginCatalogFixture();
+    vi.stubEnv("CODEX_HOME", join(catalogRoot, ".codex"));
+    vi.stubEnv("AGENTS_HOME", join(catalogRoot, ".agents"));
+    let isRunning = true;
+    const turnStarts: Array<Record<string, unknown>> = [];
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/read") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            status: isRunning ? { activeFlags: [], type: "active" } : { type: "idle" },
+            turns: [
+              createTurn({
+                completedAt: isRunning ? null : 1_778_000_050,
+                id: "turn_current",
+                status: isRunning ? "inProgress" : "completed"
+              })
+            ]
+          })
+        });
+      }
+
+      if (message.method === "thread/resume") {
+        sendResult(socket, message.id, {
+          thread: createThread({
+            status: { activeFlags: [], type: "active" },
+            turns: [createTurn({ completedAt: 1_778_000_050, status: "completed" })]
+          })
+        });
+      }
+
+      if (message.method === "turn/start") {
+        turnStarts.push(message.params as Record<string, unknown>);
+        sendResult(socket, message.id, {
+          turn: createTurn({
+            completedAt: null,
+            id: "turn_edited_skill_clear",
+            status: "inProgress"
+          })
+        });
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+
+    await bridge.continueConversation("codex_thread_thread_busy", {
+      clientMessageId: "ios-queued-skill-edit",
+      prompt: "Use @Browser",
+      skills: [{ id: "skill:browser:browser" }]
+    });
+
+    await bridge.updateQueuedTurn("codex_thread_thread_busy", {
+      clientMessageId: "ios-queued-skill-edit",
+      prompt: "Edited without mention"
+    });
+
+    isRunning = false;
+    await waitFor(() => turnStarts.length === 1);
+    expect(turnStarts[0]).toMatchObject({
+      input: [{ text: "Edited without mention", text_elements: [], type: "text" }],
       threadId: "thread_busy"
     });
   });
@@ -613,4 +756,42 @@ function createTurn(input: { completedAt?: number | null; id?: string; status?: 
     startedAt: 1_778_000_000,
     status: input.status ?? "inProgress"
   };
+}
+
+async function createPluginCatalogFixture() {
+  const rootDir = await mkdtemp(join(tmpdir(), "abitat-queue-plugin-catalog-"));
+  const pluginRoot = join(
+    rootDir,
+    ".codex",
+    "plugins",
+    "cache",
+    "openai-bundled",
+    "browser",
+    "1"
+  );
+  await mkdir(join(pluginRoot, ".codex-plugin"), { recursive: true });
+  await mkdir(join(pluginRoot, "skills", "browser"), { recursive: true });
+  await writeFile(
+    join(pluginRoot, ".codex-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "browser",
+      skills: "./skills/",
+      interface: {
+        displayName: "Browser",
+        shortDescription: "Use Browser to inspect local apps."
+      }
+    }),
+    "utf8"
+  );
+  await writeFile(
+    join(pluginRoot, "skills", "browser", "SKILL.md"),
+    `---
+name: browser
+description: "Browser automation for local web targets."
+---
+`,
+    "utf8"
+  );
+
+  return rootDir;
 }

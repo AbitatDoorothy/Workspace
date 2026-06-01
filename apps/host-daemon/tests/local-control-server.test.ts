@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCodexAutomation } from "../src/local-control/automations";
 import type { MobileControlDiagnosticsLogger } from "../src/local-control/diagnostics-log";
@@ -14,6 +14,7 @@ const servers: Array<{ close(): Promise<void> }> = [];
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
+  vi.unstubAllEnvs();
 });
 
 describe("local control server", () => {
@@ -356,6 +357,71 @@ describe("local control server", () => {
       );
       expect(JSON.stringify(diagnostics.events)).not.toContain(paired.clientToken);
       expect(JSON.stringify(diagnostics.events)).not.toContain("Sensitive continue prompt");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("serves plugin suggestions only to paired phones without local skill paths", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "abitat-local-control-plugin-suggestions-"));
+    const catalogRoot = await createPluginCatalogFixture(directory);
+    vi.stubEnv("CODEX_HOME", join(catalogRoot, ".codex"));
+    vi.stubEnv("AGENTS_HOME", join(catalogRoot, ".agents"));
+    const store = createLocalControlStore({
+      idGenerator: (prefix) => `${prefix}_test`,
+      randomSecret: (() => {
+        let index = 0;
+        return () => `secret_${++index}`;
+      })(),
+      statePath: join(directory, "state.json")
+    });
+    const server = await startLocalControlServer({
+      bindHost: "127.0.0.1",
+      codex: createFakeCodexBridge(),
+      endpoint: "http://127.0.0.1:0",
+      port: 0,
+      store,
+      transport: "local"
+    });
+    servers.push(server);
+
+    try {
+      const endpoint = server.endpoint;
+      const pairing = await store.createPairing({ endpoint, transport: "local" });
+      const paired = await fetchJson(`${endpoint}/pairing/consume`, {
+        body: JSON.stringify({
+          deviceName: "Reece iPhone",
+          pairingSecret: pairing.pairingSecret,
+          platform: "ios"
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      });
+      const auth = { authorization: `Bearer ${paired.clientToken}` };
+
+      await expect(fetchJson(`${endpoint}/api/mobile/codex/plugin-suggestions`)).rejects.toThrow(
+        "401"
+      );
+      const body = await fetchJson(`${endpoint}/api/mobile/codex/plugin-suggestions`, {
+        headers: auth
+      });
+      expect(body).toEqual({
+        suggestions: [
+          expect.objectContaining({
+            displayName: "Browser",
+            id: "plugin:browser",
+            invocationName: "browser",
+            kind: "plugin"
+          }),
+          expect.objectContaining({
+            displayName: "Browser",
+            id: "skill:browser:browser",
+            invocationName: "browser:browser",
+            kind: "skill"
+          })
+        ]
+      });
+      expect(JSON.stringify(body)).not.toContain("SKILL.md");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -834,6 +900,44 @@ function createMemoryDiagnostics() {
   };
 
   return logger;
+}
+
+async function createPluginCatalogFixture(rootDir: string) {
+  const pluginRoot = join(
+    rootDir,
+    "catalog",
+    ".codex",
+    "plugins",
+    "cache",
+    "openai-bundled",
+    "browser",
+    "1"
+  );
+  await mkdir(join(pluginRoot, ".codex-plugin"), { recursive: true });
+  await mkdir(join(pluginRoot, "skills", "browser"), { recursive: true });
+  await writeFile(
+    join(pluginRoot, ".codex-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "browser",
+      skills: "./skills/",
+      interface: {
+        displayName: "Browser",
+        shortDescription: "Use Browser to inspect local apps."
+      }
+    }),
+    "utf8"
+  );
+  await writeFile(
+    join(pluginRoot, "skills", "browser", "SKILL.md"),
+    `---
+name: browser
+description: "Browser automation for local web targets."
+---
+`,
+    "utf8"
+  );
+
+  return join(rootDir, "catalog");
 }
 
 function createFakeRemoteControlManager(): LocalRemoteControlManager & {

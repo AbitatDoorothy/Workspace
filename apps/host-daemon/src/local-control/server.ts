@@ -23,6 +23,7 @@ import {
   type MobileControlDiagnosticsLogger
 } from "./diagnostics-log.js";
 import { readCodexTokenUsageSummary, type CodexTokenUsageSummary } from "./token-usage.js";
+import { listPluginSuggestions, publicPluginSuggestions } from "./plugin-suggestions.js";
 import {
   createCodexAutomation,
   listCodexAutomations,
@@ -121,6 +122,7 @@ export interface LocalCodexBridge {
       delivery?: LocalCodexDeliveryMode;
       modelSettings?: CodexMobileModelSettings;
       prompt: string;
+      skills?: LocalCodexSkillSelection[];
     }
   ): Promise<{ conversationId: string; status: ConversationStatus | string }>;
   deleteQueuedTurn(
@@ -155,6 +157,7 @@ export interface LocalCodexBridge {
       attachments?: LocalAttachmentReference[];
       modelSettings?: CodexMobileModelSettings;
       prompt: string;
+      skills?: LocalCodexSkillSelection[];
     }
   ): Promise<{ conversationId: string; status: ConversationStatus | string }>;
 }
@@ -163,6 +166,10 @@ export interface LocalAttachmentReference {
   kind: "file" | "image";
   name: string;
   path: string;
+}
+
+export interface LocalCodexSkillSelection {
+  id: string;
 }
 
 interface StartLocalControlServerInput {
@@ -313,6 +320,13 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
         return;
       }
 
+      if (method === "GET" && path === "/api/mobile/codex/plugin-suggestions") {
+        writeJson(response, 200, {
+          suggestions: await safePublicPluginSuggestions()
+        });
+        return;
+      }
+
       if (method === "GET" && path === "/api/mobile/codex/token-usage") {
         const tokenUsage = await (input.tokenUsageProvider ?? readCodexTokenUsageSummary)();
         writeJson(response, 200, {
@@ -439,7 +453,8 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
           started = await input.codex.startConversation(projectConversationsMatch.projectId, {
             attachments,
             modelSettings: modelSettings(body),
-            prompt
+            prompt,
+            skills: skillSelections(body.skills)
           });
         } catch (error) {
           const status = statusCode(error);
@@ -523,7 +538,8 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
           continued = await input.codex.continueConversation(messageMatch.conversationId, {
             clientMessageId: stringValue(body.clientMessageId) || undefined,
             delivery,
-            prompt
+            prompt,
+            skills: skillSelections(body.skills)
           });
         } catch (error) {
           const status = statusCode(error);
@@ -564,7 +580,8 @@ export async function startLocalControlServer(input: StartLocalControlServerInpu
             clientMessageId: stringValue(body.clientMessageId) || undefined,
             delivery,
             modelSettings: modelSettings(body),
-            prompt
+            prompt,
+            skills: skillSelections(body.skills)
           });
         } catch (error) {
           const status = statusCode(error);
@@ -877,6 +894,21 @@ function attachmentReferences(value: unknown): LocalAttachmentReference[] {
   });
 }
 
+function skillSelections(value: unknown): LocalCodexSkillSelection[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+
+    const id = stringValue((item as Record<string, unknown>).id);
+    return id ? [{ id }] : [];
+  });
+}
+
 function automationWriteInput(body: Record<string, unknown>) {
   return {
     cwds: stringArrayValue(body.cwds),
@@ -974,6 +1006,14 @@ async function saveAttachment(directory: string, body: Record<string, unknown>) 
     path,
     size: bytes.byteLength
   };
+}
+
+async function safePublicPluginSuggestions() {
+  try {
+    return publicPluginSuggestions(await listPluginSuggestions());
+  } catch {
+    return [];
+  }
 }
 
 function deliveryMode(input: unknown): LocalCodexDeliveryMode | undefined {

@@ -175,6 +175,22 @@ export interface CodexModelOption {
   isDefault: boolean;
 }
 
+export interface PluginSuggestion {
+  id: string;
+  displayName: string;
+  invocationName: string;
+  kind: "plugin" | "skill";
+  pluginName?: string;
+  skillName?: string;
+  description: string;
+  source: string;
+  keywords: string[];
+}
+
+export interface SkillSelection {
+  id: string;
+}
+
 export interface CodexCompletionSummary {
   conversationId: string;
   failed: boolean;

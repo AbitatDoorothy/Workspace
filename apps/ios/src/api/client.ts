@@ -25,6 +25,7 @@ import type {
   MobileDiagnosticsLogDownload,
   MobileBootstrap,
   PairingState,
+  PluginSuggestion,
   ProjectSummary,
   RemoteControlFrame,
   RemoteControlInputEvent,
@@ -53,6 +54,7 @@ export interface ApiClient {
       effort?: CodexReasoningEffort;
       model?: string;
       prompt: string;
+      skills?: Array<{ id: string }>;
     }
   ): Promise<{ conversationId: string; status: string }>;
   createConversation(
@@ -63,6 +65,7 @@ export interface ApiClient {
       effort?: CodexReasoningEffort;
       model?: string;
       prompt: string;
+      skills?: Array<{ id: string }>;
     }
   ): Promise<{ conversationId: string; status: string }>;
   createRemoteSession(hostMachineId: string): Promise<RemoteControlSession>;
@@ -74,6 +77,7 @@ export interface ApiClient {
   listConversations(projectId: string): Promise<ConversationSummary[]>;
   listCompletionStates(): Promise<CodexCompletionSummary[]>;
   listCodexModels(): Promise<CodexModelOption[]>;
+  listPluginSuggestions(): Promise<PluginSuggestion[]>;
   listCodexAutomations(): Promise<CodexAutomationSummary[]>;
   createCodexAutomation(input: CodexAutomationWriteInput): Promise<CodexAutomationSummary>;
   updateCodexAutomation(
@@ -184,6 +188,10 @@ export function createApiClient(pairing: PairingState): ApiClient {
       ),
     listCodexModels: () =>
       get(pairing, "/api/mobile/codex/models").then((body) => body.models as CodexModelOption[]),
+    listPluginSuggestions: () =>
+      get(pairing, "/api/mobile/codex/plugin-suggestions").then(
+        (body) => body.suggestions as PluginSuggestion[]
+      ),
     listCodexAutomations: () =>
       get(pairing, "/api/mobile/codex/automations").then(
         (body) => body.automations as CodexAutomationSummary[]

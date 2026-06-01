@@ -1,7 +1,4 @@
-export {
-  createLocalCodexBridge,
-  LocalCodexConversationBusyError
-} from "./codex-bridge.js";
+export { createLocalCodexBridge, LocalCodexConversationBusyError } from "./codex-bridge.js";
 export {
   createCodexAutomation,
   defaultCodexAutomationsDirectory,
@@ -12,6 +9,11 @@ export {
   type CodexAutomationUpdateInput,
   type CodexAutomationWriteInput
 } from "./automations.js";
+export {
+  startDesktopControlServer,
+  type DesktopControlServer,
+  type StartDesktopControlServerOptions
+} from "./desktop-server.js";
 export {
   createMobileControlDiagnosticsLogger,
   defaultMobileControlDiagnosticsLogPath,

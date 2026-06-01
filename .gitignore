@@ -7,6 +7,8 @@ apps/web/.wrangler
 apps/web/.data
 apps/ios/.expo
 apps/mac-remote-helper/.build
+apps/mac-native/.build
+apps/mac-native/dist
 dist
 *.tsbuildinfo
 node_modules

@@ -43,7 +43,8 @@ import type {
   ConversationAttachment,
   ConversationMessage,
   ConversationSummary,
-  GeneratedFileSummary
+  GeneratedFileSummary,
+  PluginSuggestion
 } from "../types";
 
 interface ConversationScreenProps {
@@ -69,6 +70,7 @@ interface SendConversationInput {
   delivery?: "queue" | "steer";
   prompt: string;
   replyTo?: ReplyTargetSnapshot | null;
+  skillIds?: string[];
 }
 
 type FeatherIconName = keyof typeof Feather.glyphMap;
@@ -116,6 +118,9 @@ export function ConversationScreen({
   const [activeConversation, setActiveConversation] = useState(conversation);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [prompt, setPrompt] = useState("");
+  const [composerSelection, setComposerSelection] = useState({ end: 0, start: 0 });
+  const [pluginSuggestions, setPluginSuggestions] = useState<PluginSuggestion[]>([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [status, setStatus] = useState(conversation.status);
   const [error, setError] = useState<string | null>(null);
@@ -182,11 +187,51 @@ export function ConversationScreen({
         : "send";
   const canSubmitComposer =
     editingQueuedMessageId !== null ? prompt.trim().length > 0 : hasComposerPayload && canSendNow;
+  const activePluginToken = useMemo(
+    () => pluginAutocompleteToken(prompt, composerSelection),
+    [composerSelection, prompt]
+  );
+  const activePluginSuggestions = useMemo(
+    () =>
+      activePluginToken
+        ? rankedPluginSuggestions(activePluginToken.query, pluginSuggestions).slice(0, 5)
+        : [],
+    [activePluginToken, pluginSuggestions]
+  );
 
   function applyLocalConversationStatus(nextStatus: string) {
     statusRefreshGenerationRef.current += 1;
     latestStatusRef.current = nextStatus;
     setStatus(nextStatus);
+  }
+
+  function updatePrompt(nextPrompt: string) {
+    setPrompt(nextPrompt);
+    setSelectedSkillIds((current) =>
+      reconcileSelectedSkillIds(nextPrompt, current, pluginSuggestions)
+    );
+  }
+
+  function acceptPluginSuggestion(suggestion: PluginSuggestion) {
+    if (!activePluginToken) {
+      return;
+    }
+
+    const replacement = `@${suggestion.displayName} `;
+    const nextPrompt =
+      prompt.slice(0, activePluginToken.start) +
+      replacement +
+      prompt.slice(activePluginToken.end);
+    const nextCursor = activePluginToken.start + replacement.length;
+    setPrompt(nextPrompt);
+    setComposerSelection({ end: nextCursor, start: nextCursor });
+    setSelectedSkillIds((current) =>
+      reconcileSelectedSkillIds(
+        nextPrompt,
+        current.includes(suggestion.id) ? current : [...current, suggestion.id],
+        pluginSuggestions
+      )
+    );
   }
 
   function scrollToLatest(animated = true) {
@@ -220,6 +265,8 @@ export function ConversationScreen({
     setActiveConversation(conversation);
     setError(null);
     setPrompt("");
+    setComposerSelection({ end: 0, start: 0 });
+    setSelectedSkillIds([]);
     setAttachments([]);
     setGeneratedFiles([]);
     setDownloadingFileId(null);
@@ -244,6 +291,29 @@ export function ConversationScreen({
     messageRefreshInFlightRef.current = false;
     pendingFullMessageRefreshRef.current = false;
   }, [conversation]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPluginSuggestions() {
+      try {
+        const suggestions = await api.listPluginSuggestions();
+        if (!cancelled) {
+          setPluginSuggestions(suggestions);
+        }
+      } catch {
+        if (!cancelled) {
+          setPluginSuggestions([]);
+        }
+      }
+    }
+
+    void loadPluginSuggestions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   useEffect(() => {
     if (!refreshEnabled) {
@@ -487,6 +557,7 @@ export function ConversationScreen({
     const delivery = input.delivery ?? "queue";
     const displayPrompt = promptForSend(input.prompt, queuedAttachments);
     const submittedPrompt = replyPromptForSend(displayPrompt, input.replyTo ?? null);
+    const skillIds = input.skillIds ?? [];
     const clientMessageId = `ios-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const afterSequence = lastSequence;
     const optimisticLocalStatus =
@@ -503,6 +574,7 @@ export function ConversationScreen({
       localStatus: optimisticLocalStatus,
       prompt: displayPrompt,
       replyTarget: input.replyTo ?? null,
+      skillIds,
       sequence: afterSequence + 1
     });
 
@@ -537,7 +609,8 @@ export function ConversationScreen({
           clientMessageId,
           effort: modelSettings.effort,
           model: modelSettings.model,
-          prompt: submittedPrompt
+          prompt: submittedPrompt,
+          skills: skillIds.map((id) => ({ id }))
         });
         const nextConversation = {
           ...conversationForSend,
@@ -599,7 +672,8 @@ export function ConversationScreen({
         delivery,
         effort: modelSettings.effort,
         model: modelSettings.model,
-        prompt: submittedPrompt
+        prompt: submittedPrompt,
+        skills: skillIds.map((id) => ({ id }))
       });
       const nextStatus =
         continued.status === "queued" && isConversationBusyStatus(status)
@@ -668,19 +742,23 @@ export function ConversationScreen({
     const queuedPrompt = prompt;
     const queuedAttachments = attachments;
     const queuedReplyTarget = replyTargetMessage;
+    const queuedSkillIds = selectedSkillIds;
 
     if (!canSendPrompt(queuedPrompt, queuedAttachments) || !canSendNow) {
       return;
     }
 
     setPrompt("");
+    setSelectedSkillIds([]);
+    setComposerSelection({ end: 0, start: 0 });
     setAttachments([]);
     clearReplyTarget();
     void sendConversation({
       attachments: queuedAttachments,
       delivery: "queue",
       prompt: queuedPrompt,
-      replyTo: queuedReplyTarget
+      replyTo: queuedReplyTarget,
+      skillIds: queuedSkillIds
     });
   }
 
@@ -719,7 +797,8 @@ export function ConversationScreen({
         delivery: "steer",
         effort: modelSettings.effort,
         model: modelSettings.model,
-        prompt: submittedPrompt
+        prompt: submittedPrompt,
+        skills: queuedMessageSkillIds(message).map((id) => ({ id }))
       });
 
       const nextStatus =
@@ -825,7 +904,8 @@ export function ConversationScreen({
         delivery: "queue",
         effort: modelSettings.effort,
         model: modelSettings.model,
-        prompt: submittedPrompt
+        prompt: submittedPrompt,
+        skills: queuedMessageSkillIds(message).map((id) => ({ id }))
       });
 
       const nextStatus =
@@ -902,6 +982,7 @@ export function ConversationScreen({
       if (editingQueuedMessageId === message.id) {
         setEditingQueuedMessageId(null);
         setPrompt("");
+        setSelectedSkillIds([]);
       }
       queuedDrainAttemptedAtRef.current.delete(clientMessageId);
 
@@ -931,6 +1012,7 @@ export function ConversationScreen({
     }
 
     setAttachments([]);
+    setSelectedSkillIds([]);
     setEditingQueuedMessageId(message.id);
     setPrompt(submittedPrompt);
   }
@@ -951,6 +1033,7 @@ export function ConversationScreen({
     if (!queuedMessage) {
       setEditingQueuedMessageId(null);
       setPrompt("");
+      setSelectedSkillIds([]);
       return;
     }
 
@@ -984,6 +1067,7 @@ export function ConversationScreen({
       );
       setEditingQueuedMessageId(null);
       setPrompt("");
+      setSelectedSkillIds([]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to edit queued message");
     }
@@ -1377,6 +1461,43 @@ export function ConversationScreen({
                 ))}
               </View>
             ) : null}
+            {activePluginSuggestions.length > 0 ? (
+              <View style={styles.pluginSuggestionTray}>
+                {activePluginSuggestions.map((suggestion, index) => (
+                  <Pressable
+                    accessibilityLabel={`Insert ${suggestion.displayName}`}
+                    accessibilityRole="button"
+                    key={suggestion.id}
+                    onPress={() => acceptPluginSuggestion(suggestion)}
+                    style={[
+                      styles.pluginSuggestionRow,
+                      index === 0 ? styles.pluginSuggestionRowActive : null
+                    ]}
+                  >
+                    <View style={styles.pluginSuggestionIcon}>
+                      <Feather
+                        color={index === 0 ? "#f4f4f5" : colors.muted}
+                        name={suggestion.kind === "plugin" ? "box" : "zap"}
+                        size={15}
+                      />
+                    </View>
+                    <View style={styles.pluginSuggestionTextBlock}>
+                      <Text numberOfLines={1} style={styles.pluginSuggestionName}>
+                        {suggestion.displayName}
+                      </Text>
+                      {suggestion.description ? (
+                        <Text numberOfLines={1} style={styles.pluginSuggestionDescription}>
+                          {suggestion.description}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <Text numberOfLines={1} style={styles.pluginSuggestionInvocation}>
+                      @{suggestion.invocationName}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
             <View style={styles.composerRow}>
               <Pressable
                 accessibilityLabel="Attach files or images"
@@ -1390,7 +1511,8 @@ export function ConversationScreen({
                 contextMenuHidden={false}
                 keyboardAppearance="dark"
                 multiline
-                onChangeText={setPrompt}
+                onChangeText={updatePrompt}
+                onSelectionChange={(event) => setComposerSelection(event.nativeEvent.selection)}
                 placeholder={
                   editingQueuedMessageId === null
                     ? "Enter celestial command..."
@@ -1398,6 +1520,7 @@ export function ConversationScreen({
                 }
                 placeholderTextColor={colors.muted}
                 scrollEnabled
+                selection={composerSelection}
                 style={styles.composerInput}
                 value={prompt}
               />
@@ -1716,6 +1839,52 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingBottom: 22,
     paddingTop: 4
+  },
+  pluginSuggestionDescription: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 16
+  },
+  pluginSuggestionIcon: {
+    alignItems: "center",
+    height: 28,
+    justifyContent: "center",
+    width: 28
+  },
+  pluginSuggestionInvocation: {
+    color: colors.muted,
+    fontFamily: Platform.select({ ios: "Menlo", default: undefined }),
+    fontSize: 11,
+    maxWidth: 112
+  },
+  pluginSuggestionName: {
+    color: "#f4f4f5",
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 18
+  },
+  pluginSuggestionRow: {
+    alignItems: "center",
+    borderRadius: 14,
+    flexDirection: "row",
+    gap: 8,
+    minHeight: 48,
+    paddingHorizontal: 10
+  },
+  pluginSuggestionRowActive: {
+    backgroundColor: "rgba(126,160,196,0.2)"
+  },
+  pluginSuggestionTextBlock: {
+    flex: 1,
+    minWidth: 0
+  },
+  pluginSuggestionTray: {
+    backgroundColor: "rgba(12,14,18,0.96)",
+    borderColor: "rgba(255,255,255,0.13)",
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: 2,
+    padding: 4
   },
   conversationContent: {
     backgroundColor: "#000000",
@@ -2144,6 +2313,100 @@ function canSendPrompt(prompt: string, attachments: PendingAttachment[]) {
   return prompt.trim().length > 0 || attachments.length > 0;
 }
 
+function pluginAutocompleteToken(
+  prompt: string,
+  selection: { end: number; start: number }
+): { end: number; query: string; start: number } | null {
+  if (selection.start !== selection.end || selection.start <= 0) {
+    return null;
+  }
+
+  const cursor = Math.min(selection.start, prompt.length);
+  let atIndex = -1;
+  for (let index = cursor - 1; index >= 0; index -= 1) {
+    const character = prompt[index] ?? "";
+    if (character === "@") {
+      atIndex = index;
+      break;
+    }
+    if (!isPluginTokenCharacter(character)) {
+      break;
+    }
+  }
+
+  if (atIndex < 0) {
+    return null;
+  }
+  const previous = atIndex > 0 ? prompt[atIndex - 1] : "";
+  if (previous && isPluginTokenBoundaryBlocker(previous)) {
+    return null;
+  }
+
+  let end = cursor;
+  while (end < prompt.length && isPluginTokenCharacter(prompt[end] ?? "")) {
+    end += 1;
+  }
+
+  return {
+    end,
+    query: prompt.slice(atIndex + 1, cursor),
+    start: atIndex
+  };
+}
+
+function rankedPluginSuggestions(query: string, suggestions: PluginSuggestion[]) {
+  const normalizedQuery = query.toLowerCase();
+
+  return suggestions
+    .map((suggestion): [PluginSuggestion, number] | null => {
+      const searchable = [
+        suggestion.displayName,
+        suggestion.invocationName,
+        suggestion.pluginName ?? "",
+        suggestion.skillName ?? ""
+      ].map((value) => value.toLowerCase());
+
+      if (!normalizedQuery) {
+        return [suggestion, suggestion.kind === "plugin" ? 0 : 1];
+      }
+      if (searchable.some((value) => value.startsWith(normalizedQuery))) {
+        return [suggestion, suggestion.kind === "plugin" ? 0 : 1];
+      }
+      if (searchable.some((value) => value.includes(normalizedQuery))) {
+        return [suggestion, 2];
+      }
+      if (
+        suggestion.keywords.some((value) => value.toLowerCase().includes(normalizedQuery)) ||
+        suggestion.description.toLowerCase().includes(normalizedQuery)
+      ) {
+        return [suggestion, 3];
+      }
+      return null;
+    })
+    .filter((entry): entry is [PluginSuggestion, number] => entry !== null)
+    .sort((left, right) => left[1] - right[1] || left[0].displayName.localeCompare(right[0].displayName))
+    .map(([suggestion]) => suggestion);
+}
+
+function reconcileSelectedSkillIds(
+  prompt: string,
+  selectedIds: string[],
+  suggestions: PluginSuggestion[]
+) {
+  return selectedIds.filter((id) => {
+    const suggestion = suggestions.find((candidate) => candidate.id === id);
+    return suggestion ? prompt.includes(`@${suggestion.displayName}`) : false;
+  });
+}
+
+function isPluginTokenCharacter(character: string) {
+  return /^[A-Za-z0-9_.-]$/.test(character);
+}
+
+function isPluginTokenBoundaryBlocker(character: string) {
+  return isPluginTokenCharacter(character) || character === "/" || character === "@";
+}
+
 function compactThreadTitle(title: string) {
   const trimmedTitle = title.trim();
   if (trimmedTitle.length <= 6) {
@@ -2291,6 +2554,7 @@ function createOptimisticMessage(input: {
   localStatus: "queued" | "sending";
   prompt: string;
   replyTarget?: ReplyTargetSnapshot | null;
+  skillIds: string[];
   sequence: number;
 }): ConversationMessage {
   return {
@@ -2305,6 +2569,7 @@ function createOptimisticMessage(input: {
       displayPrompt: input.prompt,
       localStatus: input.localStatus,
       replyTarget: input.replyTarget ?? null,
+      skillIds: input.skillIds,
       submittedPrompt: replyPromptForSend(input.prompt, input.replyTarget ?? null)
     },
     role: "user",
@@ -2439,6 +2704,11 @@ function queuedMessageDisplayPrompt(message: ConversationMessage) {
   return submittedPrompt ? displayReplyPromptText(submittedPrompt) : null;
 }
 
+function queuedMessageSkillIds(message: ConversationMessage) {
+  const skillIds = message.metadata?.skillIds;
+  return Array.isArray(skillIds) ? skillIds.filter((id): id is string => typeof id === "string") : [];
+}
+
 function removeLocalQueuedMessage(messages: ConversationMessage[], messageId: string) {
   return messages.filter((message) => message.id !== messageId);
 }
@@ -2463,6 +2733,7 @@ function updateLocalQueuedMessagePrompt(
           metadata: {
             ...(message.metadata ?? {}),
             displayPrompt: prompt,
+            skillIds: [],
             submittedPrompt: replyPromptForSend(
               prompt,
               replyTargetFromMetadata(message.metadata?.replyTarget)

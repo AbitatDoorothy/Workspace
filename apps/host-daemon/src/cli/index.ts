@@ -19,6 +19,7 @@ import {
   createLocalCodexCompletionNotifier,
   createLocalMobilePushService
 } from "../local-control/push-notifications.js";
+import { startDesktopControlServer } from "../local-control/desktop-server.js";
 import { startRelayClient } from "../local-control/relay-client.js";
 import { startLocalControlServer } from "../local-control/server.js";
 import { createLocalControlStore, type LocalControlTransport } from "../local-control/state.js";
@@ -61,6 +62,11 @@ async function main() {
     return;
   }
 
+  if (command === "desktop") {
+    await startDesktopControl(args);
+    return;
+  }
+
   if (command === "start") {
     await startDaemon(args);
     return;
@@ -73,9 +79,54 @@ async function main() {
 
   console.error(`Unknown command: ${command}`);
   console.error(
-    "Usage: abitat-host iphone [--transport relay|temporary-tunnel|quick-tunnel|local|tailscale|manual] | abitat-host pair --code ABITAT-123456 | abitat-host start --mock"
+    "Usage: abitat-host desktop | abitat-host iphone [--transport relay|temporary-tunnel|quick-tunnel|local|tailscale|manual] | abitat-host pair --code ABITAT-123456 | abitat-host start --mock"
   );
   process.exitCode = 1;
+}
+
+async function startDesktopControl(args: string[]) {
+  const parentPid = process.ppid;
+  const runtime = await startDesktopControlServer({
+    desktopPort: numberOption(
+      args,
+      "--desktop-port",
+      Number(process.env.ABITAT_DESKTOP_CONTROL_PORT ?? 3971)
+    ),
+    endpoint: readOption(args, "--endpoint") ?? process.env.ABITAT_LOCAL_CONTROL_ENDPOINT,
+    localControlPort: numberOption(
+      args,
+      "--local-control-port",
+      Number(process.env.ABITAT_LOCAL_CONTROL_PORT ?? 3901)
+    ),
+    relayEndpoint:
+      readOption(args, "--relay-endpoint") ??
+      process.env.ABITAT_RELAY_ENDPOINT ??
+      "https://workspace.abitat.io"
+  });
+
+  console.log(
+    JSON.stringify({
+      desktopEndpoint: runtime.desktopEndpoint,
+      localEndpoint: runtime.localEndpoint,
+      publicEndpoint: runtime.publicEndpoint,
+      relayEndpoint: runtime.relayEndpoint,
+      relayId: runtime.relayId,
+      type: "ready"
+    })
+  );
+
+  await new Promise<void>((resolve) => {
+    const parentMonitor = setInterval(() => {
+      if (parentPid > 1 && process.ppid === 1) {
+        clearInterval(parentMonitor);
+        resolve();
+      }
+    }, 1000);
+    parentMonitor.unref();
+    process.once("SIGINT", resolve);
+    process.once("SIGTERM", resolve);
+  });
+  await runtime.close();
 }
 
 async function pairDaemon(args: string[]) {
@@ -104,9 +155,7 @@ async function startIphoneControl(args: string[]) {
     process.env.ABITAT_RELAY_ENDPOINT ??
     "https://workspace.abitat.io";
   const codexServerUrl =
-    readOption(args, "--codex-server-url") ??
-    process.env.CODEX_APP_SERVER_URL ??
-    "stdio://";
+    readOption(args, "--codex-server-url") ?? process.env.CODEX_APP_SERVER_URL ?? "stdio://";
   const diagnosticsLogPath = mobileControlDiagnosticsLogPath();
   const diagnostics = createMobileControlDiagnosticsLogger({ logPath: diagnosticsLogPath });
   const transport = await resolveLocalControlTransport({

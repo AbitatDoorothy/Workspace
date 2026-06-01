@@ -29,6 +29,7 @@ import {
   promptDiagnostics,
   type MobileControlDiagnosticsLogger
 } from "./diagnostics-log.js";
+import { resolvePluginSkillSelections } from "./plugin-suggestions.js";
 
 const CODEX_PROJECT_PREFIX = "codex_project_";
 const CODEX_THREAD_PREFIX = "codex_thread_";
@@ -74,6 +75,7 @@ type CodexAppThreadStatus = { type?: string; activeFlags?: unknown[] } | string 
 type CodexAppUserInput =
   | { type: "text"; text: string; text_elements: [] }
   | { type: "localImage"; path: string }
+  | { type: "skill"; name: string; path: string }
   | { type: "mention"; name: string; path: string };
 
 type CodexAppResponseItem = {
@@ -157,6 +159,7 @@ interface QueuedCodexTurnInput {
   clientMessageId?: string;
   modelSettings?: CodexMobileModelSettings;
   prompt: string;
+  skills?: Array<{ id: string }>;
 }
 
 interface MessageHistoryCacheEntry {
@@ -539,7 +542,9 @@ export function createLocalCodexBridge(
     invalidateMessageHistoryCache(threadId);
     queuedTurnsByThread.set(
       threadId,
-      existing.map((turn, turnIndex) => (turnIndex === index ? { ...turn, prompt } : turn))
+      existing.map((turn, turnIndex) =>
+        turnIndex === index ? { ...turn, prompt, skills: undefined } : turn
+      )
     );
     return true;
   }
@@ -613,11 +618,15 @@ export function createLocalCodexBridge(
     }
 
     await syncPersistedTurnsIntoLoadedModelContext(activeThread, threadWasLoaded);
-    const started = await client.startTurn(threadId, userInput(input.prompt, input.attachments), {
-      ...PHONE_FULL_ACCESS_TURN_OPTIONS,
-      cwd: activeThread.cwd,
-      ...turnModelSettings(input.modelSettings)
-    });
+    const started = await client.startTurn(
+      threadId,
+      await userInput(input.prompt, input.attachments, input.skills),
+      {
+        ...PHONE_FULL_ACCESS_TURN_OPTIONS,
+        cwd: activeThread.cwd,
+        ...turnModelSettings(input.modelSettings)
+      }
+    );
     rememberModelContextSyncedTurn(threadId, started.turn.id);
     rememberLocallyStartedTurn(threadId, started.turn.id);
   }
@@ -670,7 +679,7 @@ export function createLocalCodexBridge(
           invalidateMessageHistoryCache(threadId);
           const steered = await client.steerTurn(
             threadId,
-            userInput(input.prompt, input.attachments),
+            await userInput(input.prompt, input.attachments, input.skills),
             activeTurnId
           );
           rememberLocallyStartedTurn(threadId, steered.turnId);
@@ -833,7 +842,7 @@ export function createLocalCodexBridge(
         invalidateMessageHistoryCache(thread.id);
         const started = await client.startTurn(
           thread.id,
-          userInput(input.prompt, input.attachments),
+          await userInput(input.prompt, input.attachments, input.skills),
           {
             ...PHONE_FULL_ACCESS_TURN_OPTIONS,
             cwd: thread.cwd,
@@ -858,7 +867,7 @@ export function createLocalCodexBridge(
       invalidateMessageHistoryCache(thread.id);
       const started = await client.startTurn(
         thread.id,
-        userInput(input.prompt, input.attachments),
+        await userInput(input.prompt, input.attachments, input.skills),
         {
           ...PHONE_FULL_ACCESS_TURN_OPTIONS,
           cwd,
@@ -2852,12 +2861,16 @@ function turnInputDiagnostics(input: CodexAppUserInput[]) {
   };
 }
 
-function userInput(
+async function userInput(
   prompt: string,
-  attachments: LocalAttachmentReference[] = []
-): CodexAppUserInput[] {
+  attachments: LocalAttachmentReference[] = [],
+  skills: Array<{ id: string }> = []
+): Promise<CodexAppUserInput[]> {
+  const resolvedSkills = await resolveSelectedSkills(skills);
+
   return [
     { text: normalizedPrompt(prompt), text_elements: [], type: "text" },
+    ...resolvedSkills,
     ...attachments.map((attachment): CodexAppUserInput => {
       if (attachment.kind === "image") {
         return { path: attachment.path, type: "localImage" };
@@ -2866,6 +2879,14 @@ function userInput(
       return { name: attachment.name, path: attachment.path, type: "mention" };
     })
   ];
+}
+
+async function resolveSelectedSkills(skills: Array<{ id: string }>) {
+  try {
+    return await resolvePluginSkillSelections(skills);
+  } catch {
+    return [];
+  }
 }
 
 function normalizedPrompt(prompt: string) {
@@ -2882,6 +2903,8 @@ function userInputToText(input: CodexAppUserInput) {
       return safeString(input.text);
     case "localImage":
       return `[Local image: ${input.path}]`;
+    case "skill":
+      return `[Skill: ${input.name}]`;
     case "mention":
       return `[Mention: ${input.name}]`;
   }
