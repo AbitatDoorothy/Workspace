@@ -83,6 +83,69 @@ public struct ConversationsResponse: Decodable, Equatable, Sendable {
     public let conversations: [DesktopConversation]
 }
 
+public enum ProjectConversationPreview {
+    public static let defaultCollapsedLimit = 5
+
+    public static func visibleConversations(
+        _ conversations: [DesktopConversation],
+        isExpanded: Bool,
+        limit: Int = defaultCollapsedLimit
+    ) -> [DesktopConversation] {
+        let limit = max(0, limit)
+        guard !isExpanded, conversations.count > limit else {
+            return conversations
+        }
+        return Array(conversations.prefix(limit))
+    }
+
+    public static func hiddenCount(
+        _ conversations: [DesktopConversation],
+        isExpanded: Bool,
+        limit: Int = defaultCollapsedLimit
+    ) -> Int {
+        conversations.count - visibleConversations(
+            conversations,
+            isExpanded: isExpanded,
+            limit: limit
+        ).count
+    }
+}
+
+public enum ProjectConversationRefreshPolicy {
+    private static let activeStatuses: Set<String> = [
+        "awaiting_approval",
+        "committing",
+        "preparing",
+        "queued",
+        "running"
+    ]
+
+    public static func statusPollProjectIds(
+        selectedProjectId: String?,
+        completions: [CompletionState]
+    ) -> [String] {
+        var seen = Set<String>()
+        var projectIds: [String] = []
+
+        func append(_ projectId: String?) {
+            guard let projectId, seen.insert(projectId).inserted else {
+                return
+            }
+            projectIds.append(projectId)
+        }
+
+        append(selectedProjectId)
+        for completion in completions where isActive(completion) {
+            append(completion.projectId)
+        }
+        return projectIds
+    }
+
+    private static func isActive(_ completion: CompletionState) -> Bool {
+        !completion.isComplete || activeStatuses.contains(completion.status)
+    }
+}
+
 public struct DesktopMessage: Decodable, Identifiable, Equatable, Sendable {
     public let id: String
     public let conversationId: String

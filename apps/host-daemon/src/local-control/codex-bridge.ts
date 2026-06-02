@@ -644,6 +644,15 @@ export function createLocalCodexBridge(
   }
 
   return {
+    async close() {
+      for (const timer of queueDrainTimers.values()) {
+        clearTimeout(timer);
+      }
+      queueDrainTimers.clear();
+      queuedTurnsByThread.clear();
+      await client.close();
+    },
+
     async bootstrap() {
       try {
         await client.listThreads({ limit: 1, useStateDbOnly: true });
@@ -919,7 +928,7 @@ export function createLocalCodexBridge(
     options: { afterSequence: number | undefined; forceRefresh: boolean }
   ) {
     const cached = messageHistoryCache.get(threadId);
-    if (!options.forceRefresh && typeof options.afterSequence === "number" && cached) {
+    if (!options.forceRefresh && cached) {
       const summary = await client.readThread(threadId, false).catch(() => null);
       if (summary && canUseCachedMessageHistory(cached, summary)) {
         return cached.messages;
@@ -1073,6 +1082,12 @@ function createCodexAppClient(options: CreateLocalCodexBridgeOptions) {
   const diagnostics = options.diagnostics;
 
   return {
+    async close() {
+      if (isStdioServerUrl(serverUrl)) {
+        await JsonRpcConnection.closeSharedStdio(codexBinaryPath);
+      }
+    },
+
     async injectItems(threadId: string, items: CodexAppResponseItem[]) {
       await callCodexApp(
         serverUrl,
@@ -1726,6 +1741,18 @@ class JsonRpcConnection {
     return new JsonRpcConnection(await WebSocketJsonRpcTransport.connect(serverUrl));
   }
 
+  static async closeSharedStdio(codexBinaryPath: string) {
+    const key = normalize(codexBinaryPath);
+    const existing = sharedStdioConnections.get(key);
+    if (!existing) {
+      return;
+    }
+
+    sharedStdioConnections.delete(key);
+    const connection = await existing.catch(() => null);
+    connection?.close({ closeTransport: true });
+  }
+
   private static sharedStdio(codexBinaryPath: string) {
     const key = normalize(codexBinaryPath);
     const existing = sharedStdioConnections.get(key);
@@ -1825,8 +1852,8 @@ class JsonRpcConnection {
     );
   }
 
-  close() {
-    if (this.closeTransportOnClose) {
+  close(options: { closeTransport?: boolean } = {}) {
+    if (this.closeTransportOnClose || options.closeTransport === true) {
       this.transport.close();
     }
   }

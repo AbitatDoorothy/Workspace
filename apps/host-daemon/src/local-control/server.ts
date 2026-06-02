@@ -114,6 +114,7 @@ export interface LocalCodexCompletionStateOptions {
 
 export interface LocalCodexBridge {
   bootstrap(): Promise<{ available: boolean; error?: string }>;
+  close?(): Promise<void> | void;
   continueConversation(
     conversationId: string,
     input: {

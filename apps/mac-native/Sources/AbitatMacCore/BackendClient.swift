@@ -54,15 +54,30 @@ public struct DiagnosticsLog: Decodable, Equatable, Sendable {
     public let logPath: String
     public let size: Int
     public let truncated: Bool
+
+    public init(data: String, logPath: String, size: Int, truncated: Bool) {
+        self.data = data
+        self.logPath = logPath
+        self.size = size
+        self.truncated = truncated
+    }
 }
 
 public final class BackendClient: Sendable {
     private let endpoint: URL
     private let session: URLSession
 
-    public init(endpoint: URL, session: URLSession = .shared) {
+    public static func defaultSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 8
+        configuration.timeoutIntervalForResource = 15
+        configuration.waitsForConnectivity = false
+        return configuration
+    }
+
+    public init(endpoint: URL, session: URLSession? = nil) {
         self.endpoint = endpoint
-        self.session = session
+        self.session = session ?? URLSession(configuration: Self.defaultSessionConfiguration())
     }
 
     public func status() async throws -> DesktopStatus {
@@ -84,9 +99,10 @@ public final class BackendClient: Sendable {
         ).conversations
     }
 
-    public func messages(conversationId: String) async throws -> [DesktopMessage] {
-        try await get(
-            "/api/desktop/conversations/\(conversationId.urlPathEscaped)/messages?forceRefresh=1&includeRuntime=0",
+    public func messages(conversationId: String, forceRefresh: Bool = false) async throws -> [DesktopMessage] {
+        let forceRefreshQuery = forceRefresh ? "forceRefresh=1&" : ""
+        return try await get(
+            "/api/desktop/conversations/\(conversationId.urlPathEscaped)/messages?\(forceRefreshQuery)includeRuntime=0",
             as: MessagesResponse.self
         ).messages
     }

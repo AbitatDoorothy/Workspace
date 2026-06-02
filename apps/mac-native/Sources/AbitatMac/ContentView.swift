@@ -39,6 +39,7 @@ struct ContentView: View {
 
 private struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var expandedProjectIds: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
@@ -78,43 +79,21 @@ private struct SidebarView: View {
             VStack(alignment: .leading, spacing: 8) {
                 SectionHeader(title: "Projects", systemName: "folder")
                 ScrollView {
-                    LazyVStack(spacing: 7) {
+                    LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(model.projects) { project in
-                            SidebarRow(
-                                title: project.name,
-                                subtitle: project.hostLocalPath ?? project.id,
-                                badge: project.conversationCount.map(String.init),
-                                isSelected: project.id == model.selectedProjectId
+                            ProjectSidebarGroup(
+                                project: project,
+                                isExpanded: expandedProjectIds.contains(project.id)
                             ) {
-                                model.selectProject(project)
+                                expandedProjectIds.insert(project.id)
                             }
                         }
                     }
                     .padding(.vertical, 1)
                 }
-                .frame(maxHeight: 220)
+                .frame(maxHeight: .infinity, alignment: .top)
             }
-
-            VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(title: "Threads", systemName: "text.bubble")
-                ScrollView {
-                    LazyVStack(spacing: 7) {
-                        ForEach(model.conversations) { conversation in
-                            SidebarRow(
-                                title: conversation.prompt,
-                                subtitle: conversation.status,
-                                badge: nil,
-                                isSelected: conversation.id == model.selectedConversationId
-                            ) {
-                                model.selectConversation(conversation)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 1)
-                }
-            }
-
-            Spacer(minLength: 0)
+            .frame(maxHeight: .infinity, alignment: .top)
 
             BorderedPanel {
                 VStack(alignment: .leading, spacing: 10) {
@@ -173,6 +152,156 @@ private struct SectionHeader: View {
         }
         .foregroundStyle(AbitatTheme.subdued)
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct ProjectSidebarGroup: View {
+    @EnvironmentObject private var model: AppModel
+    let project: DesktopProject
+    let isExpanded: Bool
+    let expand: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            SidebarRow(
+                systemName: "folder",
+                title: project.name,
+                subtitle: project.hostLocalPath ?? project.id,
+                badge: project.conversationCount.map(String.init),
+                isSelected: project.id == model.selectedProjectId && model.selectedConversationId == nil
+            ) {
+                model.selectProject(project)
+            }
+
+            threadRows
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: project.id) {
+            await model.ensureConversationsLoaded(projectId: project.id)
+        }
+    }
+
+    @ViewBuilder
+    private var threadRows: some View {
+        let conversations = model.conversations(forProjectId: project.id)
+
+        if conversations.isEmpty {
+            if model.hasLoadedConversations(projectId: project.id) {
+                SidebarInlineStateRow(systemName: "text.bubble", title: "No chats")
+            } else {
+                SidebarInlineStateRow(systemName: "ellipsis", title: "Loading chats")
+            }
+        } else {
+            ForEach(ProjectConversationPreview.visibleConversations(conversations, isExpanded: isExpanded)) { conversation in
+                ThreadSidebarRow(
+                    conversation: conversation,
+                    isSelected: conversation.id == model.selectedConversationId
+                ) {
+                    model.selectConversation(conversation)
+                }
+            }
+
+            let hiddenCount = ProjectConversationPreview.hiddenCount(conversations, isExpanded: isExpanded)
+            if hiddenCount > 0 {
+                SidebarShowMoreButton(hiddenCount: hiddenCount, action: expand)
+            }
+        }
+    }
+}
+
+private struct ThreadSidebarRow: View {
+    let conversation: DesktopConversation
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        let title = SidebarTextPreview.truncated(conversation.prompt)
+        let subtitle = threadSubtitle(conversation)
+
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "text.bubble")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(isSelected ? AbitatTheme.primary : AbitatTheme.subdued)
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(AbitatTheme.Fonts.caption)
+                        .foregroundStyle(AbitatTheme.text)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(AbitatTheme.Fonts.smallLabel)
+                        .foregroundStyle(AbitatTheme.muted)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 44)
+            .contentShape(Rectangle())
+            .background(isSelected ? AbitatTheme.surfaceSelected : AbitatTheme.surface.opacity(0.58))
+            .clipShape(RoundedRectangle(cornerRadius: AbitatTheme.controlRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AbitatTheme.controlRadius, style: .continuous)
+                    .stroke(isSelected ? AbitatTheme.primary.opacity(0.75) : AbitatTheme.borderSoft.opacity(0.65), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, 22)
+        .help(title)
+        .accessibilityLabel("\(title), \(subtitle)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct SidebarInlineStateRow: View {
+    let systemName: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemName)
+                .font(.system(size: 10, weight: .medium))
+                .frame(width: 16)
+            Text(title)
+                .font(AbitatTheme.Fonts.caption)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(AbitatTheme.muted)
+        .padding(.horizontal, 9)
+        .frame(height: 30)
+        .padding(.leading, 22)
+        .accessibilityLabel(title)
+    }
+}
+
+private struct SidebarShowMoreButton: View {
+    let hiddenCount: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .frame(width: 16)
+                Text("Show \(hiddenCount) more")
+                    .font(AbitatTheme.Fonts.caption)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(AbitatTheme.muted)
+            .padding(.horizontal, 9)
+            .frame(height: 30)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, 22)
+        .help("Show more chats")
+        .accessibilityLabel("Show \(hiddenCount) more chats")
     }
 }
 
@@ -337,7 +466,7 @@ private struct ChatPanel: View {
                         .zIndex(10)
                     }
                 }
-                .onChange(of: model.visibleMessages.map(\.id)) { _, _ in
+                .onChange(of: model.visibleMessagesVersion) { _, _ in
                     if isAtBottom {
                         scrollToBottom(proxy)
                     }
@@ -449,7 +578,7 @@ private struct ComposerView: View {
                 Spacer()
 
                 IconActionButton(
-                    title: model.selectedConversation == nil ? "Start" : "Send",
+                    title: model.selectedConversationId == nil ? "Start" : "Send",
                     systemName: "paperplane.fill",
                     isPrimary: true
                 ) {
@@ -939,13 +1068,14 @@ private struct PairingPanel: View {
 
 private struct LogsPanel: View {
     @EnvironmentObject private var model: AppModel
+    @State private var selectedLogSource: LogSource = .appActivity
     private let maxRenderedLogCharacters = 80_000
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Label("Diagnostics", systemImage: "terminal")
+                    Label(selectedLogSource.title, systemImage: selectedLogSource.systemName)
                         .font(AbitatTheme.Fonts.panelTitle)
                     Text(logSubtitle)
                         .font(AbitatTheme.Fonts.caption)
@@ -953,8 +1083,15 @@ private struct LogsPanel: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                Picker("Log Source", selection: $selectedLogSource) {
+                    ForEach(LogSource.allCases) { source in
+                        Text(source.label).tag(source)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
                 IconActionButton(title: "Load", systemName: "arrow.down.doc") {
-                    model.loadDiagnostics()
+                    loadSelectedLog()
                 }
             }
             .padding(.horizontal, 16)
@@ -974,9 +1111,9 @@ private struct LogsPanel: View {
                         .padding(16)
                 } else {
                     EmptyStateView(
-                        systemName: "terminal",
-                        title: "No diagnostics loaded",
-                        message: "Load the local diagnostics log for this Mac session."
+                        systemName: selectedLogSource.systemName,
+                        title: "No log loaded",
+                        message: selectedLogSource.emptyMessage
                     )
                 }
             }
@@ -984,12 +1121,16 @@ private struct LogsPanel: View {
         }
         .onAppear {
             model.loadDiagnostics()
+            model.loadAppActivityLog()
+        }
+        .onChange(of: selectedLogSource) { _, _ in
+            loadSelectedLog()
         }
     }
 
     private var logSubtitle: String {
-        guard let diagnostics = model.diagnostics else {
-            return "Local helper logs"
+        guard let diagnostics = selectedDiagnostics else {
+            return selectedLogSource.defaultSubtitle(model: model)
         }
         let size = ByteCountFormatter.string(fromByteCount: Int64(diagnostics.size), countStyle: .file)
         if diagnostics.size > maxRenderedLogCharacters {
@@ -999,13 +1140,78 @@ private struct LogsPanel: View {
     }
 
     private var renderedLogData: String {
-        guard let diagnostics = model.diagnostics else {
+        guard let diagnostics = selectedDiagnostics else {
             return ""
         }
         guard diagnostics.size > maxRenderedLogCharacters else {
             return diagnostics.data
         }
         return String(diagnostics.data.suffix(maxRenderedLogCharacters))
+    }
+
+    private var selectedDiagnostics: DiagnosticsLog? {
+        switch selectedLogSource {
+        case .appActivity:
+            return model.appActivityLog
+        case .helper:
+            return model.diagnostics
+        }
+    }
+
+    private func loadSelectedLog() {
+        switch selectedLogSource {
+        case .appActivity:
+            model.loadAppActivityLog()
+        case .helper:
+            model.loadDiagnostics()
+        }
+    }
+
+    private enum LogSource: String, CaseIterable, Identifiable {
+        case appActivity
+        case helper
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .appActivity: return "App"
+            case .helper: return "Helper"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .appActivity: return "App Activity"
+            case .helper: return "Diagnostics"
+            }
+        }
+
+        var systemName: String {
+            switch self {
+            case .appActivity: return "waveform.path.ecg"
+            case .helper: return "terminal"
+            }
+        }
+
+        var emptyMessage: String {
+            switch self {
+            case .appActivity:
+                return "Load the native Mac app activity log for this session."
+            case .helper:
+                return "Load the local helper diagnostics log for this Mac session."
+            }
+        }
+
+        @MainActor
+        func defaultSubtitle(model: AppModel) -> String {
+            switch self {
+            case .appActivity:
+                return model.appActivityLogPath
+            case .helper:
+                return "Local helper logs"
+            }
+        }
     }
 }
 
@@ -1064,6 +1270,7 @@ private struct RemotePanel: View {
 }
 
 private struct SidebarRow: View {
+    let systemName: String?
     let title: String
     let subtitle: String
     let badge: String?
@@ -1071,14 +1278,24 @@ private struct SidebarRow: View {
     let action: () -> Void
 
     var body: some View {
+        let displayTitle = SidebarTextPreview.truncated(title)
+        let displaySubtitle = SidebarTextPreview.truncated(subtitle)
+
         Button(action: action) {
             HStack(spacing: 10) {
+                if let systemName {
+                    Image(systemName: systemName)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(isSelected ? AbitatTheme.primary : AbitatTheme.subdued)
+                        .frame(width: 16)
+                }
+
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
+                    Text(displayTitle)
                         .font(AbitatTheme.Fonts.rowTitle)
                         .foregroundStyle(AbitatTheme.text)
                         .lineLimit(1)
-                    Text(subtitle)
+                    Text(displaySubtitle)
                         .font(AbitatTheme.Fonts.caption)
                         .foregroundStyle(AbitatTheme.muted)
                         .lineLimit(1)
@@ -1105,7 +1322,9 @@ private struct SidebarRow: View {
             )
         }
         .buttonStyle(.plain)
-        .help(title)
+        .help(displayTitle)
+        .accessibilityLabel("\(displayTitle), \(displaySubtitle)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -1185,6 +1404,61 @@ private enum QRCode {
         image.addRepresentation(rep)
         return image
     }
+}
+
+enum SidebarTextPreview {
+    static let maxLength = 180
+
+    static func truncated(_ value: String, maxLength: Int = maxLength) -> String {
+        guard maxLength > 0 else {
+            return ""
+        }
+        guard let limitIndex = value.index(value.startIndex, offsetBy: maxLength, limitedBy: value.endIndex),
+              limitIndex != value.endIndex else {
+            return value
+        }
+        let endIndex = value.index(value.startIndex, offsetBy: max(0, maxLength - 1))
+        return String(value[..<endIndex]) + "…"
+    }
+}
+
+@MainActor
+private func threadSubtitle(_ conversation: DesktopConversation) -> String {
+    guard let updatedAt = conversation.updatedAt,
+          let date = parseISODate(updatedAt) else {
+        return conversation.status
+    }
+    let age = SidebarDateFormatters.relative.localizedString(for: date, relativeTo: Date())
+    return "\(conversation.status) - \(age)"
+}
+
+@MainActor
+private func parseISODate(_ value: String) -> Date? {
+    if let date = SidebarDateFormatters.fractionalISO8601.date(from: value) {
+        return date
+    }
+    return SidebarDateFormatters.standardISO8601.date(from: value)
+}
+
+@MainActor
+private enum SidebarDateFormatters {
+    static let fractionalISO8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    static let standardISO8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    static let relative: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
 }
 
 private func roleColor(_ role: String) -> Color {

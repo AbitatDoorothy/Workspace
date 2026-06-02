@@ -17,6 +17,10 @@ let package = Package(
         .testTarget(
             name: "AbitatMacCoreTests",
             dependencies: ["AbitatMacCore"]
+        ),
+        .testTarget(
+            name: "AbitatMacTests",
+            dependencies: ["AbitatMac", "AbitatMacCore"]
         )
     ]
 )

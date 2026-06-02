@@ -42,6 +42,7 @@ import { HostApiClient, isTransientHostApiError } from "../transport/api-client.
 import { createToolScanner } from "../tools/scanner.js";
 import { runConversationRuntime } from "./conversation-runtime.js";
 import { resolveDaemonConnection } from "./daemon-connection.js";
+import { cleanupStaleDesktopHelpers } from "./desktop-lifecycle.js";
 import { createSerialHeartbeatLoop, runHeartbeatWithRecovery } from "./heartbeat-loop.js";
 import { createRetryableTask } from "./retryable-task.js";
 import { parseStartOptions } from "./start-options.js";
@@ -86,6 +87,7 @@ async function main() {
 
 async function startDesktopControl(args: string[]) {
   const parentPid = process.ppid;
+  await cleanupStaleDesktopHelpers({ helperPath: process.argv[1] ?? "" });
   const runtime = await startDesktopControlServer({
     desktopPort: numberOption(
       args,

@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -270,6 +270,23 @@ describe("local Codex bridge app-server transport", () => {
       status: "running"
     });
   });
+
+  it("closes the shared stdio app-server process when the bridge closes", async () => {
+    const { codexBinaryPath, pidPath } = await createClosableStdioCodexBinary();
+    const bridge = createLocalCodexBridge({ codexBinaryPath, serverUrl: "stdio://" });
+
+    await expect(bridge.listProjects()).resolves.toEqual([
+      expect.objectContaining({
+        name: "Closable Stdio Project"
+      })
+    ]);
+    const childPid = Number(await readFile(pidPath, "utf8"));
+    expect(isProcessRunning(childPid)).toBe(true);
+
+    await bridge.close?.();
+
+    await expectProcessToExit(childPid);
+  });
 });
 
 describe("local Codex bridge loading performance", () => {
@@ -458,6 +475,65 @@ describe("local Codex bridge loading performance", () => {
     });
 
     expect(incrementalMessages).toEqual([]);
+    expect(threadReads).toEqual([
+      { includeTurns: true, threadId: "thread_fast" },
+      { includeTurns: false, threadId: "thread_fast" }
+    ]);
+  });
+
+  it("serves unchanged full message requests from the cached full history", async () => {
+    const threadReads: Array<{ includeTurns?: boolean; threadId?: string }> = [];
+    const thread = {
+      createdAt: 1_778_000_000,
+      cwd: "/Users/reece/Desktop/Fast Project",
+      ephemeral: false,
+      id: "thread_fast",
+      name: null,
+      preview: "Make loading faster",
+      status: { activeFlags: [], type: "idle" },
+      turns: [
+        {
+          completedAt: 1_778_000_010,
+          error: null,
+          id: "turn_1",
+          items: [
+            {
+              content: [{ text: "Hello", text_elements: [], type: "text" }],
+              id: "item_user",
+              type: "userMessage"
+            },
+            {
+              id: "item_agent",
+              text: "Hi there",
+              type: "agentMessage"
+            }
+          ],
+          startedAt: 1_778_000_000,
+          status: { type: "completed" }
+        }
+      ],
+      updatedAt: 1_778_000_010
+    };
+    const { serverUrl } = await startMockCodexAppServer((socket, message) => {
+      if (message.method === "initialize") {
+        sendResult(socket, message.id, {});
+      }
+
+      if (message.method === "thread/read") {
+        const params = message.params as { includeTurns?: boolean; threadId?: string };
+        threadReads.push(params);
+        sendResult(socket, message.id, {
+          thread: params.includeTurns === false ? { ...thread, turns: [] } : thread
+        });
+      }
+    });
+    const bridge = createLocalCodexBridge({ codexBinaryPath: "/unused", serverUrl });
+    const conversationId = "codex_thread_thread_fast";
+
+    const initialMessages = await bridge.listMessages(conversationId);
+    const cachedMessages = await bridge.listMessages(conversationId);
+
+    expect(cachedMessages).toEqual(initialMessages);
     expect(threadReads).toEqual([
       { includeTurns: true, threadId: "thread_fast" },
       { includeTurns: false, threadId: "thread_fast" }
@@ -1158,6 +1234,82 @@ function sendError(id, message) {
   );
   await chmod(scriptPath, 0o755);
   return scriptPath;
+}
+
+async function createClosableStdioCodexBinary() {
+  const directory = await mkdtemp(join(tmpdir(), "abitat-stdio-close-codex-"));
+  const scriptPath = join(directory, "codex-close-mock.js");
+  const pidPath = join(directory, "codex-close.pid");
+  await writeFile(
+    scriptPath,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const readline = require("node:readline");
+
+fs.writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));
+
+const thread = {
+  createdAt: 1778000000,
+  cwd: "/Users/reece/Desktop/Closable Stdio Project",
+  ephemeral: false,
+  id: "thread_stdio_close",
+  name: null,
+  preview: "Closable stdio thread",
+  status: { type: "idle" },
+  turns: [],
+  updatedAt: 1778000010
+};
+
+const rl = readline.createInterface({ input: process.stdin });
+
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send(message.id, {});
+    return;
+  }
+
+  if (message.method === "thread/list") {
+    const params = message.params || {};
+    send(message.id, { data: params.archived === true ? [] : [thread], nextCursor: null });
+    return;
+  }
+
+  if (message.method === "thread/loaded/list") {
+    send(message.id, { data: [], nextCursor: null });
+    return;
+  }
+
+  send(message.id, {});
+});
+
+function send(id, result) {
+  process.stdout.write(JSON.stringify({ id, result }) + "\\n");
+}
+`
+  );
+  await chmod(scriptPath, 0o755);
+  return { codexBinaryPath: scriptPath, pidPath };
+}
+
+function isProcessRunning(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function expectProcessToExit(pid: number) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 2_000) {
+    if (!isProcessRunning(pid)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Expected process ${pid} to exit`);
 }
 
 function sendResult(socket: WebSocket, id: number | undefined, result: unknown) {

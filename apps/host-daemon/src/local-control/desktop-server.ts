@@ -383,6 +383,7 @@ export async function startDesktopControlServer(
       relayClient?.close();
       await closeHttpServer(desktopServer);
       await localServer.close();
+      await codex.close?.();
     }
   };
 }

@@ -66,8 +66,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var ready: HelperReadyMessage?
     @Published private(set) var status: DesktopStatus?
     @Published private(set) var projects: [DesktopProject] = []
-    @Published private(set) var conversations: [DesktopConversation] = []
+    @Published private(set) var conversationsByProjectId: [String: [DesktopConversation]] = [:]
+    @Published private(set) var loadedConversationProjectIds: Set<String> = []
+    @Published private(set) var loadingConversationProjectIds: Set<String> = []
     @Published private(set) var messages: [DesktopMessage] = []
+    @Published private(set) var visibleMessages: [DesktopMessage] = []
+    @Published private(set) var visibleMessagesVersion = 0
     @Published private(set) var completions: [CompletionState] = []
     @Published private(set) var models: [ModelOption] = []
     @Published private(set) var generatedFiles: [GeneratedFile] = []
@@ -75,13 +79,28 @@ final class AppModel: ObservableObject {
     @Published private(set) var automations: [AutomationSummary] = []
     @Published private(set) var pluginSuggestions: [PluginSuggestion] = []
     @Published private(set) var diagnostics: DiagnosticsLog?
+    @Published private(set) var appActivityLog: DiagnosticsLog?
     @Published private(set) var pairing: PairingPayload?
     @Published private(set) var queuedTurns: [QueuedTurnDraft] = []
     @Published private var optimisticMessages: [DesktopMessage] = []
 
     @Published var selectedProjectId: String?
-    @Published var selectedConversationId: String?
-    @Published var selectedPanel: Panel = .chat
+    @Published var selectedConversationId: String? {
+        didSet {
+            guard selectedConversationId != oldValue else {
+                return
+            }
+            refreshVisibleMessages()
+        }
+    }
+    @Published var selectedPanel: Panel = .chat {
+        didSet {
+            guard selectedPanel != oldValue else {
+                return
+            }
+            activityLogger.log("panel.change", fields: ["panel": selectedPanel.rawValue])
+        }
+    }
     @Published var prompt = "" {
         didSet {
             dismissedPluginTokenRange = nil
@@ -105,17 +124,49 @@ final class AppModel: ObservableObject {
     @Published var errorMessage: String?
 
     private let backendProcess = BackendProcess()
-    private var backend: BackendClient?
+    private let activityLogger: AppActivityLogger
+    private let stallWatchdog: AppActivityStallWatchdog
+    private var backend: AppBackendClient?
     private var refreshTask: Task<Void, Never>?
+    private var conversationLoadCountsByProjectId: [String: Int] = [:]
+    private var latestConversationLoadRequestIdByProjectId: [String: Int] = [:]
+    private var nextConversationLoadRequestId = 0
+    private var locallyStartedConversationIds: Set<String> = []
+    private var messagesConversationId: String?
     private var didStart = false
     private var dismissedPluginTokenRange: NSRange?
+
+    init(
+        backend: AppBackendClient? = nil,
+        activityLogger: AppActivityLogger = .shared
+    ) {
+        self.backend = backend
+        self.activityLogger = activityLogger
+        self.stallWatchdog = AppActivityStallWatchdog(logger: activityLogger)
+    }
 
     var selectedProject: DesktopProject? {
         projects.first(where: { $0.id == selectedProjectId })
     }
 
+    var conversations: [DesktopConversation] {
+        guard let selectedProjectId else {
+            return []
+        }
+        return conversationsByProjectId[selectedProjectId] ?? []
+    }
+
     var selectedConversation: DesktopConversation? {
-        conversations.first(where: { $0.id == selectedConversationId })
+        guard let selectedConversationId else {
+            return nil
+        }
+        if let selectedProjectId,
+           let conversation = conversationsByProjectId[selectedProjectId]?.first(where: { $0.id == selectedConversationId }) {
+            return conversation
+        }
+        return conversationsByProjectId.values.lazy.compactMap { conversations in
+            conversations.first(where: { $0.id == selectedConversationId })
+        }.first
     }
 
     var selectedConversationStatus: String {
@@ -134,13 +185,6 @@ final class AppModel: ObservableObject {
 
     var queuedTurnsForSelectedConversation: [QueuedTurnDraft] {
         queuedTurns.filter { $0.conversationId == selectedConversationId }
-    }
-
-    var visibleMessages: [DesktopMessage] {
-        guard let selectedConversationId else {
-            return messages + optimisticMessages.filter { $0.conversationId == "pending" }
-        }
-        return messages + optimisticMessages.filter { $0.conversationId == selectedConversationId }
     }
 
     var activePluginToken: PluginAutocompleteToken? {
@@ -165,29 +209,64 @@ final class AppModel: ObservableObject {
         return suggestions[min(activePluginSuggestionIndex, suggestions.count - 1)]
     }
 
+    var appActivityLogPath: String {
+        activityLogger.fileURL.path
+    }
+
+    func conversations(forProjectId projectId: String) -> [DesktopConversation] {
+        conversationsByProjectId[projectId] ?? []
+    }
+
+    func hasLoadedConversations(projectId: String) -> Bool {
+        loadedConversationProjectIds.contains(projectId)
+    }
+
+    func isLoadingConversations(projectId: String) -> Bool {
+        loadingConversationProjectIds.contains(projectId)
+    }
+
+    func ensureConversationsLoaded(projectId: String) async {
+        await loadConversations(projectId: projectId)
+    }
+
     func start() {
         guard !didStart else {
             return
         }
         didStart = true
         phase = .starting
+        activityLogger.log("app.start")
+        activityLogger.log("phase.change", fields: ["phase": "starting"])
+        stallWatchdog.start()
 
         Task {
             do {
+                self.activityLogger.log("backend.start.start")
                 let ready = try await backendProcess.start()
                 self.ready = ready
                 self.backend = BackendClient(endpoint: ready.desktopEndpoint)
                 self.phase = .online
+                self.activityLogger.log("backend.start.end", fields: [
+                    "desktopEndpoint": ready.desktopEndpoint.absoluteString,
+                    "localEndpoint": ready.localEndpoint.absoluteString,
+                    "relayId": ready.relayId ?? ""
+                ])
+                self.activityLogger.log("phase.change", fields: ["phase": "online"])
                 await refreshAll()
                 startPolling()
             } catch {
-                phase = .failed(readableError(error))
+                let message = readableError(error)
+                phase = .failed(message)
+                activityLogger.log("backend.start.error", fields: ["error": message])
+                activityLogger.log("phase.change", fields: ["phase": "failed"])
             }
         }
     }
 
     func stop() {
+        activityLogger.log("app.stop")
         refreshTask?.cancel()
+        stallWatchdog.stop()
         backendProcess.stop()
     }
 
@@ -196,6 +275,8 @@ final class AppModel: ObservableObject {
             return
         }
 
+        let startedAt = Date()
+        activityLogger.log("refreshAll.start", fields: activityContext())
         do {
             async let status = backend.status()
             async let projects = backend.projects()
@@ -226,70 +307,185 @@ final class AppModel: ObservableObject {
                     : automationDraft.reasoningEffort
             }
 
+            pruneConversationCache()
             if selectedProjectId == nil || !self.projects.contains(where: { $0.id == selectedProjectId }) {
                 selectedProjectId = self.projects.first?.id
+                selectedConversationId = nil
+                clearConversationDetails()
             }
-            if let selectedProjectId {
-                await loadConversations(projectId: selectedProjectId)
-            }
+            await refreshConversationLists(projectIds: statusPollProjectIds(), force: true)
             if let selectedConversationId {
                 await loadConversationDetails(conversationId: selectedConversationId)
             }
             reconcileOptimisticMessages()
             errorMessage = nil
+            activityLogger.log("refreshAll.end", fields: activityContext([
+                "durationMs": durationMs(since: startedAt),
+                "projectCount": self.projects.count,
+                "completionCount": self.completions.count,
+                "modelCount": self.models.count,
+                "pluginSuggestionCount": self.pluginSuggestions.count,
+                "automationCount": self.automations.count
+            ]))
         } catch {
-            errorMessage = readableError(error)
+            let message = readableError(error)
+            errorMessage = message
+            activityLogger.log("refreshAll.error", fields: activityContext([
+                "durationMs": durationMs(since: startedAt),
+                "error": message
+            ]))
         }
     }
 
-    func refreshStatusOnly() async {
+    func refreshStatusOnly(includeConversationDetails: Bool = true) async {
         guard let backend else {
             return
         }
 
+        let startedAt = Date()
+        activityLogger.log("refreshStatusOnly.start", fields: activityContext([
+            "includeConversationDetails": includeConversationDetails
+        ]))
         do {
             async let status = backend.status()
             async let completions = backend.completions()
             self.status = try await status
             self.completions = try await completions
 
-            if let selectedProjectId {
-                conversations = try await backend.conversations(projectId: selectedProjectId)
+            await refreshConversationLists(projectIds: statusPollProjectIds(), force: true)
+            if includeConversationDetails, let selectedConversationId {
+                await loadConversationDetails(conversationId: selectedConversationId)
             }
-            if let selectedConversationId {
-                messages = try await backend.messages(conversationId: selectedConversationId)
-                generatedFiles = try await backend.generatedFiles(conversationId: selectedConversationId)
-                reconcileOptimisticMessages()
-            }
+            activityLogger.log("refreshStatusOnly.end", fields: activityContext([
+                "durationMs": durationMs(since: startedAt),
+                "completionCount": self.completions.count,
+                "conversationDetailsLoaded": includeConversationDetails && selectedConversationId != nil
+            ]))
         } catch {
-            errorMessage = readableError(error)
+            let message = readableError(error)
+            errorMessage = message
+            activityLogger.log("refreshStatusOnly.error", fields: activityContext([
+                "durationMs": durationMs(since: startedAt),
+                "error": message
+            ]))
         }
     }
 
-    func selectProject(_ project: DesktopProject) {
-        guard selectedProjectId != project.id else {
-            return
+    func refreshPollingTick() async {
+        let startedAt = Date()
+        activityLogger.log("polling.tick.start", fields: activityContext())
+        await refreshStatusOnly(includeConversationDetails: false)
+        let shouldLoadDetails = shouldRefreshSelectedConversationDetailsDuringPolling()
+        if shouldLoadDetails, let selectedConversationId {
+            await loadConversationDetails(conversationId: selectedConversationId)
         }
+        activityLogger.log("polling.tick.end", fields: activityContext([
+            "durationMs": durationMs(since: startedAt),
+            "loadedConversationDetails": shouldLoadDetails && selectedConversationId != nil
+        ]))
+    }
+
+    func selectProject(_ project: DesktopProject) {
+        activityLogger.log("selectProject", fields: activityContext([
+            "projectId": project.id,
+            "previousSelectedProjectId": selectedProjectId ?? "",
+            "previousSelectedConversationId": selectedConversationId ?? "",
+            "conversationCount": project.conversationCount ?? 0
+        ]))
         selectedProjectId = project.id
         selectedConversationId = nil
-        messages = []
-        optimisticMessages = []
-        generatedFiles = []
+        clearConversationDetails()
         Task {
             await loadConversations(projectId: project.id)
         }
     }
 
     func selectConversation(_ conversation: DesktopConversation) {
-        guard selectedConversationId != conversation.id else {
+        let didChangeSelection = selectedProjectId != conversation.projectId
+            || selectedConversationId != conversation.id
+        activityLogger.log("selectConversation.start", fields: activityContext([
+            "projectId": conversation.projectId,
+            "conversationId": conversation.id,
+            "status": conversation.status,
+            "didChangeSelection": didChangeSelection,
+            "previousSelectedProjectId": selectedProjectId ?? "",
+            "previousSelectedConversationId": selectedConversationId ?? ""
+        ]))
+        guard didChangeSelection else {
+            if selectedPanel != .chat {
+                selectedPanel = .chat
+            }
+            activityLogger.log("selectConversation.end", fields: activityContext([
+                "conversationId": conversation.id,
+                "didChangeSelection": false
+            ]))
             return
         }
-        selectedConversationId = conversation.id
-        selectedPanel = .chat
+        let startedAt = Date()
+        let previousMessageCount = messages.count
+        let previousVisibleMessageCount = visibleMessages.count
+        let previousGeneratedFileCount = generatedFiles.count
+
+        activityLogger.log("selectConversation.clearDetails.start", fields: activityContext([
+            "conversationId": conversation.id,
+            "previousMessageCount": previousMessageCount,
+            "previousVisibleMessageCount": previousVisibleMessageCount,
+            "previousGeneratedFileCount": previousGeneratedFileCount
+        ]))
+        messagesConversationId = nil
+        messages = []
+        generatedFiles = []
         optimisticMessages.removeAll { $0.conversationId == "pending" || $0.conversationId != conversation.id }
+        refreshVisibleMessages()
+        activityLogger.log("selectConversation.clearDetails.end", fields: activityContext([
+            "conversationId": conversation.id,
+            "previousMessageCount": previousMessageCount,
+            "previousVisibleMessageCount": previousVisibleMessageCount,
+            "previousGeneratedFileCount": previousGeneratedFileCount
+        ]))
+
+        if selectedProjectId != conversation.projectId {
+            selectedProjectId = conversation.projectId
+        }
+        selectedConversationId = conversation.id
+        if selectedPanel != .chat {
+            selectedPanel = .chat
+        }
+        activityLogger.log("selectConversation.selectionAssigned", fields: activityContext([
+            "conversationId": conversation.id,
+            "durationMs": durationMs(since: startedAt)
+        ]))
+
+        let shouldUpsertCache = !isConversationCached(conversation)
+        if shouldUpsertCache {
+            activityLogger.log("selectConversation.cacheUpsert.start", fields: activityContext([
+                "conversationId": conversation.id,
+                "durationMs": durationMs(since: startedAt)
+            ]))
+            upsertCachedConversation(conversation)
+            activityLogger.log("selectConversation.cacheUpsert.end", fields: activityContext([
+                "conversationId": conversation.id,
+                "durationMs": durationMs(since: startedAt)
+            ]))
+        } else {
+            activityLogger.log("selectConversation.cacheUpsert.skip", fields: activityContext([
+                "conversationId": conversation.id,
+                "durationMs": durationMs(since: startedAt)
+            ]))
+        }
+
+        activityLogger.log("selectConversation.taskScheduled", fields: activityContext([
+            "conversationId": conversation.id,
+            "durationMs": durationMs(since: startedAt)
+        ]))
         Task {
             await loadConversationDetails(conversationId: conversation.id)
         }
+        activityLogger.log("selectConversation.end", fields: activityContext([
+            "conversationId": conversation.id,
+            "didChangeSelection": true,
+            "durationMs": durationMs(since: startedAt)
+        ]))
     }
 
     func moveActivePluginSuggestion(by delta: Int) {
@@ -342,11 +538,19 @@ final class AppModel: ObservableObject {
         let settings = currentModelSettings()
         let skillIds = selectedSkillIds
         let optimisticConversationId = conversationId ?? "pending"
+        activityLogger.log("send.start", fields: activityContext([
+            "conversationId": conversationId ?? "",
+            "delivery": delivery.rawValue,
+            "promptLength": trimmed.count,
+            "skillCount": skillIds.count,
+            "hasModelSettings": settings != nil
+        ]))
         addOptimisticMessage(id: clientMessageId, conversationId: optimisticConversationId, prompt: trimmed)
         prompt = ""
         selectedSkillIds = []
 
         Task {
+            let startedAt = Date()
             do {
                 let result: ConversationStartResult
                 if let conversationId {
@@ -378,20 +582,31 @@ final class AppModel: ObservableObject {
                         selectedSkillIds: skillIds
                     )
                     selectedConversationId = result.conversationId
+                    locallyStartedConversationIds.insert(result.conversationId)
                     movePendingOptimisticMessage(id: clientMessageId, to: result.conversationId)
                 } else {
                     throw BackendClientError.requestFailed("Select a project before sending.")
                 }
 
-                await refreshAll()
+                await refreshAfterSend(projectId: projectId, conversationId: result.conversationId)
                 if selectedConversationId == nil {
                     selectedConversationId = result.conversationId
                 }
+                activityLogger.log("send.end", fields: activityContext([
+                    "durationMs": durationMs(since: startedAt),
+                    "conversationId": result.conversationId,
+                    "status": result.status
+                ]))
             } catch {
                 removeOptimisticMessage(id: clientMessageId)
                 prompt = trimmed
                 selectedSkillIds = skillIds
-                errorMessage = readableError(error)
+                let message = readableError(error)
+                errorMessage = message
+                activityLogger.log("send.error", fields: activityContext([
+                    "durationMs": durationMs(since: startedAt),
+                    "error": message
+                ]))
             }
             isSending = false
         }
@@ -484,10 +699,44 @@ final class AppModel: ObservableObject {
             return
         }
         Task {
+            let startedAt = Date()
+            activityLogger.log("diagnostics.load.start")
             do {
                 diagnostics = try await backend.diagnosticsLog()
+                activityLogger.log("diagnostics.load.end", fields: [
+                    "durationMs": durationMs(since: startedAt),
+                    "size": diagnostics?.size ?? 0,
+                    "truncated": diagnostics?.truncated ?? false
+                ])
             } catch {
-                errorMessage = readableError(error)
+                let message = readableError(error)
+                errorMessage = message
+                activityLogger.log("diagnostics.load.error", fields: [
+                    "durationMs": durationMs(since: startedAt),
+                    "error": message
+                ])
+            }
+        }
+    }
+
+    func loadAppActivityLog() {
+        Task {
+            let startedAt = Date()
+            activityLogger.log("appActivityLog.load.start")
+            do {
+                appActivityLog = try activityLogger.read()
+                activityLogger.log("appActivityLog.load.end", fields: [
+                    "durationMs": durationMs(since: startedAt),
+                    "size": appActivityLog?.size ?? 0,
+                    "truncated": appActivityLog?.truncated ?? false
+                ])
+            } catch {
+                let message = readableError(error)
+                errorMessage = message
+                activityLogger.log("appActivityLog.load.error", fields: [
+                    "durationMs": durationMs(since: startedAt),
+                    "error": message
+                ])
             }
         }
     }
@@ -546,20 +795,101 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func loadConversations(projectId: String) async {
+    private func loadConversations(projectId: String, force: Bool = false) async {
         guard let backend else {
             return
         }
+        guard force || !loadedConversationProjectIds.contains(projectId) else {
+            activityLogger.log("loadConversations.skip", fields: [
+                "projectId": projectId,
+                "reason": "alreadyLoaded",
+                "force": force
+            ])
+            return
+        }
+        guard force || !loadingConversationProjectIds.contains(projectId) else {
+            activityLogger.log("loadConversations.skip", fields: [
+                "projectId": projectId,
+                "reason": "alreadyLoading",
+                "force": force
+            ])
+            return
+        }
+        let startedAt = Date()
+        activityLogger.log("loadConversations.start", fields: [
+            "projectId": projectId,
+            "force": force
+        ])
+        let requestId = beginConversationLoad(projectId: projectId)
+        defer {
+            finishConversationLoad(projectId: projectId)
+        }
+
         do {
-            conversations = try await backend.conversations(projectId: projectId)
-            if selectedConversationId == nil || !conversations.contains(where: { $0.id == selectedConversationId }) {
-                selectedConversationId = conversations.first?.id
+            let conversations = try await backend.conversations(projectId: projectId)
+            guard latestConversationLoadRequestIdByProjectId[projectId] == requestId else {
+                activityLogger.log("loadConversations.stale", fields: [
+                    "projectId": projectId,
+                    "force": force,
+                    "durationMs": durationMs(since: startedAt),
+                    "conversationCount": conversations.count
+                ])
+                return
             }
-            if let selectedConversationId {
-                await loadConversationDetails(conversationId: selectedConversationId)
+            conversationsByProjectId[projectId] = conversations
+            loadedConversationProjectIds.insert(projectId)
+            locallyStartedConversationIds.subtract(conversations.map(\.id))
+
+            if selectedProjectId == projectId,
+               let selectedConversationId,
+               !conversations.contains(where: { $0.id == selectedConversationId }),
+               !locallyStartedConversationIds.contains(selectedConversationId) {
+                self.selectedConversationId = nil
+                clearConversationDetails()
             }
+            activityLogger.log("loadConversations.end", fields: [
+                "projectId": projectId,
+                "force": force,
+                "durationMs": durationMs(since: startedAt),
+                "conversationCount": conversations.count
+            ])
         } catch {
-            errorMessage = readableError(error)
+            let message = readableError(error)
+            errorMessage = message
+            activityLogger.log("loadConversations.error", fields: [
+                "projectId": projectId,
+                "force": force,
+                "durationMs": durationMs(since: startedAt),
+                "error": message
+            ])
+        }
+    }
+
+    private func refreshConversationLists(projectIds: [String], force: Bool) async {
+        var seen = Set<String>()
+        let uniqueProjectIds = projectIds.filter { projectId in
+            seen.insert(projectId).inserted
+        }
+
+        for projectId in uniqueProjectIds {
+            await loadConversations(projectId: projectId, force: force)
+        }
+    }
+
+    private func statusPollProjectIds() -> [String] {
+        ProjectConversationRefreshPolicy.statusPollProjectIds(
+            selectedProjectId: selectedProjectId,
+            completions: completions
+        )
+    }
+
+    private func refreshAfterSend(projectId: String?, conversationId: String) async {
+        if let projectId {
+            await loadConversations(projectId: projectId, force: true)
+        }
+        await refreshStatusOnly(includeConversationDetails: false)
+        Task { [weak self] in
+            await self?.loadConversationDetails(conversationId: conversationId)
         }
     }
 
@@ -567,25 +897,171 @@ final class AppModel: ObservableObject {
         guard let backend else {
             return
         }
+        let startedAt = Date()
+        var loadedMessageCount = 0
+        activityLogger.log("loadConversationDetails.start", fields: activityContext([
+            "conversationId": conversationId
+        ]))
         do {
-            async let messages = backend.messages(conversationId: conversationId)
-            async let files = backend.generatedFiles(conversationId: conversationId)
-            self.messages = try await messages
-            self.generatedFiles = try await files
+            let loadedMessages = try await backend.messages(conversationId: conversationId, forceRefresh: false)
+            guard selectedConversationId == conversationId else {
+                activityLogger.log("loadConversationDetails.staleMessages", fields: activityContext([
+                    "conversationId": conversationId,
+                    "durationMs": durationMs(since: startedAt),
+                    "messageCount": loadedMessages.count
+                ]))
+                return
+            }
+            loadedMessageCount = loadedMessages.count
+            messagesConversationId = conversationId
+            self.messages = loadedMessages
             reconcileOptimisticMessages()
         } catch {
-            errorMessage = readableError(error)
+            let message = readableError(error)
+            errorMessage = message
+            activityLogger.log("loadConversationDetails.error", fields: activityContext([
+                "conversationId": conversationId,
+                "durationMs": durationMs(since: startedAt),
+                "stage": "messages",
+                "error": message
+            ]))
+            return
         }
+
+        do {
+            let loadedFiles = try await backend.generatedFiles(conversationId: conversationId)
+            guard selectedConversationId == conversationId else {
+                activityLogger.log("loadConversationDetails.staleFiles", fields: activityContext([
+                    "conversationId": conversationId,
+                    "durationMs": durationMs(since: startedAt),
+                    "messageCount": loadedMessageCount,
+                    "fileCount": loadedFiles.count
+                ]))
+                return
+            }
+            self.generatedFiles = loadedFiles
+            activityLogger.log("loadConversationDetails.end", fields: activityContext([
+                "conversationId": conversationId,
+                "durationMs": durationMs(since: startedAt),
+                "messageCount": loadedMessageCount,
+                "fileCount": loadedFiles.count
+            ]))
+        } catch {
+            let message = readableError(error)
+            errorMessage = message
+            activityLogger.log("loadConversationDetails.error", fields: activityContext([
+                "conversationId": conversationId,
+                "durationMs": durationMs(since: startedAt),
+                "stage": "generatedFiles",
+                "error": message
+            ]))
+        }
+    }
+
+    private func pruneConversationCache() {
+        let validProjectIds = Set(projects.map(\.id))
+        conversationsByProjectId = conversationsByProjectId.filter { validProjectIds.contains($0.key) }
+        loadedConversationProjectIds = loadedConversationProjectIds.intersection(validProjectIds)
+        loadingConversationProjectIds = loadingConversationProjectIds.intersection(validProjectIds)
+        conversationLoadCountsByProjectId = conversationLoadCountsByProjectId.filter { validProjectIds.contains($0.key) }
+        latestConversationLoadRequestIdByProjectId = latestConversationLoadRequestIdByProjectId.filter {
+            validProjectIds.contains($0.key)
+        }
+    }
+
+    private func beginConversationLoad(projectId: String) -> Int {
+        nextConversationLoadRequestId += 1
+        let requestId = nextConversationLoadRequestId
+        latestConversationLoadRequestIdByProjectId[projectId] = requestId
+        conversationLoadCountsByProjectId[projectId, default: 0] += 1
+        loadingConversationProjectIds.insert(projectId)
+        return requestId
+    }
+
+    private func finishConversationLoad(projectId: String) {
+        let count = (conversationLoadCountsByProjectId[projectId] ?? 0) - 1
+        if count > 0 {
+            conversationLoadCountsByProjectId[projectId] = count
+        } else {
+            conversationLoadCountsByProjectId.removeValue(forKey: projectId)
+            loadingConversationProjectIds.remove(projectId)
+        }
+    }
+
+    private func upsertCachedConversation(_ conversation: DesktopConversation) {
+        var conversations = conversationsByProjectId[conversation.projectId] ?? []
+        conversations.removeAll { $0.id == conversation.id }
+        conversations.insert(conversation, at: 0)
+        conversationsByProjectId[conversation.projectId] = conversations
+    }
+
+    private func isConversationCached(_ conversation: DesktopConversation) -> Bool {
+        conversationsByProjectId[conversation.projectId]?.contains { $0.id == conversation.id } == true
+    }
+
+    private func clearConversationDetails() {
+        let startedAt = Date()
+        let previousMessageCount = messages.count
+        let previousVisibleMessageCount = visibleMessages.count
+        activityLogger.log("clearConversationDetails.start", fields: activityContext([
+            "previousMessageCount": previousMessageCount,
+            "previousVisibleMessageCount": previousVisibleMessageCount
+        ]))
+        messagesConversationId = nil
+        messages = []
+        optimisticMessages = []
+        generatedFiles = []
+        refreshVisibleMessages()
+        activityLogger.log("clearConversationDetails.end", fields: activityContext([
+            "durationMs": durationMs(since: startedAt),
+            "previousMessageCount": previousMessageCount,
+            "previousVisibleMessageCount": previousVisibleMessageCount,
+            "visibleMessagesVersion": visibleMessagesVersion
+        ]))
     }
 
     private func startPolling() {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refreshStatusOnly()
+                await self?.refreshPollingTick()
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
             }
         }
+    }
+
+    private func shouldRefreshSelectedConversationDetailsDuringPolling() -> Bool {
+        guard let selectedConversationId else {
+            return false
+        }
+        if let completion = completions.first(where: { $0.conversationId == selectedConversationId }) {
+            return !completion.isComplete || isActiveConversationStatus(completion.status)
+        }
+        return isActiveConversationStatus(selectedConversationStatus)
+    }
+
+    private func isActiveConversationStatus(_ status: String) -> Bool {
+        ["awaiting_approval", "committing", "preparing", "queued", "running"].contains(status)
+    }
+
+    private func activityContext(_ fields: [String: Any] = [:]) -> [String: Any] {
+        var context = fields
+        if let selectedProjectId {
+            context["selectedProjectId"] = selectedProjectId
+        }
+        if let selectedConversationId {
+            context["selectedConversationId"] = selectedConversationId
+        }
+        context["messageCount"] = messages.count
+        context["visibleMessageCount"] = visibleMessages.count
+        context["visibleMessagesVersion"] = visibleMessagesVersion
+        context["optimisticMessageCount"] = optimisticMessages.count
+        context["generatedFileCount"] = generatedFiles.count
+        return context
+    }
+
+    private func durationMs(since startedAt: Date) -> Int {
+        Int(Date().timeIntervalSince(startedAt) * 1_000)
     }
 
     private func currentModelSettings() -> ModelSettings? {
@@ -612,6 +1088,7 @@ final class AppModel: ObservableObject {
                 createdAt: nil
             )
         )
+        refreshVisibleMessages()
     }
 
     private func movePendingOptimisticMessage(id: String, to conversationId: String) {
@@ -627,10 +1104,12 @@ final class AppModel: ObservableObject {
             sequence: message.sequence,
             createdAt: message.createdAt
         )
+        refreshVisibleMessages()
     }
 
     private func removeOptimisticMessage(id: String) {
         optimisticMessages.removeAll { $0.id == id }
+        refreshVisibleMessages()
     }
 
     private func reconcileOptimisticMessages() {
@@ -641,6 +1120,23 @@ final class AppModel: ObservableObject {
                     && synced.content == optimistic.content
             }
         }
+        refreshVisibleMessages()
+    }
+
+    private func refreshVisibleMessages() {
+        let nextMessages: [DesktopMessage]
+        if let selectedConversationId {
+            if messagesConversationId == selectedConversationId {
+                nextMessages = messages + optimisticMessages.filter { $0.conversationId == selectedConversationId }
+            } else {
+                nextMessages = optimisticMessages.filter { $0.conversationId == selectedConversationId }
+            }
+        } else {
+            nextMessages = optimisticMessages.filter { $0.conversationId == "pending" }
+        }
+
+        visibleMessages = nextMessages
+        visibleMessagesVersion += 1
     }
 
     private func reconcileSelectedSkills() {
